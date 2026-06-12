@@ -4769,250 +4769,75 @@ function DiscoveryView({
         : true
   );
   const firstMissingParsedItem = parsedListState.items.find((item) => item.ownedMatchCount === 0) ?? null;
+  const missingParsedCount = parsedListState.items.filter((item) => item.ownedMatchCount === 0).length;
+  const activeDownloadCount = downloadJobs.filter((job) => job.status === "queued" || job.status === "running").length;
+  const stagedDownloadCount = downloadJobs.reduce((totalCount, job) => totalCount + job.completedCount, 0);
+  const discoveryStatusLabel = discoveryState.health?.reachable ? "Connected" : "Needs Check";
+  const discoveryStatusDetail = discoveryState.health?.message ?? discoveryState.health?.url ?? "Check slskd before searching.";
 
   useEffect(() => {
     setVisibleClusterLimit(24);
   }, [availabilityFilter, discoveryState.results, formatFilter, groupingQuery, libraryFilter, releaseFilter, sortMode]);
 
   return (
-    <>
-      <section className="discoveryControls" aria-label="Discovery">
+    <section className="discoveryControls discoveryPage" aria-label="Discovery">
+      <section className="discoveryHero">
+        <div className="discoveryHeroCopy">
+          <span className="eyebrow">Discovery</span>
+          <h2>Find, compare, and stage albums.</h2>
+          <p>Search slskd, review candidate folders against your library, then create a reviewable download batch for Imports.</p>
+        </div>
         <form className="discoverySearchForm" onSubmit={(event) => void onSearch(event)}>
-          <select
-            aria-label="Discovery source"
-            value={discoverySource}
-            onChange={(event) => setDiscoverySource(event.target.value as DiscoverySource)}
-          >
-            <option value="slskd">slskd</option>
-          </select>
-          <input
-            aria-label="Search Discovery source"
-            placeholder={discoverySource === "slskd" ? "Search Soulseek via slskd" : "Search Discovery"}
-            value={discoveryQuery}
-            onChange={(event) => setDiscoveryQuery(event.target.value)}
-          />
+          <label>
+            <span>Source</span>
+            <select
+              aria-label="Discovery source"
+              value={discoverySource}
+              onChange={(event) => setDiscoverySource(event.target.value as DiscoverySource)}
+            >
+              <option value="slskd">slskd</option>
+            </select>
+          </label>
+          <label className="discoverySearchInput">
+            <span>Search</span>
+            <input
+              aria-label="Search Discovery source"
+              placeholder={discoverySource === "slskd" ? "Artist, album, catalog number, or pasted-list query" : "Search Discovery"}
+              value={discoveryQuery}
+              onChange={(event) => setDiscoveryQuery(event.target.value)}
+            />
+          </label>
           <button disabled={discoveryState.status === "searching" || !discoveryQuery.trim()} type="submit">
             {discoveryState.status === "searching" ? "Searching" : "Search"}
           </button>
           <button className="secondary" type="button" onClick={() => void onRefreshHealth()}>
-            Check slskd
+            Check
           </button>
         </form>
-        <div className={discoveryState.health?.reachable ? "discoveryStatus ready" : "discoveryStatus"}>
-          <strong>{discoveryState.health?.reachable ? "slskd reachable" : "slskd not confirmed"}</strong>
-          <span>{discoveryState.health?.message ?? discoveryState.health?.url ?? "Check slskd before searching."}</span>
-          {discoveryState.health?.reachable && !discoveryState.health.downloadsConfigured ? (
-            <span className="warningText">Download staging needs MUSIC_OS_SLSKD_DOWNLOAD_DIR before transfer batches can run.</span>
-          ) : null}
-        </div>
-        <form className="discoveryListParser" onSubmit={(event) => void onParseList(event)}>
-          <textarea
-            aria-label="Pasted chart or album list"
-            placeholder={"Paste chart/list rows, one item per line. Example: 1. Artist - Album (1980)"}
-            value={pastedListText}
-            onChange={(event) => setPastedListText(event.target.value)}
-          />
-          <div className="discoveryListParserFooter">
-            <span className="muted">
-              {parsedListState.message ??
-                "Parsed rows are checked against the indexed library and can launch Discovery searches."}
-            </span>
-            <button
-              className="secondary"
-              disabled={!pastedListText.trim() || parsedListState.status === "parsing"}
-              type="submit"
-            >
-              {parsedListState.status === "parsing" ? "Parsing" : "Parse List"}
-            </button>
-            <button
-              className="secondary"
-              disabled={parsedListState.items.length === 0 || parsedListState.status === "parsing"}
-              type="button"
-              onClick={() => void onSaveParsedList()}
-            >
-              Save List
-            </button>
-          </div>
-        </form>
-        {parsedListState.items.length > 0 ? (
-          <section className="parsedDiscoveryList" aria-label="Parsed Discovery list">
-            <div className="parsedDiscoveryToolbar">
-              <strong>
-                {visibleParsedListItems.length.toLocaleString()} shown ·{" "}
-                {parsedListState.items.filter((item) => item.ownedMatchCount === 0).length.toLocaleString()} missing
-              </strong>
-              <div className="segmentedControl" aria-label="Parsed list filter">
-                <button
-                  className={parsedListFilter === "all" ? "active" : ""}
-                  type="button"
-                  onClick={() => setParsedListFilter("all")}
-                >
-                  All
-                </button>
-                <button
-                  className={parsedListFilter === "missing" ? "active" : ""}
-                  type="button"
-                  onClick={() => setParsedListFilter("missing")}
-                >
-                  Missing
-                </button>
-                <button
-                  className={parsedListFilter === "owned" ? "active" : ""}
-                  type="button"
-                  onClick={() => setParsedListFilter("owned")}
-                >
-                  Owned
-                </button>
-              </div>
-              <button
-                className="compactButton"
-                disabled={!firstMissingParsedItem}
-                type="button"
-                onClick={() => firstMissingParsedItem && void onSearchParsedItem(firstMissingParsedItem)}
-              >
-                Search First Missing
-              </button>
-            </div>
-            {visibleParsedListItems.slice(0, 12).map((item, index) => (
-              <div className="parsedDiscoveryItem" key={`${item.rank ?? index}-${item.query}`}>
-                <div>
-                  <strong>
-                    {item.rank ? `${item.rank}. ` : ""}
-                    {item.artist ? `${item.artist} - ` : ""}
-                    {item.title}
-                    {item.year ? ` (${item.year})` : ""}
-                  </strong>
-                  <span>
-                    {item.ownedMatchCount.toLocaleString()} indexed match{item.ownedMatchCount === 1 ? "" : "es"} · query {item.query}
-                  </span>
-                </div>
-                <button className="compactButton" type="button" onClick={() => void onSearchParsedItem(item)}>
-                  Search
-                </button>
-              </div>
-            ))}
-            {visibleParsedListItems.length > 12 ? (
-              <div className="parsedDiscoveryMore">
-                Showing 12 of {visibleParsedListItems.length.toLocaleString()} parsed rows.
-              </div>
-            ) : null}
-          </section>
-        ) : null}
-        {savedLists.length > 0 ? (
-          <section className="savedDiscoveryLists" aria-label="Saved parsed Discovery lists">
-            <div className="savedDiscoveryHeader">
-              <strong>Saved Lists</strong>
-              <span>{savedLists.length.toLocaleString()} parsed source{savedLists.length === 1 ? "" : "s"}</span>
-            </div>
-            <div className="savedDiscoveryList">
-              {savedLists.slice(0, 6).map((list) => (
-                <div className="savedDiscoveryItem" key={list.id}>
-                  <div>
-                    <strong>{list.name}</strong>
-                    <span>
-                      {list.itemCount.toLocaleString()} item{list.itemCount === 1 ? "" : "s"} ·{" "}
-                      {list.missingCount.toLocaleString()} missing · {list.ownedCount.toLocaleString()} owned
-                    </span>
-                  </div>
-                  <div className="savedDiscoveryActions">
-                    <button
-                      className="compactButton"
-                      disabled={list.items.length === 0}
-                      type="button"
-                      onClick={() => void onSearchSavedListMissing(list)}
-                    >
-                      Missing
-                    </button>
-                    <button className="compactButton" type="button" onClick={() => onLoadSavedList(list)}>
-                      Load
-                    </button>
-                    <button className="compactButton danger" type="button" onClick={() => void onRemoveSavedList(list.id)}>
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
-        {discoveryState.results.length > 0 ? (
-          <>
-            <div className="discoveryRefiners">
-              <label>
-                <span>Sort</span>
-                <select value={sortMode} onChange={(event) => setSortMode(event.target.value as DiscoverySort)}>
-                  <option value="best">Best candidates</option>
-                  <option value="match">Closest query match</option>
-                  <option value="tracks">Most tracks</option>
-                  <option value="size">Largest folders</option>
-                  <option value="user">User / folder</option>
-                </select>
-              </label>
-              <label>
-                <span>Format</span>
-                <select value={formatFilter} onChange={(event) => setFormatFilter(event.target.value as DiscoveryFormatFilter)}>
-                  <option value="all">All formats</option>
-                  <option value="lossless">Lossless folders</option>
-                  <option value="compressed">Compressed folders</option>
-                </select>
-              </label>
-              <label>
-                <span>Availability</span>
-                <select
-                  value={availabilityFilter}
-                  onChange={(event) => setAvailabilityFilter(event.target.value as DiscoveryAvailabilityFilter)}
-                >
-                  <option value="available">Unlocked folders</option>
-                  <option value="all">All folders</option>
-                </select>
-              </label>
-              <label>
-                <span>Library</span>
-                <select value={libraryFilter} onChange={(event) => setLibraryFilter(event.target.value as DiscoveryLibraryFilter)}>
-                  <option value="actionable">Missing or upgrades</option>
-                  <option value="missing">Missing only</option>
-                  <option value="owned">Owned or upgrades</option>
-                  <option value="all">All candidates</option>
-                </select>
-              </label>
-              <label>
-                <span>Release Type</span>
-                <select value={releaseFilter} onChange={(event) => setReleaseFilter(event.target.value as DiscoveryReleaseFilter)}>
-                  <option value="recommended">Recommended</option>
-                  <option value="all">All release sections</option>
-                  <option value="albums">Album-like sections</option>
-                  <option value="singles">Singles / loose files</option>
-                  <option value="collections">Large collections</option>
-                  <option value="upgrades">Possible upgrades</option>
-                </select>
-              </label>
-            </div>
-            <div className="discoverySummary">
-              <strong>
-                {releaseFilteredClusters.length.toLocaleString()} of {clusters.length.toLocaleString()} release section
-                {clusters.length === 1 ? "" : "s"} ·{" "}
-                {groups.length.toLocaleString()} of {unfilteredGroupCount.toLocaleString()} source folder
-                {unfilteredGroupCount === 1 ? "" : "s"}
-              </strong>
-              <span>
-                {discoveryState.results.length.toLocaleString()} file result{discoveryState.results.length === 1 ? "" : "s"} ·{" "}
-                {actionableGroupCount.toLocaleString()} actionable ·{" "}
-                {selectedFileCount.toLocaleString()} stageable audio file{selectedFileCount === 1 ? "" : "s"} in{" "}
-                {selectedGroupCount.toLocaleString()} selected folder{selectedGroupCount === 1 ? "" : "s"}
-              </span>
-              <button
-                className="secondary"
-                disabled={!canDownload}
-                title={downloadsConfigured ? undefined : "Set MUSIC_OS_SLSKD_DOWNLOAD_DIR before proposing downloads"}
-                type="button"
-                onClick={() => void onDownloadSelection()}
-              >
-                {downloadState.status === "working" ? "Creating Batch" : "Propose Download"}
-              </button>
-            </div>
-          </>
-        ) : null}
       </section>
+
+      <div className="discoveryWorkflowStrip" aria-label="Discovery workflow">
+        <div>
+          <span>01</span>
+          <strong>Search</strong>
+          <small>{discoveryStatusLabel}</small>
+        </div>
+        <div>
+          <span>02</span>
+          <strong>Review</strong>
+          <small>{releaseFilteredClusters.length.toLocaleString()} release sections</small>
+        </div>
+        <div>
+          <span>03</span>
+          <strong>Select</strong>
+          <small>{selectedFileCount.toLocaleString()} files staged</small>
+        </div>
+        <div>
+          <span>04</span>
+          <strong>Import</strong>
+          <small>{activeDownloadCount.toLocaleString()} active · {stagedDownloadCount.toLocaleString()} ready</small>
+        </div>
+      </div>
 
       {discoveryState.status === "error" ? <div className="inlineError">{discoveryState.message}</div> : null}
       {downloadState.message ? (
@@ -5021,167 +4846,409 @@ function DiscoveryView({
         </div>
       ) : null}
 
-      {inspectedGroup ? (
-        <DiscoveryCandidateDetail
-          group={inspectedGroup}
-          libraryMatch={summarizeDiscoveryLibraryMatch(inspectedGroup, libraryFiles)}
-          selectedFileCount={inspectedGroup.files.filter((file) => !file.isLocked && isAudioDiscoveryResult(file) && selectedFileIds.has(file.id)).length}
-          saved={savedCandidates.some((candidate) => candidate.candidateKey === inspectedGroup.id)}
-          onSave={() => onSaveCandidate(inspectedGroup)}
-          onSendToAgent={() => onSendCandidateToAgent(inspectedGroup)}
-          onSelect={() => onGroupSelect(inspectedGroup)}
-        />
-      ) : null}
-
-      {savedCandidates.length > 0 ? (
-        <section className="savedDiscoveryCandidates" aria-label="Saved Discovery candidates">
-          <div className="savedDiscoveryHeader">
-            <strong>Saved Candidates</strong>
-            <span>{savedCandidates.length.toLocaleString()} source candidate{savedCandidates.length === 1 ? "" : "s"}</span>
-          </div>
-          <div className="savedDiscoveryList">
-            {savedCandidates.slice(0, 8).map((candidate) => (
-              <div className="savedDiscoveryItem" key={candidate.id}>
+      <div className="discoveryWorkspace">
+        <div className="discoveryMainColumn">
+          {discoveryState.results.length > 0 ? (
+            <section className="discoveryFilterPanel" aria-label="Discovery filters">
+              <div className="discoverySummary">
                 <div>
-                  <strong title={candidate.folder ?? undefined}>
-                    {candidate.releaseArtist ? `${candidate.releaseArtist} - ${candidate.releaseTitle}` : candidate.releaseTitle}
+                  <strong>
+                    {releaseFilteredClusters.length.toLocaleString()} of {clusters.length.toLocaleString()} release section
+                    {clusters.length === 1 ? "" : "s"}
                   </strong>
                   <span>
-                    {candidate.username ?? "unknown user"} · {candidate.resultCount.toLocaleString()} file
-                    {candidate.resultCount === 1 ? "" : "s"} · {candidate.qualityLabel}
-                    {candidate.primaryFormat ? ` · ${candidate.primaryFormat}` : ""}
+                    {groups.length.toLocaleString()} of {unfilteredGroupCount.toLocaleString()} source folder
+                    {unfilteredGroupCount === 1 ? "" : "s"} · {actionableGroupCount.toLocaleString()} actionable ·{" "}
+                    {discoveryState.results.length.toLocaleString()} file result{discoveryState.results.length === 1 ? "" : "s"}
                   </span>
                 </div>
-                <div className="savedDiscoveryActions">
-                  <button
-                    className="compactButton"
-                    disabled={candidate.availableCount === 0 || downloadState.status === "working" || !downloadsConfigured}
-                    title={downloadsConfigured ? undefined : "Set MUSIC_OS_SLSKD_DOWNLOAD_DIR before proposing downloads"}
-                    type="button"
-                    onClick={() => void onProposeSavedCandidateDownload(candidate)}
+                <button
+                  disabled={!canDownload}
+                  title={downloadsConfigured ? undefined : "Set MUSIC_OS_SLSKD_DOWNLOAD_DIR before proposing downloads"}
+                  type="button"
+                  onClick={() => void onDownloadSelection()}
+                >
+                  {downloadState.status === "working" ? "Creating Batch" : `Propose ${selectedFileCount.toLocaleString()} File${selectedFileCount === 1 ? "" : "s"}`}
+                </button>
+              </div>
+              <div className="discoveryRefiners">
+                <label>
+                  <span>Sort</span>
+                  <select value={sortMode} onChange={(event) => setSortMode(event.target.value as DiscoverySort)}>
+                    <option value="best">Best candidates</option>
+                    <option value="match">Closest query match</option>
+                    <option value="tracks">Most tracks</option>
+                    <option value="size">Largest folders</option>
+                    <option value="user">User / folder</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Format</span>
+                  <select value={formatFilter} onChange={(event) => setFormatFilter(event.target.value as DiscoveryFormatFilter)}>
+                    <option value="all">All formats</option>
+                    <option value="lossless">Lossless folders</option>
+                    <option value="compressed">Compressed folders</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Availability</span>
+                  <select
+                    value={availabilityFilter}
+                    onChange={(event) => setAvailabilityFilter(event.target.value as DiscoveryAvailabilityFilter)}
                   >
-                    Propose
-                  </button>
-                  <button className="secondary compactButton" type="button" onClick={() => void onSendSavedCandidateToAgent(candidate)}>
-                    Agent
-                  </button>
-                  <button className="secondary compactButton" type="button" onClick={() => void onRemoveSavedCandidate(candidate.id)}>
-                    Remove
-                  </button>
-                </div>
+                    <option value="available">Unlocked folders</option>
+                    <option value="all">All folders</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Library</span>
+                  <select value={libraryFilter} onChange={(event) => setLibraryFilter(event.target.value as DiscoveryLibraryFilter)}>
+                    <option value="actionable">Missing or upgrades</option>
+                    <option value="missing">Missing only</option>
+                    <option value="owned">Owned or upgrades</option>
+                    <option value="all">All candidates</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Release Type</span>
+                  <select value={releaseFilter} onChange={(event) => setReleaseFilter(event.target.value as DiscoveryReleaseFilter)}>
+                    <option value="recommended">Recommended</option>
+                    <option value="all">All release sections</option>
+                    <option value="albums">Album-like sections</option>
+                    <option value="singles">Singles / loose files</option>
+                    <option value="collections">Large collections</option>
+                    <option value="upgrades">Possible upgrades</option>
+                  </select>
+                </label>
               </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
+            </section>
+          ) : null}
 
-      {downloadJobs.length > 0 ? (
-        <section className="downloadJobs" aria-label="Discovery download jobs">
-          {downloadJobs.map((job) => (
-            <div className="downloadJob" key={job.id}>
-              <div className="downloadJobMain">
-                <strong>
-                  {job.selectedCount.toLocaleString()} selected · {job.completedCount.toLocaleString()} staged
-                </strong>
-                <div className="progressRail">
-                  <div className="progressFill" style={{ width: `${Math.round(job.progress * 100)}%` }} />
+          {topCandidateClusters.length > 0 ? (
+            <section className="discoveryHighlights" aria-label="Top Discovery candidates">
+              <div className="discoveryHighlightsHeader">
+                <div>
+                  <span className="eyebrow">Best Matches</span>
+                  <strong>Start with these candidates</strong>
+                  <span>Stageable releases ranked by query match, source quality, and library usefulness.</span>
                 </div>
-                <span>{formatDiscoveryDownloadMessage(job)}</span>
               </div>
-              <span className={job.status === "failed" || job.status === "cancelled" ? "statusPill warning" : "statusPill"}>
-                {job.status}
-              </span>
-              <div className="rootActions">
-                <button disabled={!job.imported} type="button" onClick={onOpenImports}>
-                  Import
-                </button>
-                <button
-                  className="secondary"
-                  disabled={job.status !== "failed" && job.status !== "cancelled"}
-                  type="button"
-                  onClick={() => void onRetryDownload(job.id)}
-                >
-                  Retry
-                </button>
-                <button
-                  className="secondary"
-                  disabled={job.status !== "queued" && job.status !== "running"}
-                  type="button"
-                  onClick={() => void onCancelDownload(job.id)}
-                >
-                  Cancel
-                </button>
+              <div className="discoveryHighlightGrid">
+                {topCandidateClusters.map((cluster) => (
+                  <DiscoveryHighlightCard
+                    cluster={cluster}
+                    key={cluster.id}
+                    libraryMatch={summarizeDiscoveryLibraryMatch(cluster.bestGroup, libraryFiles)}
+                    selectedFileIds={selectedFileIds}
+                    onGroupSelect={onGroupSelect}
+                    onInspectGroup={onInspectGroup}
+                  />
+                ))}
               </div>
+            </section>
+          ) : null}
+
+          <section className="discoveryResults" aria-label="Discovery results">
+            <div className="discoveryResultsHeader">
+              <div>
+                <span className="eyebrow">Browse Sources</span>
+                <strong>{groupingQuery ? `Results for "${groupingQuery}"` : "Search results"}</strong>
+              </div>
+              {selectedFileCount > 0 ? (
+                <span className="statusPill">{selectedFileCount.toLocaleString()} selected files</span>
+              ) : null}
             </div>
-          ))}
-        </section>
-      ) : null}
+            {releaseFilteredClusters.length === 0 ? (
+              <div className="emptyState">
+                {discoveryState.status === "searching"
+                  ? "Searching slskd."
+                  : discoveryState.results.length > 0
+                    ? "No results match the active Discovery filters."
+                    : "Search results will appear here. Downloads will be staged through Imports in the next step."}
+              </div>
+            ) : (
+              <>
+                {visibleClusters.map((cluster) => (
+                  <DiscoveryClusterResult
+                    cluster={cluster}
+                    expanded={expandedClusterIds.has(cluster.id)}
+                    expandedGroupIds={expandedGroupIds}
+                    key={cluster.id}
+                    libraryFiles={libraryFiles}
+                    selectedFileIds={selectedFileIds}
+                    selectedGroupIds={selectedGroupIds}
+                    onGroupSelect={onGroupSelect}
+                    onInspectGroup={onInspectGroup}
+                    onSaveCandidate={onSaveCandidate}
+                    onSendCandidateToAgent={onSendCandidateToAgent}
+                    onToggleCluster={onToggleCluster}
+                    onToggleFileSelect={onToggleFileSelect}
+                    onToggleGroup={onToggleGroup}
+                  />
+                ))}
+                {hiddenClusterCount > 0 ? (
+                  <button
+                    className="secondary discoveryShowMore"
+                    type="button"
+                    onClick={() => setVisibleClusterLimit((current) => current + 24)}
+                  >
+                    Show 24 More ({hiddenClusterCount.toLocaleString()} hidden)
+                  </button>
+                ) : null}
+              </>
+            )}
+          </section>
+        </div>
 
-      {topCandidateClusters.length > 0 ? (
-        <section className="discoveryHighlights" aria-label="Top Discovery candidates">
-          <div className="discoveryHighlightsHeader">
+        <aside className="discoverySideColumn" aria-label="Discovery staging workspace">
+          <section className={discoveryState.health?.reachable ? "discoveryStatus ready" : "discoveryStatus"}>
             <div>
-              <strong>Top Candidates</strong>
-              <span>Best stageable releases from the current filters.</span>
+              <span className="eyebrow">Connection</span>
+              <strong>{discoveryState.health?.reachable ? "slskd reachable" : "slskd not confirmed"}</strong>
             </div>
-          </div>
-          <div className="discoveryHighlightGrid">
-            {topCandidateClusters.map((cluster) => (
-              <DiscoveryHighlightCard
-                cluster={cluster}
-                key={cluster.id}
-                libraryMatch={summarizeDiscoveryLibraryMatch(cluster.bestGroup, libraryFiles)}
-                selectedFileIds={selectedFileIds}
-                onGroupSelect={onGroupSelect}
-                onInspectGroup={onInspectGroup}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="discoveryResults" aria-label="Discovery results">
-        {releaseFilteredClusters.length === 0 ? (
-          <div className="emptyState">
-            {discoveryState.status === "searching"
-              ? "Searching slskd."
-              : discoveryState.results.length > 0
-                ? "No results match the active Discovery filters."
-                : "Search results will appear here. Downloads will be staged through Imports in the next step."}
-          </div>
-        ) : (
-          <>
-            {visibleClusters.map((cluster) => (
-              <DiscoveryClusterResult
-                cluster={cluster}
-                expanded={expandedClusterIds.has(cluster.id)}
-                expandedGroupIds={expandedGroupIds}
-                key={cluster.id}
-                libraryFiles={libraryFiles}
-                selectedFileIds={selectedFileIds}
-                selectedGroupIds={selectedGroupIds}
-                onGroupSelect={onGroupSelect}
-                onInspectGroup={onInspectGroup}
-                onSaveCandidate={onSaveCandidate}
-                onSendCandidateToAgent={onSendCandidateToAgent}
-                onToggleCluster={onToggleCluster}
-                onToggleFileSelect={onToggleFileSelect}
-                onToggleGroup={onToggleGroup}
-              />
-            ))}
-            {hiddenClusterCount > 0 ? (
-              <button
-                className="secondary discoveryShowMore"
-                type="button"
-                onClick={() => setVisibleClusterLimit((current) => current + 24)}
-              >
-                Show 24 More ({hiddenClusterCount.toLocaleString()} hidden)
-              </button>
+            <span>{discoveryStatusDetail}</span>
+            {discoveryState.health?.reachable && !discoveryState.health.downloadsConfigured ? (
+              <span className="warningText">Download staging needs MUSIC_OS_SLSKD_DOWNLOAD_DIR before transfer batches can run.</span>
             ) : null}
-          </>
-        )}
-      </section>
-    </>
+          </section>
+
+          {inspectedGroup ? (
+            <DiscoveryCandidateDetail
+              group={inspectedGroup}
+              libraryMatch={summarizeDiscoveryLibraryMatch(inspectedGroup, libraryFiles)}
+              selectedFileCount={inspectedGroup.files.filter((file) => !file.isLocked && isAudioDiscoveryResult(file) && selectedFileIds.has(file.id)).length}
+              saved={savedCandidates.some((candidate) => candidate.candidateKey === inspectedGroup.id)}
+              onSave={() => onSaveCandidate(inspectedGroup)}
+              onSendToAgent={() => onSendCandidateToAgent(inspectedGroup)}
+              onSelect={() => onGroupSelect(inspectedGroup)}
+            />
+          ) : (
+            <section className="discoveryCandidateDetail isEmpty" aria-label="Discovery candidate detail">
+              <span className="eyebrow">Candidate Detail</span>
+              <strong>Select a source to inspect it.</strong>
+              <span>Use Inspect on any result to see library match, quality flags, preview files, and agent handoff options.</span>
+            </section>
+          )}
+
+          <form className="discoveryListParser" onSubmit={(event) => void onParseList(event)}>
+            <div className="discoveryPanelHeader">
+              <div>
+                <span className="eyebrow">List Search</span>
+                <strong>Paste a chart or wantlist</strong>
+              </div>
+              {parsedListState.items.length > 0 ? <span>{missingParsedCount.toLocaleString()} missing</span> : null}
+            </div>
+            <textarea
+              aria-label="Pasted chart or album list"
+              placeholder={"Paste rows, one item per line. Example: 1. Artist - Album (1980)"}
+              value={pastedListText}
+              onChange={(event) => setPastedListText(event.target.value)}
+            />
+            <div className="discoveryListParserFooter">
+              <span className="muted">
+                {parsedListState.message ?? "Parsed rows are checked against the indexed library and can launch Discovery searches."}
+              </span>
+              <button
+                className="secondary"
+                disabled={!pastedListText.trim() || parsedListState.status === "parsing"}
+                type="submit"
+              >
+                {parsedListState.status === "parsing" ? "Parsing" : "Parse"}
+              </button>
+              <button
+                className="secondary"
+                disabled={parsedListState.items.length === 0 || parsedListState.status === "parsing"}
+                type="button"
+                onClick={() => void onSaveParsedList()}
+              >
+                Save
+              </button>
+            </div>
+          </form>
+
+          {parsedListState.items.length > 0 ? (
+            <section className="parsedDiscoveryList" aria-label="Parsed Discovery list">
+              <div className="parsedDiscoveryToolbar">
+                <strong>
+                  {visibleParsedListItems.length.toLocaleString()} shown · {missingParsedCount.toLocaleString()} missing
+                </strong>
+                <div className="segmentedControl" aria-label="Parsed list filter">
+                  <button className={parsedListFilter === "all" ? "active" : ""} type="button" onClick={() => setParsedListFilter("all")}>
+                    All
+                  </button>
+                  <button className={parsedListFilter === "missing" ? "active" : ""} type="button" onClick={() => setParsedListFilter("missing")}>
+                    Missing
+                  </button>
+                  <button className={parsedListFilter === "owned" ? "active" : ""} type="button" onClick={() => setParsedListFilter("owned")}>
+                    Owned
+                  </button>
+                </div>
+                <button
+                  className="compactButton"
+                  disabled={!firstMissingParsedItem}
+                  type="button"
+                  onClick={() => firstMissingParsedItem && void onSearchParsedItem(firstMissingParsedItem)}
+                >
+                  Search First
+                </button>
+              </div>
+              {visibleParsedListItems.slice(0, 8).map((item, index) => (
+                <div className="parsedDiscoveryItem" key={`${item.rank ?? index}-${item.query}`}>
+                  <div>
+                    <strong>
+                      {item.rank ? `${item.rank}. ` : ""}
+                      {item.artist ? `${item.artist} - ` : ""}
+                      {item.title}
+                      {item.year ? ` (${item.year})` : ""}
+                    </strong>
+                    <span>
+                      {item.ownedMatchCount.toLocaleString()} indexed match{item.ownedMatchCount === 1 ? "" : "es"} · query {item.query}
+                    </span>
+                  </div>
+                  <button className="compactButton" type="button" onClick={() => void onSearchParsedItem(item)}>
+                    Search
+                  </button>
+                </div>
+              ))}
+              {visibleParsedListItems.length > 8 ? (
+                <div className="parsedDiscoveryMore">
+                  Showing 8 of {visibleParsedListItems.length.toLocaleString()} parsed rows.
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
+          {downloadJobs.length > 0 ? (
+            <section className="downloadJobs" aria-label="Discovery download jobs">
+              <div className="discoveryPanelHeader">
+                <div>
+                  <span className="eyebrow">Transfers</span>
+                  <strong>Download staging</strong>
+                </div>
+                <span>{activeDownloadCount.toLocaleString()} active</span>
+              </div>
+              {downloadJobs.map((job) => (
+                <div className="downloadJob" key={job.id}>
+                  <div className="downloadJobMain">
+                    <strong>
+                      {job.selectedCount.toLocaleString()} selected · {job.completedCount.toLocaleString()} staged
+                    </strong>
+                    <div className="progressRail">
+                      <div className="progressFill" style={{ width: `${Math.round(job.progress * 100)}%` }} />
+                    </div>
+                    <span>{formatDiscoveryDownloadMessage(job)}</span>
+                  </div>
+                  <span className={job.status === "failed" || job.status === "cancelled" ? "statusPill warning" : "statusPill"}>
+                    {job.status}
+                  </span>
+                  <div className="rootActions">
+                    <button disabled={!job.imported} type="button" onClick={onOpenImports}>
+                      Import
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={job.status !== "failed" && job.status !== "cancelled"}
+                      type="button"
+                      onClick={() => void onRetryDownload(job.id)}
+                    >
+                      Retry
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={job.status !== "queued" && job.status !== "running"}
+                      type="button"
+                      onClick={() => void onCancelDownload(job.id)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </section>
+          ) : null}
+
+          {savedCandidates.length > 0 ? (
+            <section className="savedDiscoveryCandidates" aria-label="Saved Discovery candidates">
+              <div className="savedDiscoveryHeader">
+                <strong>Saved Candidates</strong>
+                <span>{savedCandidates.length.toLocaleString()} source candidate{savedCandidates.length === 1 ? "" : "s"}</span>
+              </div>
+              <div className="savedDiscoveryList">
+                {savedCandidates.slice(0, 8).map((candidate) => (
+                  <div className="savedDiscoveryItem" key={candidate.id}>
+                    <div>
+                      <strong title={candidate.folder ?? undefined}>
+                        {candidate.releaseArtist ? `${candidate.releaseArtist} - ${candidate.releaseTitle}` : candidate.releaseTitle}
+                      </strong>
+                      <span>
+                        {candidate.username ?? "unknown user"} · {candidate.resultCount.toLocaleString()} file
+                        {candidate.resultCount === 1 ? "" : "s"} · {candidate.qualityLabel}
+                        {candidate.primaryFormat ? ` · ${candidate.primaryFormat}` : ""}
+                      </span>
+                    </div>
+                    <div className="savedDiscoveryActions">
+                      <button
+                        className="compactButton"
+                        disabled={candidate.availableCount === 0 || downloadState.status === "working" || !downloadsConfigured}
+                        title={downloadsConfigured ? undefined : "Set MUSIC_OS_SLSKD_DOWNLOAD_DIR before proposing downloads"}
+                        type="button"
+                        onClick={() => void onProposeSavedCandidateDownload(candidate)}
+                      >
+                        Propose
+                      </button>
+                      <button className="secondary compactButton" type="button" onClick={() => void onSendSavedCandidateToAgent(candidate)}>
+                        Agent
+                      </button>
+                      <button className="secondary compactButton" type="button" onClick={() => void onRemoveSavedCandidate(candidate.id)}>
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {savedLists.length > 0 ? (
+            <section className="savedDiscoveryLists" aria-label="Saved parsed Discovery lists">
+              <div className="savedDiscoveryHeader">
+                <strong>Saved Lists</strong>
+                <span>{savedLists.length.toLocaleString()} parsed source{savedLists.length === 1 ? "" : "s"}</span>
+              </div>
+              <div className="savedDiscoveryList">
+                {savedLists.slice(0, 6).map((list) => (
+                  <div className="savedDiscoveryItem" key={list.id}>
+                    <div>
+                      <strong>{list.name}</strong>
+                      <span>
+                        {list.itemCount.toLocaleString()} item{list.itemCount === 1 ? "" : "s"} ·{" "}
+                        {list.missingCount.toLocaleString()} missing · {list.ownedCount.toLocaleString()} owned
+                      </span>
+                    </div>
+                    <div className="savedDiscoveryActions">
+                      <button
+                        className="compactButton"
+                        disabled={list.items.length === 0}
+                        type="button"
+                        onClick={() => void onSearchSavedListMissing(list)}
+                      >
+                        Missing
+                      </button>
+                      <button className="compactButton" type="button" onClick={() => onLoadSavedList(list)}>
+                        Load
+                      </button>
+                      <button className="compactButton danger" type="button" onClick={() => void onRemoveSavedList(list.id)}>
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </aside>
+      </div>
+    </section>
   );
 }
 
