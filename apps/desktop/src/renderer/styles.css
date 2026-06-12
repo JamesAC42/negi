@@ -1,0 +1,4875 @@
+/* ============================================================
+   Music OS — flat terminal-rice design system
+   Fonts: JetBrains Mono Variable (UI/data), Space Grotesk (display)
+   ============================================================ */
+
+:root {
+  /* surfaces */
+  --bg0: #0b0d10;
+  --bg1: #10131a;
+  --bg2: #151923;
+  --bg3: #1b2130;
+  --line: #1f2633;
+  --line2: #2b3445;
+
+  /* text */
+  --tx0: #e9eef5;
+  --tx1: #aab3c5;
+  --tx2: #69748c;
+
+  /* accents */
+  --acc: #c3f53c;
+  --acc-ink: #10130a;
+  --acc-dim: rgba(195, 245, 60, 0.12);
+  --acc-line: rgba(195, 245, 60, 0.38);
+  --cyan: #6ee7ff;
+  --warn: #ffc46b;
+  --warn-line: #6f5a2e;
+  --danger: #ff7676;
+  --danger-line: #6d3434;
+  --ok-line: #4c5f2c;
+
+  /* geometry */
+  --r-s: 0.1875rem;
+  --r-m: 0.3125rem;
+  --pad: 0.625rem;
+
+  /* motion */
+  --fast: 120ms cubic-bezier(0.2, 0, 0.2, 1);
+  --med: 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  color: var(--tx0);
+  background: var(--bg0);
+  font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 16px;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 20rem;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+::selection {
+  background: var(--acc);
+  color: var(--acc-ink);
+}
+
+::-webkit-scrollbar {
+  width: 0.625rem;
+  height: 0.625rem;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line2);
+  border: 0.1875rem solid var(--bg0);
+  border-radius: 0.3125rem;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--tx2);
+}
+
+:focus-visible {
+  outline: 0.0625rem solid var(--acc);
+  outline-offset: 0.125rem;
+}
+
+@keyframes viewIn {
+  from {
+    opacity: 0;
+    transform: translateY(0.375rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pulseDot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ------------------------------------------------------------
+   Base controls
+   ------------------------------------------------------------ */
+
+button {
+  display: inline-grid;
+  place-items: center;
+  min-height: 2rem;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-m);
+  background: var(--bg2);
+  color: var(--tx0);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0 0.75rem;
+  white-space: nowrap;
+  box-shadow:
+    inset 0 0.0625rem 0 rgba(255, 255, 255, 0.045),
+    0 0.0625rem 0 rgba(0, 0, 0, 0.35);
+  transition:
+    background-color var(--fast),
+    border-color var(--fast),
+    box-shadow var(--fast),
+    color var(--fast),
+    opacity var(--fast),
+    transform var(--fast);
+}
+
+button:not(:disabled):hover {
+  border-color: var(--acc-line);
+  background: var(--bg3);
+  color: var(--tx0);
+  box-shadow:
+    inset 0 0.0625rem 0 rgba(255, 255, 255, 0.06),
+    0 0 0 0.0625rem rgba(195, 245, 60, 0.08),
+    0 0.375rem 1rem rgba(0, 0, 0, 0.18);
+}
+
+button:not(:disabled):active {
+  transform: translateY(0.0625rem);
+  box-shadow:
+    inset 0 0.0625rem 0 rgba(0, 0, 0, 0.4),
+    0 0.0625rem 0 rgba(0, 0, 0, 0.25);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+button.secondary {
+  border-color: var(--line2);
+  background: var(--bg1);
+  color: var(--tx1);
+  font-weight: 500;
+}
+
+button.secondary:not(:disabled):hover {
+  border-color: var(--line2);
+  background: var(--bg2);
+  color: var(--tx0);
+}
+
+button.active {
+  border-color: var(--acc-line);
+  background: var(--acc-dim);
+  color: var(--acc);
+  box-shadow:
+    inset 0 0 0 0.0625rem rgba(195, 245, 60, 0.08),
+    0 0 0.875rem rgba(195, 245, 60, 0.08);
+}
+
+input[type="checkbox"] {
+  display: inline-grid;
+  place-content: center;
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-s);
+  appearance: none;
+  background: var(--bg2);
+  color: var(--acc-ink);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    background-color var(--fast),
+    border-color var(--fast),
+    box-shadow var(--fast),
+    transform var(--fast);
+}
+
+input[type="checkbox"]::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  transform: scale(0);
+  clip-path: polygon(14% 44%, 0 62%, 38% 100%, 100% 18%, 82% 0, 34% 62%);
+  background: currentColor;
+  transition: transform var(--fast);
+}
+
+input[type="checkbox"]:checked {
+  border-color: var(--acc);
+  background: var(--acc);
+  box-shadow: 0 0 0 0.1875rem var(--acc-dim);
+}
+
+input[type="checkbox"]:checked::before {
+  transform: scale(1);
+}
+
+input[type="checkbox"]:hover {
+  border-color: var(--acc-line);
+}
+
+input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+input,
+textarea,
+select {
+  min-width: 0;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+  color: var(--tx0);
+  font: inherit;
+  font-size: 0.8125rem;
+  box-shadow:
+    inset 0 0.0625rem 0 rgba(255, 255, 255, 0.035),
+    0 0.0625rem 0 rgba(0, 0, 0, 0.25);
+  transition:
+    border-color var(--fast),
+    background-color var(--fast),
+    box-shadow var(--fast);
+}
+
+input {
+  height: 2.25rem;
+  padding: 0 0.625rem;
+}
+
+textarea {
+  min-height: 5.75rem;
+  width: 100%;
+  resize: vertical;
+  padding: 0.625rem;
+}
+
+select {
+  appearance: none;
+  height: 2.25rem;
+  padding: 0 2rem 0 0.625rem;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23aab3c5' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: calc(100% - 0.75rem) 50%;
+  background-size: 0.625rem 0.375rem;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+input:hover,
+textarea:hover,
+select:hover {
+  border-color: var(--acc-line);
+  background-color: var(--bg2);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--acc);
+  outline: none;
+  background-color: var(--bg2);
+  box-shadow:
+    inset 0 0.0625rem 0 rgba(255, 255, 255, 0.045),
+    0 0 0 0.1875rem var(--acc-dim);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--tx2);
+}
+
+select:disabled,
+input:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.srOnly {
+  position: absolute;
+  width: 0.0625rem;
+  height: 0.0625rem;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-family: "Space Grotesk Variable", "Space Grotesk", "JetBrains Mono Variable", sans-serif;
+  font-size: 1.625rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+h2 {
+  font-family: "Space Grotesk Variable", "Space Grotesk", "JetBrains Mono Variable", sans-serif;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.toolbar p,
+.muted,
+.emptyState,
+.agentPanel p {
+  color: var(--tx1);
+}
+
+/* primary / secondary buttons --------------------------------- */
+
+.libraryControls button,
+.discoveryControls button,
+.rootActions button,
+.metadataEditor button,
+.diagnosticsPanel button,
+.importControlFooter button,
+.importMetadataEditor button,
+.settingsHeader button,
+.agentComposer button {
+  height: 2.25rem;
+  border: 0.0625rem solid transparent;
+  border-radius: var(--r-m);
+  background: var(--acc);
+  color: var(--acc-ink);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  padding: 0 0.875rem;
+  white-space: nowrap;
+}
+
+.libraryControls button:not(:disabled):hover,
+.discoveryControls button:not(:disabled):hover,
+.rootActions button:not(:disabled):hover,
+.metadataEditor button:not(:disabled):hover,
+.diagnosticsPanel button:not(:disabled):hover,
+.importControlFooter button:not(:disabled):hover,
+.importMetadataEditor button:not(:disabled):hover,
+.settingsHeader button:not(:disabled):hover,
+.agentComposer button:not(:disabled):hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: #d4ff5e;
+  box-shadow:
+    inset 0 0.0625rem 0 rgba(255, 255, 255, 0.26),
+    0 0.5rem 1.25rem rgba(195, 245, 60, 0.12);
+}
+
+.libraryControls button:disabled,
+.discoveryControls button:disabled,
+.rootActions button:disabled,
+.metadataEditor button:disabled,
+.diagnosticsPanel button:disabled,
+.settingsHeader button:disabled,
+.agentComposer button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.rootActions button.secondary,
+.metadataEditor button.secondary,
+.diagnosticsPanel button.secondary,
+.bulkTagForm button.secondary,
+.discoverySearchForm button.secondary,
+.discoveryClusterActions button.secondary,
+.discoveryGroupActions button.secondary,
+.agentThreadBar button.secondary {
+  border: 0.0625rem solid var(--line2);
+  background: var(--bg2);
+  color: var(--tx1);
+  font-weight: 500;
+}
+
+.rootActions button.secondary:not(:disabled):hover,
+.metadataEditor button.secondary:not(:disabled):hover,
+.diagnosticsPanel button.secondary:not(:disabled):hover,
+.bulkTagForm button.secondary:not(:disabled):hover,
+.discoverySearchForm button.secondary:not(:disabled):hover,
+.discoveryClusterActions button.secondary:not(:disabled):hover,
+.discoveryGroupActions button.secondary:not(:disabled):hover,
+.agentThreadBar button.secondary:not(:disabled):hover {
+  border-color: var(--acc-line);
+  background: var(--bg3);
+  color: var(--tx0);
+}
+
+.rootActions button.active {
+  border: 0.0625rem solid var(--acc-line);
+}
+
+/* ------------------------------------------------------------
+   App shell
+   ------------------------------------------------------------ */
+
+.appShell {
+  display: grid;
+  grid-template-columns: 13.5rem minmax(32.5rem, 1fr) 19rem;
+  grid-template-rows: minmax(0, 1fr) auto;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg0);
+  transition: grid-template-columns var(--med);
+}
+
+.appShell.inspectorCollapsed {
+  grid-template-columns: 13.5rem minmax(32.5rem, 1fr) 3.75rem;
+}
+
+.sidebar,
+.inspector {
+  min-height: 0;
+  background: var(--bg1);
+}
+
+.sidebar {
+  grid-row: 1 / 3;
+  display: flex;
+  flex-direction: column;
+  border-right: 0.0625rem solid var(--line);
+  padding: 1.125rem 0.75rem;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0 0.5rem 1.25rem;
+  font-family: "Space Grotesk Variable", "Space Grotesk", sans-serif;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.brandMark {
+  display: grid;
+  width: 1.875rem;
+  height: 1.875rem;
+  place-items: center;
+  border-radius: var(--r-s);
+  background: var(--acc);
+  color: var(--acc-ink);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 0.6875rem;
+  font-weight: 800;
+}
+
+.navList {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.navItem {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.625rem;
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  border: 0;
+  border-radius: var(--r-s);
+  background: transparent;
+  box-shadow: none;
+  color: var(--tx1);
+  font-size: 0.8125rem;
+  justify-content: start;
+  text-align: left;
+  cursor: pointer;
+}
+
+.navItem::before {
+  display: none;
+}
+
+.navItem svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--tx2);
+  transition:
+    color var(--fast),
+    transform var(--fast);
+}
+
+.navItem:hover {
+  background: transparent;
+  color: var(--tx0);
+}
+
+.navItem.active {
+  background: transparent;
+  color: var(--tx0);
+}
+
+.navItem.active svg {
+  color: var(--acc);
+  transform: scale(1.08);
+}
+
+.centerPane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 1.25rem 1.375rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.centerPane > section {
+  animation: viewIn var(--med) both;
+}
+
+.centerPane:has(.artistIndexSections) {
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding-bottom: 1.125rem;
+  animation: viewIn var(--med) both;
+}
+
+.health {
+  display: grid;
+  gap: 0.1875rem;
+  min-width: 14.375rem;
+  max-width: 22.5rem;
+  padding: 0.5rem 0.625rem;
+  border: 0.0625rem solid var(--line);
+  border-left: 0.1875rem solid var(--line2);
+  border-radius: var(--r-s);
+  background: var(--bg1);
+  font-size: 0.75rem;
+}
+
+.health span {
+  overflow: hidden;
+  color: var(--tx1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.health.ready {
+  border-left-color: var(--acc);
+}
+
+.health.error {
+  border-left-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ------------------------------------------------------------
+   Cards / panels (shared flat surface)
+   ------------------------------------------------------------ */
+
+.bulkActionBar,
+.discoveryStatus,
+.discoveryListParser,
+.parsedDiscoveryList,
+.discoverySummary,
+.downloadJob,
+.jobsToolbar,
+.jobItem,
+.jobDetail,
+.settingsHeader,
+.settingsPanel,
+.duplicatesSummary div,
+.duplicateGroup,
+.metadataGapItem,
+.qualityUpgradeItem,
+.importItem,
+.operationBatch,
+.playlistItem,
+.discoveryGroup,
+.discoveryHighlightCard,
+.discoveryCandidateDetail,
+.savedDiscoveryCandidates,
+.savedDiscoveryLists,
+.rootStripHeader,
+.rootItem,
+.libraryRefiners,
+.agentComposer,
+.agentTranscript {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+  overflow-y: visible;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+}
+
+/* ------------------------------------------------------------
+   Library
+   ------------------------------------------------------------ */
+
+.libraryCommandBar {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: 0;
+  margin-bottom: 0.75rem;
+}
+
+.libraryCommandBar .searchForm {
+  flex: 1;
+  min-width: 0;
+}
+
+.commandBarToggles {
+  display: flex;
+  flex: none;
+  gap: 0.5rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.toggleChip {
+  height: 2.25rem;
+  padding: 0 0.875rem;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-s);
+  background: var(--bg1);
+  color: var(--tx1);
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition:
+    border-color var(--fast),
+    color var(--fast),
+    background-color var(--fast);
+}
+
+.toggleChip:hover {
+  border-color: var(--acc-line);
+  color: var(--tx0);
+}
+
+.toggleChip.active {
+  border-color: var(--acc-line);
+  background: var(--acc-dim);
+  color: var(--acc);
+}
+
+.collapsePanel {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+  overflow-y: visible;
+  margin-bottom: 0.75rem;
+  padding: var(--pad);
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+  animation: viewIn var(--med) both;
+}
+
+.collapsePanel .scanSummary {
+  margin-bottom: 0;
+}
+
+.rootPanel {
+  gap: 0.75rem;
+}
+
+.pathForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.searchForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.watchRootToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  height: 2.25rem;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-m);
+  background: var(--bg2);
+  color: var(--tx1);
+  font-size: 0.8125rem;
+  padding: 0 0.625rem;
+  white-space: nowrap;
+}
+
+.rootActions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: 0.5rem;
+}
+
+.importControls {
+  margin-bottom: 0.75rem;
+}
+
+.bulkActionBar {
+  display: grid;
+  grid-template-columns: minmax(11.25rem, 0.35fr) minmax(0, 1fr);
+  gap: 0.625rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  padding: var(--pad);
+}
+
+.bulkActionBar > div {
+  display: grid;
+  gap: 0.25rem;
+  grid-row: 1 / span 2;
+}
+
+.bulkActionBar span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.bulkPlaylistForm,
+.bulkTagForm {
+  display: grid;
+  grid-column: 2;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.bulkPlaylistForm {
+  grid-template-columns: minmax(8.125rem, 0.7fr) minmax(10rem, 1fr) auto;
+}
+
+.bulkHint {
+  align-self: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rootStrip {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.rootStripHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.625rem;
+}
+
+.rootPanel .rootStripHeader {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.rootStripHeader div {
+  display: grid;
+  min-width: 0;
+  gap: 0.1875rem;
+}
+
+.rootStripHeader span {
+  overflow: hidden;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rootStripHeader button {
+  height: 2rem;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-m);
+  background: var(--bg2);
+  color: var(--tx1);
+  cursor: pointer;
+  padding: 0 0.625rem;
+}
+
+.rootStripHeader button:not(:disabled):hover {
+  border-color: var(--tx2);
+  color: var(--tx0);
+}
+
+.rootStripHeader button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.rootList {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.rootItem {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.875rem;
+  min-width: 0;
+  min-height: 3rem;
+  padding: 0.625rem 0.75rem;
+}
+
+.rootItemMain {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.rootItemMain div {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.rootItem span {
+  overflow: hidden;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rootIcon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-s);
+  background: var(--bg2);
+  color: var(--tx2);
+}
+
+.rootIcon svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+.rootIcon.watched {
+  border-color: var(--acc-line);
+  background: var(--acc-dim);
+  color: var(--acc);
+}
+
+.rootStatus {
+  flex: none;
+  border: 0.0625rem solid var(--line2);
+  border-radius: 999px;
+  color: var(--tx2);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.125rem 0.4375rem;
+  text-transform: uppercase;
+}
+
+.rootStatus.watched {
+  border-color: var(--acc-line);
+  color: var(--acc);
+}
+
+.scanSummary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.625rem;
+  min-height: 2.125rem;
+  margin-bottom: 0.75rem;
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.scanSummary span {
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-s);
+  background: var(--bg1);
+  padding: 0.25rem 0.5rem;
+}
+
+.libraryRefiners {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.85fr) minmax(0, 1.65fr);
+  align-items: stretch;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: var(--pad);
+}
+
+.libraryRefinerStats,
+.libraryFilterGrid {
+  display: grid;
+  min-width: 0;
+  gap: 0.5rem;
+}
+
+.libraryRefinerStats {
+  grid-template-columns: repeat(2, minmax(8.75rem, 1fr));
+}
+
+.libraryFilterGrid {
+  grid-template-columns: repeat(3, minmax(7.5rem, 1fr));
+}
+
+.libraryRefinerSummary,
+.libraryFilterGrid label {
+  display: grid;
+  min-width: 0;
+  gap: 0.3125rem;
+}
+
+.libraryRefinerSummary {
+  align-content: center;
+  min-height: 4rem;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-s);
+  background: var(--bg0);
+  padding: 0.625rem;
+}
+
+.libraryRefinerSummary span,
+.libraryFilterGrid label span,
+.discoveryRefiners label span,
+.agentThreadBar label span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--tx2);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.libraryFilterGrid label span svg {
+  width: 0.8125rem;
+  height: 0.8125rem;
+  color: var(--acc);
+}
+
+.libraryRefinerSummary strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.9375rem;
+}
+
+.libraryFilterGrid select,
+.libraryFilterGrid input {
+  width: 100%;
+  height: 2rem;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+}
+
+/* data grid ---------------------------------------------------- */
+
+.albumLibrary {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+  overflow-y: visible;
+}
+
+.libraryAlbumGroup {
+  display: grid;
+  grid-template-columns: 5.25rem minmax(0, 1fr);
+  gap: 0.875rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+  overflow-y: visible;
+  padding: 0.75rem;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+}
+
+.libraryAlbumArt {
+  align-self: start;
+}
+
+.albumGroupArt {
+  width: 5.25rem;
+  aspect-ratio: 1;
+  border-radius: var(--r-s);
+  object-fit: cover;
+  background: var(--bg2);
+}
+
+.libraryAlbumContent {
+  display: grid;
+  min-width: 0;
+  gap: 0.5rem;
+}
+
+.libraryAlbumHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+  min-height: 2.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 0.0625rem solid var(--line);
+}
+
+.libraryAlbumHeader div {
+  display: grid;
+  min-width: 0;
+  gap: 0.1875rem;
+}
+
+.libraryAlbumTitleButton,
+.libraryAlbumArtistButton {
+  width: fit-content;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  text-align: left;
+}
+
+.libraryAlbumTitleButton:hover,
+.libraryAlbumArtistButton:hover {
+  background: transparent;
+  color: var(--acc);
+  box-shadow: none;
+  transform: none;
+}
+
+.libraryAlbumHeader strong,
+.libraryAlbumTitleButton strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tx0);
+  font-family: var(--font-head);
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.libraryAlbumHeader span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.libraryAlbumArtistButton {
+  display: inline;
+  color: inherit;
+  font: inherit;
+  vertical-align: baseline;
+}
+
+.albumTrackHeader,
+.albumTrackRow {
+  display: grid;
+  grid-template-columns:
+    1.75rem
+    2rem
+    2rem
+    minmax(11rem, 1.6fr)
+    minmax(3.25rem, 0.35fr)
+    minmax(4.25rem, 0.42fr)
+    minmax(5rem, 0.5fr)
+    minmax(3.875rem, 0.38fr)
+    minmax(4.25rem, 0.42fr)
+    15.5rem;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.albumTrackHeader {
+  min-height: 1.5rem;
+  color: var(--tx2);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.albumTrackRows {
+  display: grid;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+  overflow-y: visible;
+}
+
+.albumTrackRow {
+  min-height: 2.25rem;
+  border-top: 0.0625rem solid var(--line);
+  color: var(--tx0);
+  font-size: 0.8125rem;
+  transition: background-color var(--fast);
+}
+
+.albumTrackRow:hover,
+.albumTrackRow.active {
+  background: var(--bg2);
+}
+
+.albumTrackRow > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.albumTrackRow .trackTitle {
+  font-weight: 600;
+}
+
+.dataGrid {
+  display: grid;
+  grid-template-rows: 2.375rem auto;
+  height: auto;
+  min-height: 16.25rem;
+  overflow: hidden;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+}
+
+.gridHeader {
+  display: grid;
+  grid-template-columns: 2.25rem 2.25rem minmax(10rem, 2fr) minmax(7.5rem, 1.2fr) minmax(7.5rem, 1.3fr) 4.375rem 8rem 5.125rem 5.625rem 13.5rem;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0 0.875rem;
+  border-bottom: 0.0625rem solid var(--line);
+  color: var(--tx2);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.emptyState {
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.gridBody {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.gridRow {
+  display: grid;
+  grid-template-columns: 2.25rem 2.25rem minmax(10rem, 2fr) minmax(7.5rem, 1.2fr) minmax(7.5rem, 1.3fr) 4.375rem 8rem 5.125rem 5.625rem 13.5rem;
+  align-items: center;
+  gap: 0.875rem;
+  min-height: 2.5rem;
+  padding: 0 0.875rem;
+  border-bottom: 0.0625rem solid var(--line);
+  color: var(--tx0);
+  font-size: 0.8125rem;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 2.5rem;
+  transition: background-color var(--fast);
+}
+
+.gridRow:hover {
+  background: var(--bg2);
+}
+
+.rowSelect {
+  display: grid;
+  place-items: center;
+}
+
+.gridRow span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowPlay {
+  display: grid;
+  place-items: center;
+  width: 1.875rem;
+  height: 1.875rem;
+  min-height: 0;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-s);
+  background: var(--bg2);
+  color: var(--tx1);
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+}
+
+.rowPlay svg {
+  display: block;
+  width: 0.75rem;
+  height: 0.75rem;
+  fill: currentColor;
+}
+
+.rowPlay:not(:disabled):hover,
+.rowPlay.active {
+  border-color: var(--acc);
+  background: var(--acc);
+  color: var(--acc-ink);
+}
+
+.rowPlay:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.rowActions {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  justify-content: flex-start;
+  min-width: 15.5rem;
+  overflow: visible;
+}
+
+.rowActions button,
+.rowActions select {
+  height: 1.625rem;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-s);
+  background: var(--bg2);
+  color: var(--tx1);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0 0.5rem;
+}
+
+.rowActions button:hover {
+  border-color: var(--acc-line);
+  color: var(--tx0);
+}
+
+.rowActions button.active {
+  border-color: var(--acc);
+  background: var(--acc);
+  color: var(--acc-ink);
+}
+
+.rowActions select {
+  width: 4.25rem;
+  min-width: 4.25rem;
+  padding: 0 1.25rem 0 0.5rem;
+  text-align: center;
+}
+
+.rowActions .iconBtn {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--tx2);
+  transition:
+    border-color var(--fast),
+    color var(--fast),
+    background-color var(--fast);
+}
+
+.rowActions .iconBtn svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  fill: currentColor;
+}
+
+.rowActions .iconBtn svg[fill="none"] {
+  fill: none;
+}
+
+.rowActions .iconBtn:hover {
+  border-color: var(--line2);
+  background: var(--bg2);
+  color: var(--tx0);
+}
+
+.rowActions .iconBtn.active {
+  border-color: transparent;
+  background: transparent;
+  color: var(--acc);
+}
+
+.rowActions .iconBtn.danger:hover {
+  border-color: var(--danger-line);
+  color: var(--danger);
+}
+
+.titleCell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.titleCell > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artThumb {
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--r-s);
+  object-fit: cover;
+  background: var(--bg2);
+}
+
+span.artFallback {
+  display: grid;
+  place-items: center;
+  border: 0.0625rem solid var(--line);
+  color: var(--tx2);
+}
+
+span.artFallback svg {
+  width: 45%;
+  height: 45%;
+  fill: currentColor;
+}
+
+.statusPill {
+  justify-self: start;
+  border: 0.0625rem solid var(--ok-line);
+  border-radius: var(--r-s);
+  background: var(--acc-dim);
+  color: var(--acc);
+  padding: 0.125rem 0.4375rem;
+  font-size: 0.6875rem;
+  letter-spacing: 0.03em;
+}
+
+.statusPill.warning {
+  border-color: var(--warn-line);
+  background: rgba(255, 196, 107, 0.08);
+  color: var(--warn);
+}
+
+.statusPill.muted {
+  border-color: var(--line2);
+  background: var(--bg2);
+  color: var(--tx1);
+}
+
+/* ------------------------------------------------------------
+   Discovery
+   ------------------------------------------------------------ */
+
+.discoveryControls {
+  display: grid;
+  gap: 0.625rem;
+  margin-bottom: 0.75rem;
+}
+
+.discoverySearchForm {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 9.375rem) minmax(0, 1fr) auto auto;
+  gap: 0.5rem;
+}
+
+.discoveryStatus {
+  display: grid;
+  gap: 0.25rem;
+  border-left: 0.1875rem solid var(--line2);
+  padding: var(--pad);
+}
+
+.discoveryStatus.ready {
+  border-left-color: var(--acc);
+}
+
+.discoveryStatus span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.discoveryListParser {
+  display: grid;
+  gap: 0.5rem;
+  padding: var(--pad);
+}
+
+.discoveryListParser textarea {
+  min-height: 4.625rem;
+}
+
+.discoveryListParserFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.parsedDiscoveryList {
+  display: grid;
+  gap: 0.375rem;
+  padding: var(--pad);
+}
+
+.parsedDiscoveryToolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.parsedDiscoveryToolbar strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.segmentedControl {
+  display: inline-flex;
+  align-items: center;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-s);
+  overflow: hidden;
+}
+
+.segmentedControl button {
+  height: 1.75rem;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg1);
+  color: var(--tx1);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0 0.625rem;
+}
+
+.segmentedControl button + button {
+  border-left: 0.0625rem solid var(--line2);
+}
+
+.segmentedControl button:hover {
+  color: var(--tx0);
+}
+
+.segmentedControl button.active {
+  background: var(--acc);
+  color: var(--acc-ink);
+}
+
+.parsedDiscoveryItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.625rem;
+  border-top: 0.0625rem solid var(--line);
+  padding-top: 0.5rem;
+}
+
+.parsedDiscoveryItem:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.parsedDiscoveryItem div {
+  display: grid;
+  min-width: 0;
+  gap: 0.1875rem;
+}
+
+.parsedDiscoveryItem strong,
+.parsedDiscoveryItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parsedDiscoveryItem span,
+.parsedDiscoveryMore {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.parsedDiscoveryMore {
+  padding-top: 0.25rem;
+}
+
+.discoverySummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: var(--pad);
+}
+
+.discoverySummary span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.discoveryRefiners {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.625rem;
+  margin-bottom: 0.625rem;
+}
+
+.discoveryRefiners label {
+  display: grid;
+  gap: 0.3125rem;
+  min-width: 0;
+}
+
+.discoveryRefiners select {
+  width: 100%;
+}
+
+.downloadJobs {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.downloadJob {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: var(--pad);
+}
+
+.downloadJobMain {
+  display: grid;
+  min-width: 0;
+  gap: 0.375rem;
+}
+
+.downloadJobMain span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discoveryResults {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.discoveryGroup {
+  display: grid;
+  gap: 0.625rem;
+  padding: var(--pad);
+  transition: border-color var(--fast);
+}
+
+.discoveryGroup.selected {
+  border-color: var(--acc-line);
+}
+
+.discoveryCluster {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.discoveryClusterHeader {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 0.0625rem solid var(--line);
+  padding: 0.25rem 0.125rem 0.5rem;
+}
+
+.discoveryClusterHeader div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 0.1875rem;
+}
+
+.discoveryClusterHeader strong {
+  overflow: hidden;
+  font-size: 0.9375rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discoveryClusterHeader span {
+  overflow: hidden;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discoveryClusterMeta,
+.discoveryClusterActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.discoveryClusterSources {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.discoveryHighlights {
+  display: grid;
+  gap: 0.625rem;
+  margin-bottom: 0.75rem;
+}
+
+.discoveryHighlightsHeader {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.discoveryHighlightsHeader div {
+  display: grid;
+  gap: 0.1875rem;
+}
+
+.discoveryHighlightsHeader span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.discoveryHighlightGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16.25rem, 1fr));
+  gap: 0.625rem;
+}
+
+.discoveryHighlightCard {
+  display: grid;
+  align-content: space-between;
+  gap: 0.625rem;
+  min-width: 0;
+  min-height: 11.875rem;
+  padding: 0.75rem;
+  transition:
+    border-color var(--fast),
+    transform var(--med);
+}
+
+.discoveryHighlightCard:hover {
+  border-color: var(--line2);
+  transform: translateY(-0.125rem);
+}
+
+.discoveryHighlightCard div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.discoveryHighlightCard strong,
+.discoveryHighlightCard span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discoveryHighlightCard > div:first-child > span:last-child {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.discoveryHighlightFacts,
+.discoveryHighlightActions {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+}
+
+.discoveryShowMore {
+  width: 100%;
+  margin-top: 0.125rem;
+}
+
+.discoveryGroupHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(10rem, 18rem);
+  align-items: start;
+  gap: 0.75rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.discoveryGroupMain {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.discoveryGroupMain strong,
+.discoveryResultMain strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discoveryGroupMain span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discoveryGroupActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  max-width: 22.5rem;
+}
+
+.discoveryTrackPreview,
+.discoveryCandidatePreview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3125rem;
+  min-width: 0;
+}
+
+.discoveryTrackPreview span,
+.discoveryCandidatePreview span {
+  max-width: min(22.5rem, 100%);
+  overflow: hidden;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-s);
+  background: var(--bg0);
+  color: var(--tx1);
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  padding: 0.1875rem 0.5rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discoveryCandidateDetail {
+  display: grid;
+  gap: 0.625rem;
+  border-left: 0.1875rem solid var(--acc-line);
+  padding: 0.75rem;
+  animation: viewIn var(--med) both;
+}
+
+.discoveryCandidateDetailHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.discoveryCandidateDetailHeader div {
+  display: grid;
+  min-width: 0;
+  gap: 0.1875rem;
+}
+
+.discoveryCandidateDetailHeader strong,
+.discoveryCandidateDetailHeader span,
+.discoveryCandidateLibrary strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discoveryCandidateDetailHeader span,
+.discoveryCandidateFacts span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.discoveryCandidateActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.discoveryCandidateFacts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.125rem, 1fr));
+  gap: 0.5rem;
+}
+
+.discoveryCandidateFacts div {
+  display: grid;
+  min-width: 0;
+  gap: 0.1875rem;
+  border-top: 0.0625rem solid var(--line);
+  padding-top: 0.5rem;
+}
+
+.discoveryCandidateFacts strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discoveryCandidateLibrary,
+.discoveryCandidateWarnings {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.savedDiscoveryCandidates,
+.savedDiscoveryLists {
+  display: grid;
+  gap: 0.5rem;
+  padding: var(--pad);
+}
+
+.savedDiscoveryHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.625rem;
+}
+
+.savedDiscoveryHeader span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.savedDiscoveryList {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.savedDiscoveryItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.625rem;
+  border-top: 0.0625rem solid var(--line);
+  padding-top: 0.5rem;
+}
+
+.savedDiscoveryItem div {
+  display: grid;
+  min-width: 0;
+  gap: 0.1875rem;
+}
+
+.savedDiscoveryItem strong,
+.savedDiscoveryItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.savedDiscoveryItem span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.savedDiscoveryActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+}
+
+.discoveryFileList {
+  display: grid;
+  gap: 0.375rem;
+  border-top: 0.0625rem solid var(--line);
+  padding-top: 0.5rem;
+}
+
+.discoveryFileRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: 0;
+}
+
+.selectControl {
+  display: flex;
+  align-items: center;
+  gap: 0.4375rem;
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.compactButton {
+  height: 1.875rem;
+  border-radius: var(--r-s);
+  padding: 0 0.625rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------
+   Jobs
+   ------------------------------------------------------------ */
+
+.jobsToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: var(--pad);
+}
+
+.jobsToolbar div {
+  display: grid;
+  gap: 0.1875rem;
+}
+
+.jobsToolbar span,
+.jobItemMain span,
+.jobDetailHeader span,
+.jobEvent span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.jobsLayout {
+  display: grid;
+  grid-template-columns: minmax(20rem, 0.9fr) minmax(0, 1.1fr);
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+.jobsList,
+.jobDetail,
+.jobEvents {
+  display: grid;
+  align-content: start;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.jobItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.625rem;
+  width: 100%;
+  height: auto;
+  color: var(--tx1);
+  padding: var(--pad);
+  text-align: left;
+  cursor: pointer;
+}
+
+.jobItem:hover {
+  border-color: var(--line2);
+  color: var(--tx0);
+}
+
+.jobItem.active {
+  border-color: var(--acc-line);
+  color: var(--tx0);
+}
+
+.jobItemMain,
+.jobDetailHeader div {
+  display: grid;
+  min-width: 0;
+  gap: 0.3125rem;
+}
+
+.jobItemMain strong,
+.jobItemMain span,
+.jobDetailHeader strong,
+.jobDetailHeader span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobDetail {
+  padding: var(--pad);
+}
+
+.jobDetailHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.jobFacts {
+  display: grid;
+  grid-template-columns: 6.25rem minmax(0, 1fr);
+  gap: 0.375rem 0.75rem;
+  border-top: 0.0625rem solid var(--line);
+  padding-top: 0.625rem;
+}
+
+.jobFacts span {
+  color: var(--tx1);
+}
+
+.jobFacts strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobEvents {
+  border-top: 0.0625rem solid var(--line);
+  padding-top: 0.625rem;
+}
+
+.jobEvent {
+  display: grid;
+  gap: 0.25rem;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-s);
+  background: var(--bg0);
+  padding: 0.5rem;
+}
+
+.jobEvent code {
+  overflow: hidden;
+  color: var(--tx1);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------
+   Settings
+   ------------------------------------------------------------ */
+
+.settingsHeader,
+.settingsPanel {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.75rem;
+}
+
+.settingsHeader {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.settingsHeader div,
+.settingsPanel > div {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.settingsHeader span,
+.settingsPanel span,
+.settingsField small {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem;
+  margin-bottom: 0.75rem;
+}
+
+.settingsField {
+  display: grid;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.settingsField > span {
+  color: var(--tx1);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.settingsField textarea {
+  min-height: 5.375rem;
+}
+
+.settingsField.wide {
+  grid-column: 1 / -1;
+}
+
+.settingsField.compact {
+  max-width: 15rem;
+}
+
+.settingsCheck {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--tx1);
+  font-size: 0.8125rem;
+}
+
+/* ------------------------------------------------------------
+   Imports / operations / playlists
+   ------------------------------------------------------------ */
+
+.importControls form {
+  display: grid;
+  gap: 0.625rem;
+}
+
+.importControlFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.875rem;
+}
+
+.importButtons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.importsList,
+.operationList,
+.playlistList {
+  display: grid;
+  gap: 0.5rem;
+  max-height: calc(100vh - 16.875rem);
+  overflow: auto;
+}
+
+/* album art grid ------------------------------------------------ */
+
+.albumViewToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  margin-bottom: 0.75rem;
+}
+
+.albumViewToolbar > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 0.125rem;
+}
+
+.albumViewToolbar span,
+.artistAlbumSection header span {
+  color: var(--tx2);
+  font-size: 0.75rem;
+}
+
+.albumFacetControls {
+  display: grid;
+  grid-template-columns: auto minmax(8rem, 10rem) minmax(8rem, 10rem);
+  align-items: end;
+  gap: 0.625rem;
+  min-width: 0;
+}
+
+.albumFacetControls label {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.albumFacetControls label span {
+  color: var(--tx2);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.albumFacetControls select {
+  width: 100%;
+  height: 2rem;
+  font-size: 0.75rem;
+}
+
+.segmentedControl {
+  display: inline-flex;
+  flex: none;
+  overflow: hidden;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-s);
+  background: var(--bg1);
+}
+
+.segmentedControl button {
+  min-height: 2rem;
+  border: 0;
+  border-right: 0.0625rem solid var(--line2);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--tx1);
+  padding: 0 0.75rem;
+}
+
+.segmentedControl button:last-child {
+  border-right: 0;
+}
+
+.segmentedControl button.active,
+.segmentedControl button:not(:disabled):hover {
+  background: var(--bg2);
+  color: var(--tx0);
+}
+
+.albumGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+  gap: 1rem;
+  max-height: calc(100vh - 14.5rem);
+  padding: 0.25rem 0.125rem 0.75rem;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.albumGrid.compact {
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+}
+
+.artistAlbumSections {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  scrollbar-gutter: stable;
+}
+
+.artistIndexSections,
+.artistIndexSection {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  scrollbar-gutter: stable;
+}
+
+.artistIndexSections {
+  max-height: calc(100vh - 14.5rem);
+  overflow: auto;
+  padding: 0.125rem 0.125rem 0.75rem;
+}
+
+.artistIndexSection header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  border-bottom: 0.0625rem solid var(--line);
+  padding-bottom: 0.5rem;
+}
+
+.artistIndexSection header span {
+  color: var(--tx2);
+  font-size: 0.75rem;
+}
+
+.artistAlbumSection {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.artistAlbumSection header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  border-bottom: 0.0625rem solid var(--line);
+  padding-bottom: 0.5rem;
+}
+
+.artistSectionName {
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--tx0);
+  font-family: "Space Grotesk Variable", "Space Grotesk", sans-serif;
+  font-size: 1.125rem;
+  font-weight: 700;
+  padding: 0;
+  text-align: left;
+}
+
+.artistSectionName:not(:disabled):hover {
+  background: transparent;
+  box-shadow: none;
+  color: var(--acc);
+}
+
+.albumCard {
+  display: grid;
+  gap: 0.625rem;
+  min-width: 0;
+  width: 100%;
+  padding: 0.625rem;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color var(--fast),
+    background-color var(--fast),
+    box-shadow var(--fast);
+}
+
+.albumCard:hover {
+  border-color: var(--line2);
+  background: var(--bg2);
+  box-shadow: inset 0 0 0 0.0625rem rgba(255, 255, 255, 0.035);
+}
+
+.albumCover {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: var(--r-s);
+  background: var(--bg2);
+}
+
+.albumCover .albumArt {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.albumCover span.albumArt {
+  border: none;
+}
+
+.albumCover span.albumArt svg {
+  width: 30%;
+  height: 30%;
+}
+
+.albumPlay {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: none;
+  border-radius: 50%;
+  background: var(--acc);
+  color: var(--acc-ink);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(0.375rem);
+  transition:
+    opacity var(--fast),
+    transform var(--fast);
+}
+
+.albumPlay svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  fill: currentColor;
+}
+
+.albumCard:hover .albumPlay,
+.albumPlay:focus-visible {
+  opacity: 1;
+  transform: none;
+}
+
+.albumPlay:disabled {
+  cursor: wait;
+  opacity: 0.4;
+}
+
+.albumInfo {
+  display: grid;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+
+.albumInfo strong,
+.albumInfo span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.albumInfo strong {
+  font-size: 0.8125rem;
+}
+
+.albumInfo span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.albumInfo .albumMeta {
+  color: var(--tx2);
+  font-size: 0.6875rem;
+}
+
+.linkButton,
+.artistLink {
+  display: inline;
+  width: fit-content;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--acc);
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.linkButton:not(:disabled):hover,
+.artistLink:not(:disabled):hover {
+  background: transparent;
+  color: var(--tx0);
+  box-shadow: none;
+}
+
+.detailNav {
+  margin-bottom: 0.75rem;
+}
+
+.albumDetailView,
+.artistDetailView {
+  min-width: 0;
+  animation: viewIn var(--med) both;
+}
+
+.albumDetailShell {
+  display: grid;
+  grid-template-columns: minmax(12rem, 16rem) minmax(18rem, 1fr) minmax(16rem, 22rem);
+  gap: 1rem;
+  min-width: 0;
+  align-items: start;
+}
+
+.albumDetailInfo,
+.songInfoPanel,
+.artistDetailGrid > section {
+  min-width: 0;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+  padding: var(--pad);
+}
+
+.albumDetailInfo {
+  display: grid;
+  gap: 0.75rem;
+  position: sticky;
+  top: 0;
+}
+
+.albumDetailArt {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--r-s);
+  object-fit: cover;
+  background: var(--bg2);
+}
+
+.albumDetailInfo h2,
+.songInfoPanel h2,
+.artistHero h2 {
+  overflow-wrap: anywhere;
+}
+
+.albumFacts {
+  display: grid;
+  gap: 0.375rem;
+  margin: 0;
+}
+
+.albumFacts div {
+  display: grid;
+  grid-template-columns: minmax(5rem, 0.42fr) minmax(0, 1fr);
+  gap: 0.5rem;
+  border-top: 0.0625rem solid var(--line);
+  padding-top: 0.375rem;
+}
+
+.albumFacts dt,
+.songInfoPanel th {
+  color: var(--tx2);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.albumFacts dd {
+  margin: 0;
+  color: var(--tx0);
+  font-size: 0.75rem;
+  text-align: left;
+}
+
+.albumDetailPlay {
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  justify-self: center;
+  border-radius: 50%;
+  padding: 0;
+}
+
+.albumDetailPlay svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  fill: currentColor;
+}
+
+.albumDetailTracks {
+  display: grid;
+  min-width: 0;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+  overflow: hidden;
+}
+
+.albumDetailTrackHeader,
+.albumDetailTrack {
+  display: grid;
+  grid-template-columns: 2.75rem minmax(8rem, 1.8fr) 4.75rem 4.75rem 5.25rem minmax(6rem, 1fr);
+  align-items: center;
+  justify-items: start;
+  gap: 0.75rem;
+  min-width: 0;
+  text-align: left;
+}
+
+.albumDetailTrackHeader {
+  min-height: 2rem;
+  border-bottom: 0.0625rem solid var(--line);
+  color: var(--tx2);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0 0.75rem;
+  text-transform: uppercase;
+}
+
+.albumDetailTrack {
+  width: 100%;
+  min-height: 2.5rem;
+  border: 0.0625rem solid transparent;
+  border-bottom-color: var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  padding: 0 0.75rem;
+  text-align: left;
+}
+
+.albumDetailTrack strong,
+.albumDetailTrack span {
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.albumDetailTrack strong {
+  color: var(--tx0);
+}
+
+.albumDetailTrack.active,
+.albumDetailTrack:not(:disabled):hover {
+  background: var(--bg2);
+  border-color: var(--line2);
+  box-shadow: none;
+  color: var(--tx0);
+  transform: none;
+}
+
+.albumDetailTrack:not(:disabled):hover strong,
+.albumDetailTrack:not(:disabled):hover span {
+  color: var(--tx0);
+}
+
+.songInfoPanel {
+  display: grid;
+  gap: 0.75rem;
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 10rem);
+  overflow: auto;
+  animation: viewIn var(--med) both;
+}
+
+.songInfoPanel > div > span {
+  color: var(--tx2);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.songInfoPanel table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.songInfoPanel th,
+.songInfoPanel td {
+  border-top: 0.0625rem solid var(--line);
+  padding: 0.4375rem 0;
+  vertical-align: top;
+}
+
+.songInfoPanel th {
+  width: 6.75rem;
+  padding-right: 0.75rem;
+  text-align: left;
+}
+
+.songInfoPanel td {
+  overflow: hidden;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artistHero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(16rem, 0.85fr);
+  min-height: 17rem;
+  overflow: hidden;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+  margin-bottom: 1rem;
+  box-shadow:
+    inset 0 -5rem 5rem rgb(11 13 16 / 78%),
+    inset 0 0 0 0.0625rem rgb(255 255 255 / 3%);
+}
+
+.artistHeroFallback {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.18;
+  filter: blur(1.25rem) saturate(0.9);
+  transform: scale(1.08);
+}
+
+.artistHero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  box-shadow:
+    inset 0 -6rem 5rem var(--bg1),
+    inset 9rem 0 7rem rgb(16 19 26 / 82%);
+}
+
+.artistHeroContent {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 0.625rem;
+  min-height: 17rem;
+  padding: 1.25rem;
+}
+
+.artistHeroAlbums {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  overflow: hidden;
+  padding: 1.25rem;
+}
+
+.artistHeroAlbumArt {
+  flex: 0 0 clamp(5.25rem, 7vw, 7rem);
+  width: clamp(5.25rem, 7vw, 7rem);
+  aspect-ratio: 1;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-s);
+  object-fit: cover;
+  background: var(--bg2);
+  opacity: 0.84;
+  box-shadow: -0.5rem 0 0.875rem rgb(0 0 0 / 26%);
+}
+
+.artistHeroAlbumArt + .artistHeroAlbumArt {
+  margin-left: clamp(-3.25rem, -3.3vw, -2.125rem);
+}
+
+.artistHero h2 {
+  max-width: 11ch;
+  font-size: clamp(2rem, 5vw, 4.5rem);
+  line-height: 0.92;
+}
+
+.artistHero span {
+  color: var(--tx1);
+  font-size: 0.8125rem;
+}
+
+.artistsIndex {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  gap: 0.625rem;
+  min-width: 0;
+  overflow: visible;
+  scrollbar-gutter: stable;
+  padding: 0;
+}
+
+.artistIndexCard {
+  position: relative;
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 6rem;
+  overflow: hidden;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+  color: var(--tx0);
+  padding: 0.625rem;
+  text-align: left;
+}
+
+.artistIndexVisual {
+  position: relative;
+  display: grid;
+  width: 4.5rem;
+  height: 4.5rem;
+  place-items: center;
+  isolation: isolate;
+}
+
+.artistIndexArt {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--bg2);
+}
+
+.artistIndexArt.art1 {
+  z-index: 3;
+  width: 4rem;
+  height: 4rem;
+  border: 0.0625rem solid var(--line2);
+  border-radius: 50%;
+}
+
+.artistIndexArt.art2 {
+  z-index: 2;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  opacity: 0.72;
+  transform: translate(0.75rem, -0.35rem);
+}
+
+.artistIndexArt.art3 {
+  z-index: 1;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 50%;
+  opacity: 0.48;
+  transform: translate(0.55rem, 0.75rem);
+}
+
+.artistIndexInfo {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  justify-items: start;
+  text-align: left;
+}
+
+.artistIndexInfo strong,
+.artistIndexInfo small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artistIndexInfo strong {
+  color: var(--tx0);
+  font-family: "Space Grotesk Variable", "Space Grotesk", sans-serif;
+  font-size: 1.25rem;
+  line-height: 1.05;
+}
+
+.artistIndexInfo small {
+  color: var(--tx1);
+}
+
+.artistIndexCard:not(:disabled):hover {
+  border-color: var(--line2);
+  background: var(--bg2);
+  box-shadow: inset 0 0 0 0.0625rem rgba(255, 255, 255, 0.035);
+}
+
+.artistDetailGrid {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.9fr) minmax(18rem, 1.1fr);
+  gap: 1rem;
+}
+
+.artistDetailGrid h3 {
+  margin: 0 0 0.625rem;
+  color: var(--tx1);
+  font-size: 0.8125rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.artistSongHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.625rem;
+}
+
+.artistSongHeader h3 {
+  margin-bottom: 0.1875rem;
+}
+
+.artistSongHeader > div:first-child {
+  display: grid;
+  min-width: 0;
+}
+
+.artistSongHeader span {
+  color: var(--tx2);
+  font-size: 0.75rem;
+}
+
+.segmentedControl.compact {
+  flex-wrap: nowrap;
+}
+
+.segmentedControl.compact button {
+  min-height: 1.875rem;
+  padding: 0 0.625rem;
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+.artistAlbumList,
+.artistSongList {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.artistAlbumList button {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr);
+  align-items: center;
+  justify-items: start;
+  gap: 0.875rem;
+  min-height: 5rem;
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.artistAlbumThumb {
+  width: 4rem;
+  aspect-ratio: 1;
+  border-radius: var(--r-s);
+  object-fit: cover;
+  background: var(--bg2);
+}
+
+.artistAlbumList button > span {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+  justify-items: start;
+  gap: 0.1875rem;
+}
+
+.artistAlbumList strong,
+.artistSongList strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tx0);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artistAlbumList small,
+.artistSongList small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artistSongList button {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  align-items: center;
+  justify-items: start;
+  gap: 0.625rem;
+  width: 100%;
+  min-height: 3.75rem;
+  border: 0.0625rem solid transparent;
+  border-top-color: var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  padding: 0.5rem 0.625rem;
+  text-align: left;
+}
+
+.artistSongList button:hover {
+  background: var(--bg2);
+  border-color: var(--line2);
+  box-shadow: none;
+  color: var(--tx0);
+  transform: none;
+}
+
+.artistSongList button:hover strong,
+.artistSongList button:hover small {
+  color: var(--tx0);
+}
+
+.artistSongList button > span {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+  justify-items: start;
+  gap: 0.1875rem;
+  text-align: left;
+}
+
+.artistSongThumb {
+  width: 3rem;
+  aspect-ratio: 1;
+  border-radius: var(--r-s);
+  object-fit: cover;
+  background: var(--bg2);
+}
+
+.importItem,
+.operationBatch,
+.playlistItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(7rem, 9.375rem) minmax(8rem, auto);
+  align-items: center;
+  gap: 0.875rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: var(--pad);
+  transition: border-color var(--fast);
+}
+
+.importItem,
+.operationBatch {
+  align-items: start;
+  overflow: visible;
+}
+
+.importItem:hover,
+.operationBatch:hover,
+.playlistItem:hover {
+  border-color: var(--line2);
+}
+
+.importMain,
+.operationBatchMain,
+.playlistMain,
+.discoveryResultMain,
+.importMeta {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.importMain span,
+.operationBatchMain span,
+.playlistMain span,
+.discoveryResultMain span,
+.importMeta span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.importMain span,
+.operationBatchMain span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.operationDetails {
+  display: grid;
+  gap: 0.1875rem;
+}
+
+.playlistTracks,
+.agentResults {
+  display: grid;
+  gap: 0.1875rem;
+  margin-top: 0.375rem;
+}
+
+.playlistEditForm {
+  display: grid;
+  grid-template-columns: minmax(8.75rem, 0.7fr) minmax(11.25rem, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.playlistEditForm input {
+  height: 2rem;
+  padding: 0 0.5rem;
+}
+
+.playlistEditForm button {
+  height: 2rem;
+  white-space: nowrap;
+}
+
+.playlistTrackRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.playlistTrackRow span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playlistTrackRow button {
+  padding: 0.25rem 0.5rem;
+}
+
+/* ------------------------------------------------------------
+   Duplicates / cleanup
+   ------------------------------------------------------------ */
+
+.duplicatesSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.125rem, 1fr));
+  gap: 0.625rem;
+  margin-bottom: 0.75rem;
+}
+
+.duplicatesSummary div {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+}
+
+.duplicatesSummary strong {
+  font-family: "Space Grotesk Variable", "Space Grotesk", sans-serif;
+  font-size: 1.375rem;
+}
+
+.duplicatesSummary span {
+  color: var(--tx2);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.duplicatesList {
+  display: grid;
+  gap: 0.625rem;
+  max-height: calc((100vh - 20.625rem) / 5);
+  min-height: 6.75rem;
+  overflow: auto;
+}
+
+.cleanupSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.cleanupSectionHeader h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.cleanupSectionHeader p {
+  margin: 0.1875rem 0 0;
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.duplicateGroup {
+  display: grid;
+  gap: 0.5rem;
+  padding: var(--pad);
+}
+
+.duplicateGroupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.875rem;
+  min-width: 0;
+}
+
+.duplicateGroupHeader div {
+  display: grid;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+
+.duplicateGroupHeader span {
+  overflow: hidden;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duplicateRecommendation {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.625rem;
+  align-items: center;
+  border: 0.0625rem solid var(--ok-line);
+  border-radius: var(--r-s);
+  background: var(--acc-dim);
+  padding: 0.5rem 0.625rem;
+}
+
+.duplicateRecommendation span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.duplicateRecommendation strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duplicateFiles {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.duplicateFile {
+  display: grid;
+  gap: 0.1875rem;
+  border-top: 0.0625rem solid var(--line);
+  padding-top: 0.5rem;
+}
+
+.duplicateFile strong,
+.duplicateFile span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duplicateFile span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.duplicateFileKept strong {
+  color: var(--acc);
+}
+
+.metadataGapItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(11.25rem, auto) minmax(13.75rem, 0.55fr) auto;
+  gap: 0.625rem;
+  align-items: center;
+  padding: var(--pad);
+}
+
+.metadataGapItem > div:first-child,
+.metadataGapSuggestion {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.metadataGapItem strong,
+.metadataGapItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metadataGapItem span,
+.metadataGapSuggestion span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.metadataGapFields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.qualityUpgradeItem {
+  display: grid;
+  gap: 0.5rem;
+  padding: var(--pad);
+}
+
+.qualityUpgradeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.qualityUpgradeHeader div {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.qualityUpgradeHeader strong,
+.qualityUpgradeHeader span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qualityUpgradeHeader span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.qualityUpgradeRows {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.qualityUpgradeRow {
+  display: grid;
+  grid-template-columns: 6.875rem minmax(0, 1fr) minmax(10rem, 0.35fr);
+  gap: 0.625rem;
+  align-items: center;
+  border-top: 0.0625rem solid var(--line);
+  padding-top: 0.4375rem;
+}
+
+.qualityUpgradeRow span,
+.qualityUpgradeRow strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qualityUpgradeRow span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.qualityUpgradeRow.preferred strong {
+  color: var(--acc);
+}
+
+/* ------------------------------------------------------------
+   Agent
+   ------------------------------------------------------------ */
+
+.agentView {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 0.75rem;
+  height: calc(100vh - 9.375rem);
+  min-height: 20rem;
+}
+
+.agentThreadBar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.625rem;
+}
+
+.agentThreadBar label {
+  display: grid;
+  gap: 0.3125rem;
+  min-width: 0;
+}
+
+.agentTranscript {
+  display: grid;
+  align-content: start;
+  gap: 0.625rem;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg0);
+  padding: 0.75rem;
+}
+
+.agentMessage {
+  display: grid;
+  gap: 0.3125rem;
+  max-width: min(47.5rem, 86%);
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+  padding: var(--pad);
+  animation: viewIn var(--med) both;
+}
+
+.agentMessage.user {
+  justify-self: end;
+  border-color: var(--ok-line);
+  background: var(--acc-dim);
+}
+
+.agentMessage span,
+.agentResultSummary span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.agentMessage strong {
+  color: var(--tx0);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.agentResultSummary {
+  display: grid;
+  gap: 0.375rem;
+  border-top: 0.0625rem solid var(--line);
+  padding-top: 0.5rem;
+}
+
+.agentComposer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  padding: var(--pad);
+}
+
+.agentQuickPrompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.agentQuickPrompts button {
+  height: 1.875rem;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-s);
+  background: var(--bg2);
+  color: var(--tx1);
+  cursor: pointer;
+  padding: 0 0.625rem;
+  font-size: 0.75rem;
+}
+
+.agentQuickPrompts button:not(:disabled):hover {
+  border-color: var(--acc-line);
+  color: var(--tx0);
+}
+
+.agentQuickPrompts button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+/* ------------------------------------------------------------
+   Notices
+   ------------------------------------------------------------ */
+
+.warningText,
+.inlineError {
+  color: var(--warn);
+}
+
+.inlineError {
+  margin-bottom: 0.625rem;
+  border: 0.0625rem solid var(--warn-line);
+  border-left-width: 0.1875rem;
+  border-radius: var(--r-s);
+  background: rgba(255, 196, 107, 0.07);
+  padding: 0.5rem 0.625rem;
+  font-size: 0.8125rem;
+  animation: viewIn var(--med) both;
+}
+
+.inlineNotice {
+  margin-bottom: 0.625rem;
+  border: 0.0625rem solid var(--ok-line);
+  border-left-width: 0.1875rem;
+  border-radius: var(--r-s);
+  background: var(--acc-dim);
+  color: var(--tx0);
+  padding: 0.5rem 0.625rem;
+  font-size: 0.8125rem;
+  animation: viewIn var(--med) both;
+}
+
+.placeholderView {
+  display: grid;
+  height: calc(100vh - 10.625rem);
+  place-items: center;
+  color: var(--tx1);
+}
+
+/* ------------------------------------------------------------
+   Inspector
+   ------------------------------------------------------------ */
+
+.inspector {
+  border-left: 0.0625rem solid var(--line);
+  padding: 1.375rem 1rem;
+  overflow: hidden auto;
+  animation: inspectorExpand var(--med) both;
+}
+
+.inspector.collapsed {
+  display: grid;
+  place-items: start center;
+  padding: 1rem 0.5rem;
+  overflow: hidden;
+  animation: inspectorCollapse var(--med) both;
+}
+
+.inspectorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.inspectorHeader h2 {
+  min-width: 0;
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity var(--fast);
+  white-space: nowrap;
+}
+
+.inspector.collapsed .inspectorHeader {
+  justify-content: center;
+}
+
+.inspector.collapsed .inspectorHeader h2 {
+  width: 0;
+  opacity: 0;
+}
+
+.inspectorToggle {
+  flex: none;
+  height: 2rem;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-m);
+  background: var(--bg2);
+  color: var(--tx1);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0 0.625rem;
+}
+
+.inspectorToggle:not(:disabled):hover {
+  border-color: var(--acc-line);
+  color: var(--tx0);
+}
+
+.inspector.collapsed .inspectorToggle {
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+}
+
+.inspectorToggle svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+@keyframes inspectorCollapse {
+  from {
+    opacity: 0.72;
+    transform: translateX(0.375rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes inspectorExpand {
+  from {
+    opacity: 0.72;
+    transform: translateX(0.375rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.agentPanel {
+  display: grid;
+  gap: 0.875rem;
+  margin-top: 1rem;
+  min-width: 15.5rem;
+  opacity: 1;
+  transform: translateX(0);
+  transition:
+    opacity var(--fast),
+    transform var(--med),
+    visibility var(--fast);
+}
+
+.inspector.collapsed .agentPanel {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(0.5rem);
+}
+
+.operationPreview {
+  display: grid;
+  gap: 0.375rem;
+  padding: 0.75rem;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg2);
+}
+
+.metric {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 0.0625rem solid var(--line);
+  font-size: 0.8125rem;
+}
+
+.metric span {
+  color: var(--tx1);
+}
+
+.metric strong {
+  font-family: "Space Grotesk Variable", "Space Grotesk", sans-serif;
+  font-size: 0.9375rem;
+}
+
+.operationPreview span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+/* ------------------------------------------------------------
+   Player bar
+   ------------------------------------------------------------ */
+
+.playerBar {
+  grid-column: 2 / 4;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 5.25rem;
+  border-top: 0.0625rem solid var(--line);
+  background: var(--bg1);
+  overflow: hidden;
+}
+
+.progressSeek {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 0;
+  height: 0.875rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.progressSeek:not(:disabled):hover,
+.progressSeek:not(:disabled):active {
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+  transform: none;
+}
+
+.progressSeek:disabled {
+  cursor: default;
+}
+
+.progressTrack {
+  position: absolute;
+  inset: 0.3125rem 0;
+  overflow: hidden;
+  border-top: 0.0625rem solid var(--line2);
+  border-bottom: 0.0625rem solid var(--line);
+  border-radius: var(--r-s);
+  background: var(--bg3);
+  transition:
+    background-color var(--fast),
+    border-color var(--fast);
+}
+
+.progressFill {
+  position: relative;
+  height: 100%;
+  background: var(--acc);
+  transition: width 180ms linear;
+}
+
+.progressFill::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  background: var(--tx0);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition:
+    opacity var(--fast),
+    background-color var(--fast);
+}
+
+.progressSeek:not(:disabled):hover .progressTrack,
+.progressSeek:focus-visible .progressTrack {
+  border-top-color: var(--acc-line);
+  border-bottom-color: var(--acc-line);
+  background: var(--bg2);
+}
+
+.progressSeek:not(:disabled):hover .progressFill::after,
+.progressSeek:focus-visible .progressFill::after {
+  opacity: 0.9;
+}
+
+.playerBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 1.5rem;
+  min-width: 0;
+  padding: 0.375rem 1.375rem 0.625rem;
+}
+
+.nowPlaying {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  justify-content: start;
+  padding: 0;
+  text-align: left;
+}
+
+.nowPlaying:not(:disabled):hover {
+  background: transparent;
+  box-shadow: none;
+}
+
+.nowPlaying:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.playerGlyph {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: none;
+  overflow: hidden;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-s);
+  background: var(--bg2);
+  color: var(--tx2);
+  transition:
+    border-color var(--fast),
+    color var(--fast);
+}
+
+img.playerArt {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.playerGlyph span.playerArt {
+  display: none;
+}
+
+.playerGlyph.live {
+  border-color: var(--acc-line);
+  color: var(--acc);
+}
+
+.playerGlyph.live .eqBar {
+  animation: eq 900ms ease-in-out infinite;
+}
+
+.playerGlyph .eqBar:nth-child(2) {
+  animation-delay: 150ms;
+}
+
+.playerGlyph .eqBar:nth-child(3) {
+  animation-delay: 320ms;
+}
+
+@keyframes eq {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.eqBars {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.1875rem;
+  height: 1rem;
+}
+
+.eqBar {
+  width: 0.1875rem;
+  height: 100%;
+  background: currentColor;
+  transform: scaleY(0.35);
+  transform-origin: bottom;
+}
+
+.nowPlayingText {
+  display: grid;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.nowPlayingText strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nowPlayingText .npMeta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tx2);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.npStatusDot {
+  width: 0.375rem;
+  height: 0.375rem;
+  flex: none;
+  border-radius: 50%;
+  background: var(--tx2);
+}
+
+.npStatusDot.playing {
+  background: var(--acc);
+  animation: pulseDot 1.6s ease-in-out infinite;
+}
+
+.npStatusDot.paused {
+  background: var(--warn);
+}
+
+.playerError {
+  max-width: 45rem;
+  overflow: hidden;
+  color: var(--danger);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  min-width: max-content;
+  justify-self: center;
+}
+
+.transport button {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-s);
+  background: var(--bg2);
+  color: var(--tx1);
+  cursor: pointer;
+  padding: 0;
+}
+
+.transport button svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+}
+
+.transport button:not(:disabled):hover {
+  border-color: var(--tx2);
+  color: var(--tx0);
+}
+
+.transport button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.transport button.tPlay {
+  width: 2.75rem;
+  border-color: var(--acc);
+  background: var(--acc);
+  color: var(--acc-ink);
+}
+
+.transport button.tPlay:not(:disabled):hover {
+  background: #d4ff5e;
+  color: var(--acc-ink);
+}
+
+.playerAuxControls {
+  display: grid;
+  justify-items: end;
+  gap: 0.3125rem;
+  min-width: 0;
+}
+
+.nowPlayingActions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.nowPlayingActions.bar {
+  justify-self: end;
+}
+
+.nowPlayingActions.modal {
+  justify-self: start;
+  margin-top: 0.375rem;
+}
+
+.favoriteControls,
+.starControls {
+  display: flex;
+  align-items: center;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+
+.nowPlayingActions button {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  min-height: 0;
+  border: 0;
+  border-radius: var(--r-s);
+  background: transparent;
+  box-shadow: none;
+  color: var(--tx2);
+  cursor: pointer;
+  padding: 0;
+}
+
+.nowPlayingActions.modal button {
+  width: 1.875rem;
+  height: 1.875rem;
+}
+
+.nowPlayingActions button svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  fill: currentColor;
+}
+
+.nowPlayingActions.modal button svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.nowPlayingActions button svg[fill="none"] {
+  fill: none;
+}
+
+.nowPlayingActions button:not(:disabled):hover {
+  background: var(--bg2);
+  color: var(--tx0);
+}
+
+.favoriteControls button.active,
+.starControls button.active {
+  color: var(--acc);
+}
+
+.favoriteControls button:nth-child(2).active {
+  color: var(--danger);
+}
+
+.volumeControl {
+  display: grid;
+  grid-template-columns: auto minmax(5.5rem, 8rem) 2rem;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  color: var(--tx1);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.volumeIcon {
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  color: var(--tx1);
+}
+
+.volumeIcon svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.volumeControl input[type="range"] {
+  appearance: none;
+  display: block;
+  align-self: center;
+  width: 100%;
+  height: 1rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.volumeControl input[type="range"]:focus {
+  box-shadow: none;
+}
+
+.volumeControl input[type="range"]::-webkit-slider-runnable-track {
+  height: 0.375rem;
+  border: 0.0625rem solid var(--line2);
+  border-radius: 999px;
+  background: var(--bg3);
+}
+
+.volumeControl input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 0.625rem;
+  height: 0.625rem;
+  margin-top: -0.125rem;
+  border: 0.0625rem solid var(--acc-line);
+  border-radius: 50%;
+  background: var(--bg1);
+}
+
+.volumeControl input[type="range"]::-moz-range-track {
+  height: 0.375rem;
+  border: 0.0625rem solid var(--line2);
+  border-radius: 999px;
+  background: var(--bg3);
+}
+
+.volumeControl input[type="range"]::-moz-range-thumb {
+  width: 0.625rem;
+  height: 0.625rem;
+  border: 0.0625rem solid var(--acc-line);
+  border-radius: 50%;
+  background: var(--bg1);
+}
+
+.volumeControl strong {
+  color: var(--tx0);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.playerTime {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.375rem;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.playerTime .timeSep {
+  color: var(--tx2);
+}
+
+.queueBadge {
+  margin-left: 0.625rem;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-s);
+  background: var(--bg2);
+  color: var(--tx2);
+  font-size: 0.6875rem;
+  padding: 0.125rem 0.4375rem;
+}
+
+/* legacy rails used by Albums/Playlists list previews */
+
+.progressRail {
+  display: block;
+  width: 100%;
+  height: 0.25rem;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--r-s);
+  background: var(--bg3);
+  padding: 0;
+}
+
+.progressRail .progressFill {
+  position: static;
+  height: 100%;
+}
+
+/* ------------------------------------------------------------
+   Modals
+   ------------------------------------------------------------ */
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgb(5 6 8 / 78%);
+  padding: 1.5rem;
+  animation: fadeIn var(--fast) both;
+}
+
+.nowPlayingModal {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(18rem, 0.9fr) minmax(20rem, 1.1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 1rem;
+  width: min(70rem, 100%);
+  max-height: min(47.5rem, calc(100vh - 3rem));
+  min-height: min(37.5rem, calc(100vh - 3rem));
+  overflow: hidden;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+  padding: 1rem;
+  box-shadow: 0 1.125rem 5rem rgb(0 0 0 / 50%);
+  animation: modalIn var(--med) both;
+}
+
+.modalClose {
+  flex: none;
+  min-height: 2rem;
+  padding: 0 0.625rem;
+}
+
+.nowPlayingHero {
+  display: grid;
+  grid-template-rows: auto minmax(0, auto);
+  align-content: start;
+  gap: 1rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+.nowPlayingModalArt {
+  width: 100%;
+  aspect-ratio: 1;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg2);
+  object-fit: cover;
+}
+
+.nowPlayingModalArt.placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--tx2);
+}
+
+.nowPlayingModalArt.placeholder svg {
+  width: 4rem;
+  height: 4rem;
+}
+
+.nowPlayingModalInfo {
+  display: grid;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.nowPlayingModalInfo > span {
+  color: var(--acc);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nowPlayingModalInfo h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: "Space Grotesk Variable", "Space Grotesk", sans-serif;
+  font-size: 1.75rem;
+  line-height: 1.05;
+}
+
+.nowPlayingModalInfo small {
+  color: var(--tx1);
+}
+
+.nowPlayingModalTime {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.375rem;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.modalTransport {
+  justify-self: center;
+  margin-top: 0.375rem;
+}
+
+.nowPlayingQueue {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg0);
+  padding: var(--pad);
+}
+
+.nowPlayingQueue header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.nowPlayingQueue header > div {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.nowPlayingQueue header span {
+  color: var(--tx2);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.queueRows {
+  display: grid;
+  align-content: start;
+  gap: 0.375rem;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.queueRow {
+  display: grid;
+  grid-template-columns: 2rem 2.5rem minmax(0, 1fr) minmax(2.5rem, auto);
+  align-items: center;
+  justify-items: start;
+  gap: 0.625rem;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 3.25rem;
+  overflow: hidden;
+  border: 0.0625rem solid transparent;
+  border-radius: var(--r-s);
+  background: transparent;
+  box-shadow: none;
+  color: var(--tx1);
+  padding: 0.3125rem 0.5rem;
+  text-align: left;
+}
+
+.queueRow.active,
+.queueRow:not(:disabled):hover {
+  border-color: var(--line2);
+  background: var(--bg1);
+}
+
+.queueRow.active {
+  color: var(--tx0);
+}
+
+.queueArt {
+  display: block;
+  min-width: 0;
+  width: 2.5rem;
+  aspect-ratio: 1;
+  border-radius: var(--r-s);
+  object-fit: cover;
+  background: var(--bg2);
+}
+
+.queueRow > span:nth-child(3) {
+  display: grid;
+  justify-items: start;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  gap: 0.125rem;
+}
+
+.queueRow strong,
+.queueRow small {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.queueRow small {
+  color: var(--tx2);
+}
+
+.queueRow > small {
+  justify-self: end;
+  text-align: right;
+}
+
+.metadataEditor {
+  display: grid;
+  gap: 1rem;
+  width: min(45rem, 100%);
+  max-height: min(47.5rem, calc(100vh - 3rem));
+  overflow: auto;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+  padding: 1.125rem;
+  box-shadow: 0 1.125rem 5rem rgb(0 0 0 / 50%);
+  animation: modalIn var(--med) both;
+}
+
+.diagnosticsPanel {
+  display: grid;
+  gap: 1rem;
+  width: min(56.25rem, 100%);
+  max-height: min(51.25rem, calc(100vh - 3rem));
+  overflow: hidden;
+  border: 0.0625rem solid var(--line2);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+  padding: 1.125rem;
+  box-shadow: 0 1.125rem 5rem rgb(0 0 0 / 50%);
+  animation: modalIn var(--med) both;
+}
+
+.metadataEditorHeader,
+.metadataEditorFooter {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.875rem;
+}
+
+.importMetadataEditor {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 0.625rem;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg0);
+  padding: var(--pad);
+}
+
+.metadataEditorHeader div {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.metadataEditorHeader span {
+  overflow: hidden;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metadataFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.metadataFields label,
+.importMetadataEditor label {
+  display: grid;
+  gap: 0.375rem;
+  color: var(--tx1);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.diagnosticsBody {
+  display: grid;
+  gap: 0.875rem;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
+.diagnosticsSummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.625rem;
+}
+
+.diagnosticsSummary div {
+  display: grid;
+  gap: 0.25rem;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg0);
+  padding: var(--pad);
+}
+
+.diagnosticsSummary span,
+.diagnosticsKv span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.diagnosticsSection {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.diagnosticsSection h3 {
+  margin: 0;
+  color: var(--tx1);
+  font-size: 0.8125rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.diagnosticsKv {
+  display: grid;
+  grid-template-columns: 6.875rem minmax(0, 1fr);
+  gap: 0.4375rem 0.75rem;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg0);
+  padding: var(--pad);
+}
+
+.diagnosticsKv strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tagTable,
+.candidateTable {
+  display: grid;
+  overflow: hidden;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+}
+
+.tagRow {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 0.32fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.4375rem 0.625rem;
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg0);
+  font-size: 0.75rem;
+}
+
+.candidateRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.5rem 0.625rem;
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg0);
+  font-size: 0.75rem;
+}
+
+.candidateRow div {
+  display: grid;
+  min-width: 0;
+  gap: 0.1875rem;
+}
+
+.tagRow:last-child,
+.candidateRow:last-child {
+  border-bottom: 0;
+}
+
+.tagRow span,
+.candidateRow span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tx1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tagRow strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tx0);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidateRow strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tx0);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagnosticsEmpty {
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg0);
+  color: var(--tx1);
+  padding: var(--pad);
+  font-size: 0.75rem;
+}
+
+/* ------------------------------------------------------------
+   Narrow layout
+   ------------------------------------------------------------ */
+
+@media (max-width: 86rem) {
+  .albumTrackHeader,
+  .albumTrackRow {
+    grid-template-columns: 1.75rem 2rem 2rem minmax(10rem, 1fr) minmax(3.25rem, 0.35fr) minmax(4.25rem, 0.42fr) 15.5rem;
+  }
+
+  .albumTrackHeader span:nth-child(7),
+  .albumTrackHeader span:nth-child(8),
+  .albumTrackHeader span:nth-child(9),
+  .albumTrackRow > span:nth-child(7),
+  .albumTrackRow > span:nth-child(8),
+  .albumTrackRow > span:nth-child(9) {
+    display: none;
+  }
+}
+
+@media (max-width: 61.25rem) {
+  .appShell {
+    grid-template-columns: 11.25rem minmax(0, 1fr);
+  }
+
+  .inspector {
+    display: none;
+  }
+
+  .playerBar {
+    grid-column: 2;
+  }
+
+  .playerBody {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .playerTime {
+    display: none;
+  }
+
+  .gridHeader,
+  .gridRow {
+    grid-template-columns: 3.25rem 4rem minmax(10rem, 2fr) minmax(7.5rem, 1.4fr) minmax(7.5rem, 1.6fr) 11.125rem;
+  }
+
+  .gridHeader span:nth-child(6),
+  .gridHeader span:nth-child(7),
+  .gridHeader span:nth-child(8),
+  .gridRow span:nth-child(6),
+  .gridRow span:nth-child(7),
+  .gridRow span:nth-child(8) {
+    display: none;
+  }
+
+  .libraryAlbumGroup {
+    grid-template-columns: 4rem minmax(0, 1fr);
+  }
+
+  .albumGroupArt {
+    width: 4rem;
+  }
+
+  .albumTrackHeader,
+  .albumTrackRow {
+    grid-template-columns: 1.75rem 2rem 2rem minmax(9rem, 1fr) 15.5rem;
+  }
+
+  .albumTrackHeader span:nth-child(5),
+  .albumTrackHeader span:nth-child(6),
+  .albumTrackHeader span:nth-child(7),
+  .albumTrackHeader span:nth-child(8),
+  .albumTrackHeader span:nth-child(9),
+  .albumTrackRow > span:nth-child(5),
+  .albumTrackRow > span:nth-child(6),
+  .albumTrackRow > span:nth-child(7),
+  .albumTrackRow > span:nth-child(8),
+  .albumTrackRow > span:nth-child(9) {
+    display: none;
+  }
+
+  .libraryCommandBar {
+    flex-wrap: wrap;
+  }
+
+  .libraryRefiners {
+    grid-template-columns: 1fr;
+  }
+
+  .libraryFilterGrid,
+  .discoveryRefiners {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rootItem {
+    grid-template-columns: 2rem minmax(0, 1fr);
+  }
+
+  .rootActions {
+    grid-column: 1 / -1;
+    margin-left: 0;
+  }
+
+  .bulkActionBar,
+  .bulkPlaylistForm,
+  .bulkTagForm {
+    grid-template-columns: 1fr;
+  }
+
+  .bulkActionBar > div,
+  .bulkTagForm {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .albumDetailShell,
+  .artistDetailGrid,
+  .artistHero,
+  .nowPlayingModal {
+    grid-template-columns: 1fr;
+  }
+
+  .artistHeroAlbums {
+    grid-row: 1;
+    overflow: hidden;
+    padding-bottom: 0;
+  }
+
+  .artistHeroContent {
+    grid-row: 2;
+    min-height: auto;
+    padding-top: 0;
+  }
+
+  .nowPlayingModal {
+    overflow: auto;
+  }
+
+  .albumViewToolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .albumFacetControls {
+    grid-template-columns: 1fr;
+  }
+
+  .segmentedControl {
+    width: 100%;
+  }
+
+  .segmentedControl button {
+    flex: 1;
+  }
+
+  .albumDetailInfo,
+  .songInfoPanel {
+    position: static;
+    max-height: none;
+  }
+
+  .albumDetailTrackHeader,
+  .albumDetailTrack {
+    grid-template-columns: 2.5rem minmax(8rem, 1fr) 4.75rem 5.25rem;
+  }
+
+  .albumDetailTrackHeader span:nth-child(4),
+  .albumDetailTrackHeader span:nth-child(6),
+  .albumDetailTrack span:nth-child(4),
+  .albumDetailTrack span:nth-child(6) {
+    display: none;
+  }
+
+  .metadataFields,
+  .diagnosticsSummary,
+  .tagRow,
+  .importMetadataEditor {
+    grid-template-columns: 1fr;
+  }
+}

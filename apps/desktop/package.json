@@ -1,0 +1,31 @@
+{
+  "name": "@music-os/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build && vite build --config vite.main.config.ts && vite build --config vite.main.config.ts --mode preload",
+    "discovery-candidates:smoke": "tsx src/scripts/discovery-candidates-smoke.ts",
+    "electron-health:smoke": "tsx src/scripts/electron-health-smoke.tsx",
+    "playback-progress:smoke": "tsx src/scripts/playback-progress-smoke.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@fontsource-variable/space-grotesk": "^5.2.10",
+    "@music-os/core": "0.1.0",
+    "electron": "^31.7.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.25.46"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.16",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.5.0",
+    "typescript": "^5.8.3",
+    "vite": "^5.4.19"
+  }
+}
