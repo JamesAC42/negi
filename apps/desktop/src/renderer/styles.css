@@ -9,6 +9,7 @@
   --bg1: #10131a;
   --bg2: #151923;
   --bg3: #1b2130;
+  --app-bg-opacity: 0.72;
   --center-bg-tint: rgba(11, 13, 16, 0.78);
   --center-bg-vignette: rgba(11, 13, 16, 0.96);
   --line: #1f2633;
@@ -478,6 +479,7 @@ h2 {
    ------------------------------------------------------------ */
 
 .appShell {
+  position: relative;
   display: grid;
   grid-template-columns: 13.5rem minmax(32.5rem, 1fr) 19rem;
   grid-template-rows: minmax(0, 1fr) auto;
@@ -485,6 +487,7 @@ h2 {
   height: 100%;
   overflow: hidden;
   background: var(--bg0);
+  color: var(--tx0);
   transition: grid-template-columns var(--med);
 }
 
@@ -499,6 +502,7 @@ h2 {
 }
 
 .sidebar {
+  grid-column: 1;
   grid-row: 1 / 3;
   display: flex;
   flex-direction: column;
@@ -582,9 +586,45 @@ h2 {
   transform: scale(1.08);
 }
 
+.appBackground {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.appBackground::before,
+.appBackground::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.appBackground::before {
+  inset: -1.5rem;
+  background-image: var(--app-bg-image);
+  background-position: center;
+  background-size: cover;
+  filter: blur(1rem) saturate(0.94);
+  opacity: var(--app-bg-opacity);
+  transform: scale(1.04);
+  transform-origin: center;
+}
+
+.appBackground::after {
+  background: linear-gradient(135deg, var(--center-bg-vignette), var(--center-bg-tint) 44%, var(--center-bg-vignette));
+}
+
 .centerPane {
   position: relative;
   isolation: isolate;
+  grid-column: 2;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   --bg0: var(--panel-bg0);
@@ -598,32 +638,7 @@ h2 {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-}
-
-.centerPane::before,
-.centerPane::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -2;
-  pointer-events: none;
-}
-
-.centerPane::before {
-  inset: 0;
-  background-image: var(--app-bg-image);
-  background-attachment: fixed;
-  background-position: center;
-  background-size: cover;
-  filter: blur(1rem) saturate(0.9);
-  opacity: 0.54;
-  transform: scale(1.04);
-  transform-origin: center;
-}
-
-.centerPane::after {
-  z-index: -1;
-  background: linear-gradient(135deg, var(--center-bg-vignette), var(--center-bg-tint) 44%, var(--center-bg-vignette));
+  z-index: 1;
 }
 
 .centerPane > * {
@@ -646,6 +661,19 @@ h2 {
   gap: 1.5rem;
   padding-bottom: 1.125rem;
   animation: viewIn var(--med) both;
+}
+
+.toolbar h1,
+.toolbar h2,
+.health,
+.settingsHeader strong,
+.settingsPanel strong,
+.backgroundPicker strong,
+.nowPlayingText strong,
+.nowPlayingModalInfo h2,
+.nowPlayingModalInfo strong,
+.nowPlayingQueue header strong {
+  color: var(--tx0);
 }
 
 .health {
@@ -3770,6 +3798,8 @@ span.artFallback svg {
    ------------------------------------------------------------ */
 
 .inspector {
+  grid-column: 3;
+  grid-row: 1;
   border-left: 0.0625rem solid var(--line);
   padding: 1.375rem 1rem;
   overflow: hidden auto;
@@ -3829,12 +3859,16 @@ span.artFallback svg {
 .inspector.collapsed .inspectorToggle {
   width: 2.5rem;
   height: 2.5rem;
+  border-color: var(--line2);
+  background: var(--bg2);
+  color: var(--tx0);
   padding: 0;
 }
 
 .inspectorToggle svg {
   width: 1rem;
   height: 1rem;
+  color: currentColor;
 }
 
 @keyframes inspectorCollapse {

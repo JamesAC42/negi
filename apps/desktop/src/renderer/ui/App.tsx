@@ -2014,6 +2014,8 @@ export function App(): ReactElement {
         </nav>
       </aside>
 
+      <div className="appBackground" aria-hidden="true" />
+
       <section className="centerPane">
         <header className="toolbar">
           <div>
@@ -7674,8 +7676,9 @@ function getDarkThemeVariables(): Record<string, string> {
     "--bg1": "#10131a",
     "--bg2": "#151923",
     "--bg3": "#1b2130",
-    "--center-bg-tint": "rgba(11, 13, 16, 0.78)",
-    "--center-bg-vignette": "rgba(11, 13, 16, 0.96)",
+    "--app-bg-opacity": "0.72",
+    "--center-bg-tint": "rgba(11, 13, 16, 0.54)",
+    "--center-bg-vignette": "rgba(11, 13, 16, 0.82)",
     "--line": "#1f2633",
     "--line2": "#2b3445",
     "--panel-bg0": "rgba(11, 13, 16, 0.91)",
@@ -7694,8 +7697,9 @@ function getLightThemeVariables(): Record<string, string> {
     "--bg1": "#f8faf6",
     "--bg2": "#eef2ec",
     "--bg3": "#e4eadf",
-    "--center-bg-tint": "rgba(238, 241, 237, 0.76)",
-    "--center-bg-vignette": "rgba(238, 241, 237, 0.96)",
+    "--app-bg-opacity": "0.68",
+    "--center-bg-tint": "rgba(238, 241, 237, 0.58)",
+    "--center-bg-vignette": "rgba(238, 241, 237, 0.84)",
     "--line": "#d8dfd4",
     "--line2": "#c1ccbd",
     "--panel-bg0": "rgba(238, 241, 237, 0.9)",
@@ -7735,6 +7739,10 @@ function normalizeSavedBackgroundImage(value: unknown): SavedBackgroundImage | n
 
 function pathToBackgroundUrl(path: string): string {
   const normalized = path.replaceAll("\\", "/");
+  const wslDrivePath = normalized.match(/^\/mnt\/([a-zA-Z])\/(.*)$/);
+  if (wslDrivePath) {
+    return encodeURI(`file:///${wslDrivePath[1].toUpperCase()}:/${wslDrivePath[2]}`);
+  }
   const drivePath = normalized.match(/^([a-zA-Z]):\/(.*)$/);
   if (drivePath) {
     return encodeURI(`file:///${drivePath[1]}:/${drivePath[2]}`);
