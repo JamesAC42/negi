@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -47,7 +47,11 @@ ipcMain.handle("dialog:select-background-image", async () => {
   if (result.canceled || result.filePaths.length === 0) {
     return null;
   }
-  return toWslPath(result.filePaths[0]);
+  const path = result.filePaths[0];
+  return {
+    path: toWslPath(path),
+    url: pathToFileURL(path).href
+  };
 });
 
 async function createWindow(): Promise<void> {

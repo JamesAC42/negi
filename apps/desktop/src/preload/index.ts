@@ -4,12 +4,17 @@ import { healthResponseSchema, type HealthResponse } from "@music-os/core";
 const backendHost = process.env.MUSIC_OS_HOST ?? "127.0.0.1";
 const backendPort = Number(process.env.MUSIC_OS_PORT ?? 47831);
 
+export interface BackgroundImageSelection {
+  path: string;
+  url: string;
+}
+
 export interface MusicOsBridge {
   health(): Promise<HealthResponse>;
   selectLibraryFolder(): Promise<string | null>;
   selectImportFiles(): Promise<string[]>;
   selectImportFolder(): Promise<string[]>;
-  selectBackgroundImage(): Promise<string | null>;
+  selectBackgroundImage(): Promise<BackgroundImageSelection | null>;
 }
 
 const bridge: MusicOsBridge = {
@@ -30,7 +35,7 @@ const bridge: MusicOsBridge = {
     return ipcRenderer.invoke("dialog:select-import-folder") as Promise<string[]>;
   },
   async selectBackgroundImage() {
-    return ipcRenderer.invoke("dialog:select-background-image") as Promise<string | null>;
+    return ipcRenderer.invoke("dialog:select-background-image") as Promise<BackgroundImageSelection | null>;
   }
 };
 

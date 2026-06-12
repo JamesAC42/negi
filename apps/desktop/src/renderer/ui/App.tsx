@@ -215,10 +215,12 @@ type ArtistSongSortMode = "listens" | "ranking" | "albumYear";
 type AppearanceMode = "dark" | "light";
 type AccentColorId = "lime" | "cyan" | "amber" | "rose" | "violet";
 type DisplayFontId = "space" | "mono" | "system" | "wide";
-type SavedBackgroundImage = { id: string; name: string; path: string; addedAt: string };
+type SelectedBackgroundImage = { path: string; url: string };
+type SavedBackgroundImage = { id: string; name: string; path: string; url: string; addedAt: string };
 type AppearanceSettings = {
   accent: AccentColorId;
   backgroundImagePath: string | null;
+  backgroundImageUrl: string | null;
   backgroundImages: SavedBackgroundImage[];
   displayFont: DisplayFontId;
   mode: AppearanceMode;
@@ -263,6 +265,7 @@ const appearanceStorageKey = "music-os:appearance:v1";
 const defaultAppearanceSettings: AppearanceSettings = {
   accent: "lime",
   backgroundImagePath: null,
+  backgroundImageUrl: null,
   backgroundImages: [],
   displayFont: "space",
   mode: "dark"
@@ -1563,22 +1566,24 @@ export function App(): ReactElement {
   }
 
   async function handleSelectBackgroundImage(): Promise<void> {
-    const path = await window.musicOs?.selectBackgroundImage();
-    if (!path) {
+    const image = (await window.musicOs?.selectBackgroundImage()) as SelectedBackgroundImage | null | undefined;
+    if (!image) {
       return;
     }
 
     setAppearance((current) => {
-      const existing = current.backgroundImages.filter((image) => image.path !== path);
+      const existing = current.backgroundImages.filter((item) => item.path !== image.path);
       const nextImage: SavedBackgroundImage = {
         id: crypto.randomUUID(),
-        name: basenameFromPath(path),
-        path,
+        name: basenameFromPath(image.path),
+        path: image.path,
+        url: image.url,
         addedAt: new Date().toISOString()
       };
       return {
         ...current,
-        backgroundImagePath: path,
+        backgroundImagePath: image.path,
+        backgroundImageUrl: image.url,
         backgroundImages: [nextImage, ...existing].slice(0, 12)
       };
     });
@@ -4338,7 +4343,7 @@ function SettingsView({
             className="secondary"
             disabled={!appearance.backgroundImagePath}
             type="button"
-            onClick={() => setAppearance((current) => ({ ...current, backgroundImagePath: null }))}
+            onClick={() => setAppearance((current) => ({ ...current, backgroundImagePath: null, backgroundImageUrl: null }))}
           >
             Clear
           </button>
@@ -4347,7 +4352,10 @@ function SettingsView({
           <div className="backgroundHistory" aria-label="Saved background images">
             {appearance.backgroundImages.map((image) => (
               <div className={appearance.backgroundImagePath === image.path ? "backgroundHistoryItem active" : "backgroundHistoryItem"} key={image.id}>
-                <button type="button" onClick={() => setAppearance((current) => ({ ...current, backgroundImagePath: image.path }))}>
+                <button
+                  type="button"
+                  onClick={() => setAppearance((current) => ({ ...current, backgroundImagePath: image.path, backgroundImageUrl: image.url }))}
+                >
                   <span>{image.name}</span>
                   <small>{image.path}</small>
                 </button>
@@ -4359,6 +4367,7 @@ function SettingsView({
                     setAppearance((current) => ({
                       ...current,
                       backgroundImagePath: current.backgroundImagePath === image.path ? null : current.backgroundImagePath,
+                      backgroundImageUrl: current.backgroundImagePath === image.path ? null : current.backgroundImageUrl,
                       backgroundImages: current.backgroundImages.filter((item) => item.id !== image.id)
                     }))
                   }
@@ -7629,11 +7638,15 @@ function loadAppearanceSettings(): AppearanceSettings {
     const accent = isAccentColorId(value.accent) ? value.accent : defaultAppearanceSettings.accent;
     const displayFont = isDisplayFontId(value.displayFont) ? value.displayFont : defaultAppearanceSettings.displayFont;
     const backgroundImages = Array.isArray(value.backgroundImages)
-      ? value.backgroundImages.filter(isSavedBackgroundImage).slice(0, 12)
+      ? value.backgroundImages.map(normalizeSavedBackgroundImage).filter((image): image is SavedBackgroundImage => image != null).slice(0, 12)
       : [];
     const backgroundImagePath =
       typeof value.backgroundImagePath === "string" && value.backgroundImagePath.trim() ? value.backgroundImagePath : null;
-    return { accent, backgroundImagePath, backgroundImages, displayFont, mode };
+    const backgroundImageUrl =
+      typeof value.backgroundImageUrl === "string" && value.backgroundImageUrl.trim()
+        ? value.backgroundImageUrl
+        : backgroundImages.find((image) => image.path === backgroundImagePath)?.url ?? (backgroundImagePath ? pathToBackgroundUrl(backgroundImagePath) : null);
+    return { accent, backgroundImagePath, backgroundImageUrl, backgroundImages, displayFont, mode };
   } catch {
     return defaultAppearanceSettings;
   }
@@ -7642,7 +7655,7 @@ function loadAppearanceSettings(): AppearanceSettings {
 function getAppearanceStyle(settings: AppearanceSettings): CSSProperties {
   const theme = settings.mode === "light" ? getLightThemeVariables() : getDarkThemeVariables();
   const accent = accentPalettes[settings.accent][settings.mode];
-  const backgroundUrl = settings.backgroundImagePath ? pathToBackgroundUrl(settings.backgroundImagePath) : "";
+  const backgroundUrl = settings.backgroundImageUrl ?? (settings.backgroundImagePath ? pathToBackgroundUrl(settings.backgroundImagePath) : "");
   return {
     ...theme,
     "--acc": accent.acc,
@@ -7690,8 +7703,8 @@ function getLightThemeVariables(): Record<string, string> {
     "--panel-bg2": "rgba(238, 242, 236, 0.9)",
     "--panel-bg3": "rgba(228, 234, 223, 0.9)",
     "--tx0": "#151a17",
-    "--tx1": "#4f5c55",
-    "--tx2": "#77857c"
+    "--tx1": "#344038",
+    "--tx2": "#5f6d64"
   };
 }
 
@@ -7703,12 +7716,21 @@ function isDisplayFontId(value: unknown): value is DisplayFontId {
   return typeof value === "string" && value in displayFonts;
 }
 
-function isSavedBackgroundImage(value: unknown): value is SavedBackgroundImage {
+function normalizeSavedBackgroundImage(value: unknown): SavedBackgroundImage | null {
   if (value == null || typeof value !== "object") {
-    return false;
+    return null;
   }
   const item = value as Partial<SavedBackgroundImage>;
-  return typeof item.id === "string" && typeof item.name === "string" && typeof item.path === "string" && typeof item.addedAt === "string";
+  if (typeof item.id !== "string" || typeof item.name !== "string" || typeof item.path !== "string" || typeof item.addedAt !== "string") {
+    return null;
+  }
+  return {
+    id: item.id,
+    name: item.name,
+    path: item.path,
+    url: typeof item.url === "string" && item.url.trim() ? item.url : pathToBackgroundUrl(item.path),
+    addedAt: item.addedAt
+  };
 }
 
 function pathToBackgroundUrl(path: string): string {
