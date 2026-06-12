@@ -1145,8 +1145,10 @@ export function App(): ReactElement {
 
     setBusyImportBatchId(importBatch.id);
     try {
-      const result = await proposeBulkImportApproval(reviewableItemIds, root.id);
-      replaceOperationBatch(result.batch);
+      const batches = await proposeImportApprovals(reviewableItemIds, root.id);
+      for (const batch of batches) {
+        replaceOperationBatch(batch);
+      }
       setActiveView("Operations");
     } catch (error) {
       setImportsState((current) => ({
@@ -1177,12 +1179,14 @@ export function App(): ReactElement {
 
     setBusyImportBatchId(importBatch.id);
     try {
-      const proposed = await proposeBulkImportApproval(reviewableItemIds, root.id);
-      replaceOperationBatch(proposed.batch);
-      const approved = await approveOperationBatch(proposed.batch.id);
-      replaceOperationBatch(approved.batch);
-      const applied = await applyOperationBatch(proposed.batch.id);
-      replaceOperationBatch(applied.batch);
+      const proposedBatches = await proposeImportApprovals(reviewableItemIds, root.id);
+      for (const proposed of proposedBatches) {
+        replaceOperationBatch(proposed);
+        const approved = await approveOperationBatch(proposed.id);
+        replaceOperationBatch(approved.batch);
+        const applied = await applyOperationBatch(approved.batch.id);
+        replaceOperationBatch(applied.batch);
+      }
       await Promise.all([
         refreshImports(),
         refreshLibrary(),
@@ -7041,6 +7045,24 @@ async function proposeBulkImportApproval(importItemIds: string[], libraryRootId:
   return postJson("/operations/propose-bulk-import-approval", { importItemIds, libraryRootId }, operationBatchResponseSchema);
 }
 
+async function proposeImportApprovals(importItemIds: string[], libraryRootId: string): Promise<OperationBatch[]> {
+  try {
+    const result = await proposeBulkImportApproval(importItemIds, libraryRootId);
+    return [result.batch];
+  } catch (error) {
+    if (!isNotFoundError(error)) {
+      throw error;
+    }
+  }
+
+  const batches: OperationBatch[] = [];
+  for (const importItemId of importItemIds) {
+    const result = await proposeImportApproval(importItemId, libraryRootId);
+    batches.push(result.batch);
+  }
+  return batches;
+}
+
 async function proposeFileMetadata(fileId: string, metadata: EditableFileMetadata) {
   return postJson("/operations/propose-file-metadata", { fileId, metadata }, operationBatchResponseSchema);
 }
@@ -7200,6 +7222,10 @@ async function readError(response: Response): Promise<string> {
   } catch {
     return `Request failed with ${response.status}`;
   }
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return error instanceof Error && /\b404\b/.test(error.message);
 }
 
 function discoveryGroupToSaveRequest(group: DiscoveryGroup, query: string): SaveDiscoveryCandidateRequest {
