@@ -2490,17 +2490,15 @@ function ArtistHeroAlbumArtwork({
     const rect = cover.getBoundingClientRect();
     const x = (event.clientX - rect.left) / rect.width - 0.5;
     const y = (event.clientY - rect.top) / rect.height - 0.5;
-    cover.style.setProperty("--tilt-x", `${(y * 8).toFixed(2)}deg`);
-    cover.style.setProperty("--tilt-y", `${(-x * 10).toFixed(2)}deg`);
-    cover.style.setProperty("--lift", "-0.28rem");
-    cover.style.setProperty("--pop", "1.2rem");
+    cover.style.setProperty("--tilt-x", `${(y * 18).toFixed(2)}deg`);
+    cover.style.setProperty("--tilt-y", `${(-x * 20).toFixed(2)}deg`);
+    cover.style.setProperty("--lift", "-0.18rem");
   };
   const handlePointerLeave = (event: ReactPointerEvent<HTMLSpanElement>) => {
     const cover = event.currentTarget;
     cover.style.removeProperty("--tilt-x");
     cover.style.removeProperty("--tilt-y");
     cover.style.removeProperty("--lift");
-    cover.style.removeProperty("--pop");
   };
 
   return (

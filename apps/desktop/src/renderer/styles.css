@@ -3062,7 +3062,6 @@ span.artFallback svg {
 
 .artistHeroAlbumShell {
   --lift: 0;
-  --pop: 0;
   --tilt-x: 0deg;
   --tilt-y: 0deg;
   position: relative;
@@ -3070,7 +3069,7 @@ span.artFallback svg {
   width: clamp(8.75rem, 11.5vw, 11.75rem);
   aspect-ratio: 1;
   display: block;
-  transform: translate3d(0, var(--lift), var(--pop)) rotateX(var(--tilt-x)) rotateY(var(--tilt-y));
+  transform: translate3d(0, var(--lift), 0) rotateX(var(--tilt-x)) rotateY(var(--tilt-y));
   transform-style: preserve-3d;
   transition:
     transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
