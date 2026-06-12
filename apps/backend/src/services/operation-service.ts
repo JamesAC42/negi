@@ -6,6 +6,7 @@ import type {
   DiscoveryDownloadJob,
   DiscoveryResult,
   EditableFileMetadata,
+  ImportItem,
   Operation,
   OperationBatch,
   OperationBatchStatus,
@@ -103,7 +104,7 @@ export class OperationService {
     const label =
       items.length === 1
         ? `${items[0].detectedArtist ?? "Unknown Artist"} - ${items[0].detectedTitle ?? items[0].stagingPath}`
-        : `${items.length} import items`;
+        : importItemsBatchLabel(items);
     return this.createBatch({
       source,
       summary: `Import ${label}`,
@@ -1912,6 +1913,24 @@ function importItemOperationPayload(value: unknown): ImportItemOperationPayload 
     throw new Error("Operation payload requires importItemId");
   }
   return { importItemId: (value as { importItemId: string }).importItemId };
+}
+
+function importItemsBatchLabel(items: ImportItem[]): string {
+  const first = items[0];
+  const commonArtist = first?.detectedArtist?.trim() || "Unknown Artist";
+  const commonAlbum = first?.detectedAlbum?.trim();
+  if (
+    commonAlbum &&
+    items.every(
+      (item) =>
+        (item.detectedAlbum?.trim() || "") === commonAlbum &&
+        (item.detectedArtist?.trim() || "Unknown Artist") === commonArtist
+    )
+  ) {
+    return `${commonArtist} - ${commonAlbum} (${items.length} tracks)`;
+  }
+
+  return `${items.length} import items`;
 }
 
 function importFileOperationPayload(value: unknown): ImportFileOperationPayload {

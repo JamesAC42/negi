@@ -350,6 +350,7 @@ export function App(): ReactElement {
   const [rootPath, setRootPath] = useState("");
   const [rootWatchEnabled, setRootWatchEnabled] = useState(false);
   const [importPaths, setImportPaths] = useState("");
+  const [busyImportBatchId, setBusyImportBatchId] = useState<string | null>(null);
   const [discoveryQuery, setDiscoveryQuery] = useState("");
   const [discoverySource, setDiscoverySource] = useState<DiscoverySource>("slskd");
   const [pastedDiscoveryList, setPastedDiscoveryList] = useState("");
@@ -1124,6 +1125,88 @@ export function App(): ReactElement {
     const result = await proposeImportApproval(importItemId, root.id);
     replaceOperationBatch(result.batch);
     setActiveView("Operations");
+  }
+
+  async function handleProposeImportBatchApproval(importBatch: ImportBatch): Promise<void> {
+    const root = roots[0];
+    if (!root) {
+      setImportsState((current) => ({
+        status: "error",
+        message: "Add a library root before approving imports.",
+        imports: "imports" in current ? current.imports : []
+      }));
+      return;
+    }
+
+    const reviewableItemIds = getReviewableImportItems(importBatch).map((item) => item.id);
+    if (reviewableItemIds.length === 0) {
+      return;
+    }
+
+    setBusyImportBatchId(importBatch.id);
+    try {
+      const result = await proposeBulkImportApproval(reviewableItemIds, root.id);
+      replaceOperationBatch(result.batch);
+      setActiveView("Operations");
+    } catch (error) {
+      setImportsState((current) => ({
+        status: "error",
+        message: error instanceof Error ? error.message : "Could not create album import batch.",
+        imports: "imports" in current ? current.imports : []
+      }));
+    } finally {
+      setBusyImportBatchId(null);
+    }
+  }
+
+  async function handleApplyImportBatch(importBatch: ImportBatch): Promise<void> {
+    const root = roots[0];
+    if (!root) {
+      setImportsState((current) => ({
+        status: "error",
+        message: "Add a library root before importing albums.",
+        imports: "imports" in current ? current.imports : []
+      }));
+      return;
+    }
+
+    const reviewableItemIds = getReviewableImportItems(importBatch).map((item) => item.id);
+    if (reviewableItemIds.length === 0) {
+      return;
+    }
+
+    setBusyImportBatchId(importBatch.id);
+    try {
+      const proposed = await proposeBulkImportApproval(reviewableItemIds, root.id);
+      replaceOperationBatch(proposed.batch);
+      const approved = await approveOperationBatch(proposed.batch.id);
+      replaceOperationBatch(approved.batch);
+      const applied = await applyOperationBatch(proposed.batch.id);
+      replaceOperationBatch(applied.batch);
+      await Promise.all([
+        refreshImports(),
+        refreshLibrary(),
+        refreshDuplicates(),
+        refreshMetadataGaps(),
+        refreshQualityUpgrades(),
+        refreshIncompleteAlbums(),
+        refreshAlbumMergeSuggestions(),
+        refreshAlbums(),
+        refreshAlternateEditions(),
+        refreshPlaylists(),
+        refreshJobs(),
+        refreshDiscoveryDownloads()
+      ]);
+    } catch (error) {
+      setImportsState((current) => ({
+        status: "error",
+        message: error instanceof Error ? error.message : "Could not import album.",
+        imports: "imports" in current ? current.imports : []
+      }));
+      void refreshOperations();
+    } finally {
+      setBusyImportBatchId(null);
+    }
   }
 
   async function handleRejectImport(importItemId: string): Promise<void> {
@@ -2114,11 +2197,14 @@ export function App(): ReactElement {
             roots={roots}
             setImportPaths={setImportPaths}
             onApprove={handleProposeImportApproval}
+            onApproveBatch={handleProposeImportBatchApproval}
+            onApplyBatch={handleApplyImportBatch}
             onCreateImport={handleCreateImport}
             onInspect={handleInspectImportItem}
             onReject={handleRejectImport}
             onSelectImportFiles={handleSelectImportFiles}
             onSelectImportFolder={handleSelectImportFolder}
+            busyImportBatchId={busyImportBatchId}
           />
         ) : activeView === "Duplicates" ? (
           <DuplicatesView
@@ -3413,22 +3499,28 @@ function MetadataEditor({
 }
 
 function ImportsView({
+  busyImportBatchId,
   importPaths,
   importsState,
   roots,
   setImportPaths,
   onApprove,
+  onApproveBatch,
+  onApplyBatch,
   onCreateImport,
   onInspect,
   onReject,
   onSelectImportFiles,
   onSelectImportFolder
 }: {
+  busyImportBatchId: string | null;
   importPaths: string;
   importsState: ImportsState;
   roots: LibraryRoot[];
   setImportPaths(value: string): void;
   onApprove(importItemId: string): Promise<void>;
+  onApproveBatch(importBatch: ImportBatch): Promise<void>;
+  onApplyBatch(importBatch: ImportBatch): Promise<void>;
   onCreateImport(event: FormEvent<HTMLFormElement>): Promise<void>;
   onInspect(importItemId: string): Promise<void>;
   onReject(importItemId: string): Promise<void>;
@@ -3470,47 +3562,91 @@ function ImportsView({
         {imports.length === 0 ? (
           <div className="emptyState">No active imports.</div>
         ) : (
-          imports.flatMap((batch) =>
-            batch.items.map((item) => (
-              <div className="importItem" key={item.id}>
-                <div className="importMain">
-                  <strong>{item.detectedTitle ?? basenameFromPath(item.stagingPath)}</strong>
-                  <span>
-                    {item.detectedArtist ?? "Unknown Artist"} · {item.detectedAlbum ?? "Unknown Album"} · {item.detectedYear ?? "-"}
-                  </span>
-                  <span title={item.proposedDestination ?? ""}>
-                    Destination: {item.proposedDestination ?? "No library root selected"}
-                  </span>
-                  <span>
-                    Metadata: {item.selectedCandidate?.source ?? "none"} · {item.metadataCandidates.length} candidate
-                    {item.metadataCandidates.length === 1 ? "" : "s"}
-                  </span>
-                  {item.warnings.length > 0 ? <span className="warningText">{item.warnings.join(", ")}</span> : null}
-                  {item.duplicateCandidates.length > 0 ? (
-                    <span className="warningText" title={item.duplicateCandidates.map((candidate) => candidate.path).join("\n")}>
-                      {item.duplicateCandidates.length} exact duplicate candidate{item.duplicateCandidates.length === 1 ? "" : "s"}
+          imports.map((batch) => {
+            const reviewableItems = getReviewableImportItems(batch);
+            const importedCount = batch.items.filter((item) => item.status === "imported").length;
+            const rejectedCount = batch.items.filter((item) => item.status === "rejected").length;
+            const warningCount = batch.items.reduce((total, item) => total + item.warnings.length + item.duplicateCandidates.length, 0);
+            const busy = busyImportBatchId === batch.id;
+            return (
+              <section className="importBatchGroup" key={batch.id} aria-label={deriveImportBatchTitle(batch)}>
+                <header className="importBatchHeader">
+                  <div>
+                    <span className="eyebrow">Album Import</span>
+                    <strong>{deriveImportBatchTitle(batch)}</strong>
+                    <span>
+                      {reviewableItems.length.toLocaleString()} ready · {importedCount.toLocaleString()} imported
+                      {rejectedCount > 0 ? ` · ${rejectedCount.toLocaleString()} rejected` : ""} · {batch.source}
                     </span>
-                  ) : null}
+                  </div>
+                  <div className="importBatchActions">
+                    {warningCount > 0 ? <span className="statusPill warning">{warningCount.toLocaleString()} warning{warningCount === 1 ? "" : "s"}</span> : null}
+                    <button
+                      disabled={reviewableItems.length === 0 || roots.length === 0 || busy}
+                      type="button"
+                      onClick={() => void onApplyBatch(batch)}
+                    >
+                      {busy ? "Importing" : `Import Album (${reviewableItems.length.toLocaleString()})`}
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={reviewableItems.length === 0 || roots.length === 0 || busy}
+                      type="button"
+                      onClick={() => void onApproveBatch(batch)}
+                    >
+                      Review Batch
+                    </button>
+                  </div>
+                </header>
+                <div className="importBatchItems">
+                  {batch.items.map((item) => (
+                    <div className="importItem" key={item.id}>
+                      <div className="importMain">
+                        <strong>{item.detectedTitle ?? basenameFromPath(item.stagingPath)}</strong>
+                        <span>
+                          {item.detectedArtist ?? "Unknown Artist"} · {item.detectedAlbum ?? "Unknown Album"} · {item.detectedYear ?? "-"}
+                        </span>
+                        <span title={item.proposedDestination ?? ""}>
+                          Destination: {item.proposedDestination ?? "No library root selected"}
+                        </span>
+                        <span>
+                          Metadata: {item.selectedCandidate?.source ?? "none"} · {item.metadataCandidates.length} candidate
+                          {item.metadataCandidates.length === 1 ? "" : "s"}
+                        </span>
+                        {item.warnings.length > 0 ? <span className="warningText">{item.warnings.join(", ")}</span> : null}
+                        {item.duplicateCandidates.length > 0 ? (
+                          <span className="warningText" title={item.duplicateCandidates.map((candidate) => candidate.path).join("\n")}>
+                            {item.duplicateCandidates.length} exact duplicate candidate{item.duplicateCandidates.length === 1 ? "" : "s"}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="importMeta">
+                        <span className="statusPill">{item.status}</span>
+                        <span>{item.confidenceScore != null ? `${Math.round(item.confidenceScore * 100)}%` : "-"} confidence</span>
+                        <span>{item.qualityScore != null ? `${Math.round(item.qualityScore * 100)}%` : "-"} quality</span>
+                      </div>
+                      <div className="rootActions">
+                        <button type="button" onClick={() => void onInspect(item.id)}>
+                          Inspect
+                        </button>
+                        <button disabled={item.status !== "needs_review" || roots.length === 0 || busy} type="button" onClick={() => void onApprove(item.id)}>
+                          Approve
+                        </button>
+                        <button
+                          className="secondary"
+                          disabled={item.status === "imported" || item.status === "rejected" || busy}
+                          type="button"
+                          onClick={() => void onReject(item.id)}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div className="importMeta">
-                  <span className="statusPill">{item.status}</span>
-                  <span>{item.confidenceScore != null ? `${Math.round(item.confidenceScore * 100)}%` : "-"} confidence</span>
-                  <span>{item.qualityScore != null ? `${Math.round(item.qualityScore * 100)}%` : "-"} quality</span>
-                </div>
-                <div className="rootActions">
-                  <button type="button" onClick={() => void onInspect(item.id)}>
-                    Inspect
-                  </button>
-                  <button disabled={item.status !== "needs_review" || roots.length === 0} type="button" onClick={() => void onApprove(item.id)}>
-                    Approve
-                  </button>
-                  <button className="secondary" disabled={item.status === "imported" || item.status === "rejected"} type="button" onClick={() => void onReject(item.id)}>
-                    Reject
-                  </button>
-                </div>
-              </div>
-            ))
-          )
+              </section>
+            );
+          })
         )}
       </section>
     </>
@@ -6886,6 +7022,10 @@ async function proposeImportApproval(importItemId: string, libraryRootId: string
   return postJson("/operations/propose-import-approval", { importItemId, libraryRootId }, operationBatchResponseSchema);
 }
 
+async function proposeBulkImportApproval(importItemIds: string[], libraryRootId: string) {
+  return postJson("/operations/propose-bulk-import-approval", { importItemIds, libraryRootId }, operationBatchResponseSchema);
+}
+
 async function proposeFileMetadata(fileId: string, metadata: EditableFileMetadata) {
   return postJson("/operations/propose-file-metadata", { fileId, metadata }, operationBatchResponseSchema);
 }
@@ -8018,6 +8158,26 @@ function metadataFromCandidate(candidate: MetadataCandidate): { artist: string; 
     title: candidate.title ?? "",
     year: candidate.year == null ? "" : String(candidate.year)
   };
+}
+
+function getReviewableImportItems(importBatch: ImportBatch): ImportItem[] {
+  return importBatch.items.filter((item) => item.status === "needs_review");
+}
+
+function deriveImportBatchTitle(importBatch: ImportBatch): string {
+  const reviewableItem = getReviewableImportItems(importBatch)[0] ?? importBatch.items[0];
+  if (!reviewableItem) {
+    return "Empty import";
+  }
+
+  const artist = reviewableItem.detectedArtist?.trim() || "Unknown Artist";
+  const album = reviewableItem.detectedAlbum?.trim();
+  if (album) {
+    return `${artist} - ${album}`;
+  }
+
+  const sourceFolder = importBatch.source.split(/[\\/]/).filter(Boolean).at(-1);
+  return sourceFolder || `${artist} - ${reviewableItem.detectedTitle ?? basenameFromPath(reviewableItem.stagingPath)}`;
 }
 
 function normalizeClientPath(path: string): string {

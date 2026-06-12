@@ -2778,6 +2778,63 @@ span.artFallback svg {
   overflow: auto;
 }
 
+.importBatchGroup {
+  display: grid;
+  gap: 0.625rem;
+  min-width: 0;
+  border: 0.0625rem solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+  padding: 0.75rem;
+}
+
+.importBatchHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.875rem;
+  min-width: 0;
+  border-bottom: 0.0625rem solid var(--line);
+  padding-bottom: 0.625rem;
+}
+
+.importBatchHeader > div:first-child {
+  display: grid;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+
+.importBatchHeader strong,
+.importBatchHeader span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.importBatchHeader > div:first-child > span:not(.eyebrow) {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.importBatchActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.importBatchActions .statusPill {
+  margin-right: 0.25rem;
+}
+
+.importBatchItems {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
 /* album art grid ------------------------------------------------ */
 
 .albumViewToolbar {

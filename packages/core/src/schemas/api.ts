@@ -273,6 +273,11 @@ export const createImportApprovalBatchRequestSchema = z.object({
   libraryRootId: z.string().min(1)
 });
 
+export const createBulkImportApprovalBatchRequestSchema = z.object({
+  importItemIds: z.array(z.string().min(1)).min(1),
+  libraryRootId: z.string().min(1)
+});
+
 export const createPlaylistBatchRequestSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),

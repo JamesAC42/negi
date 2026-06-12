@@ -14,6 +14,7 @@ import {
   createAlbumMergeBatchRequestSchema,
   createAssociateFileWithTrackBatchRequestSchema,
   createAssociateTrackWithAlbumBatchRequestSchema,
+  createBulkImportApprovalBatchRequestSchema,
   createDuplicateCleanupBatchRequestSchema,
   createBulkSetInternalTagsBatchRequestSchema,
   createImportApprovalBatchRequestSchema,
@@ -418,6 +419,13 @@ const server = createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/operations/propose-import-approval") {
       const body = createImportApprovalBatchRequestSchema.parse(await readJson(request));
       const batch = app.operations.createImportApprovalBatch(body.importItemId, body.libraryRootId);
+      writeJson(response, 201, operationBatchResponseSchema.parse({ batch }));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/operations/propose-bulk-import-approval") {
+      const body = createBulkImportApprovalBatchRequestSchema.parse(await readJson(request));
+      const batch = app.operations.createImportApprovalBatchForItems(body.importItemIds, body.libraryRootId);
       writeJson(response, 201, operationBatchResponseSchema.parse({ batch }));
       return;
     }
