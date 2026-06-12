@@ -161,15 +161,18 @@ export class SlskdService {
     const startedAt = Date.now();
     const deadline = startedAt + timeoutMs + slskdSearchGraceMs();
     for (let attempt = 0; Date.now() < deadline; attempt += 1) {
-      await delay(attempt === 0 ? 700 : 1000);
+      await delay(searchPollDelayMs(attempt));
       latest = await this.fetchJson(`/api/v0/searches/${encodeURIComponent(searchId)}?includeResponses=true`, {
         method: "GET"
       });
       const state = asRecord(latest);
-      if (state?.isComplete === true || stringValue(state?.state)?.toLowerCase().includes("completed")) {
+      const results = extractResults(latest);
+      if (state && (state.isComplete === true || stringValue(state.state)?.toLowerCase().includes("completed"))) {
+        if (results.length === 0 && searchReportedResultCount(state) > 0 && Date.now() < deadline) {
+          continue;
+        }
         return latest;
       }
-      const results = extractResults(latest);
       if (results.length >= responseLimit || (results.length > 0 && Date.now() - startedAt >= slskdSearchPartialAfterMs())) {
         return latest;
       }
@@ -292,7 +295,21 @@ function slskdSearchGraceMs(): number {
 }
 
 function slskdSearchPartialAfterMs(): number {
-  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_PARTIAL_AFTER_MS", 5_000);
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_PARTIAL_AFTER_MS", 2_500);
+}
+
+function searchPollDelayMs(attempt: number): number {
+  if (attempt === 0) {
+    return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_INITIAL_POLL_MS", 150);
+  }
+  return Math.min(readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_POLL_MAX_MS", 900), 250 + attempt * 150);
+}
+
+function searchReportedResultCount(state: Record<string, unknown>): number {
+  return (
+    numberValue(state.fileCount) ??
+    ((numberValue(state.responseCount) ?? 0) + (numberValue(state.lockedFileCount) ?? 0))
+  );
 }
 
 function readPositiveIntegerEnv(name: string, fallback: number): number {
@@ -436,11 +453,23 @@ function extractResults(value: unknown): DiscoveryResult[] {
         results.push(result);
       }
     }
+    for (const file of arrayValue(responseRecord.lockedFiles)) {
+      const result = mapFileResult(file, username, availability, true);
+      if (result) {
+        results.push(result);
+      }
+    }
   }
 
   if (results.length === 0) {
     for (const file of arrayValue(root.files ?? root.results)) {
       const result = mapFileResult(file, null, emptyPeerAvailability);
+      if (result) {
+        results.push(result);
+      }
+    }
+    for (const file of arrayValue(root.lockedFiles)) {
+      const result = mapFileResult(file, null, emptyPeerAvailability, true);
       if (result) {
         results.push(result);
       }
@@ -470,7 +499,7 @@ function peerAvailability(response: Record<string, unknown>): PeerAvailability {
   };
 }
 
-function mapFileResult(value: unknown, username: string | null, availability: PeerAvailability): DiscoveryResult | null {
+function mapFileResult(value: unknown, username: string | null, availability: PeerAvailability, isLocked = false): DiscoveryResult | null {
   const file = asRecord(value);
   if (!file) {
     return null;
@@ -496,7 +525,7 @@ function mapFileResult(value: unknown, username: string | null, availability: Pe
     bitrate: numberValue(file.bitRate ?? file.bitrate),
     sampleRate: numberValue(file.sampleRate),
     lengthSeconds: numberValue(file.length ?? file.duration ?? file.durationSeconds),
-    isLocked: booleanValue(file.isLocked ?? file.locked) ?? false,
+    isLocked: isLocked || (booleanValue(file.isLocked ?? file.locked) ?? false),
     hasFreeUploadSlot: availability.hasFreeUploadSlot,
     uploadSpeedBytesPerSecond: availability.uploadSpeedBytesPerSecond,
     queueLength: availability.queueLength,

@@ -1656,7 +1656,7 @@ export function App(): ReactElement {
     setDiscoveryState((current) => ({
       status: "searching",
       health: current.health,
-      results: current.results,
+      results: [],
       query
     }));
     try {
