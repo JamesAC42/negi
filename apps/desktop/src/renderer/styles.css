@@ -483,7 +483,7 @@ h2 {
 }
 
 .appShell.inspectorCollapsed {
-  grid-template-columns: 13.5rem minmax(32.5rem, 1fr) 3.75rem;
+  grid-template-columns: 13.5rem minmax(32.5rem, 1fr) 4.5rem;
 }
 
 .sidebar,
@@ -3811,13 +3811,16 @@ span.artFallback svg {
 
 .inspector.collapsed {
   display: grid;
-  place-items: start center;
-  padding: 1rem 0.5rem;
+  align-content: start;
+  justify-items: center;
+  padding: 1rem 0.625rem;
   overflow: hidden;
   animation: inspectorCollapse var(--med) both;
 }
 
 .inspectorHeader {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3834,11 +3837,18 @@ span.artFallback svg {
 }
 
 .inspector.collapsed .inspectorHeader {
+  display: grid;
   justify-content: center;
+  justify-items: center;
+  width: 100%;
+  min-width: 0;
 }
 
 .inspector.collapsed .inspectorHeader h2 {
+  position: absolute;
   width: 0;
+  height: 0;
+  overflow: hidden;
   opacity: 0;
 }
 
@@ -3860,12 +3870,21 @@ span.artFallback svg {
 }
 
 .inspector.collapsed .inspectorToggle {
-  width: 2.5rem;
-  height: 2.5rem;
-  border-color: var(--line2);
-  background: var(--bg2);
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-height: 2.75rem;
+  border-color: var(--acc-line);
+  background: var(--acc-dim);
   color: var(--tx0);
+  place-items: center;
   padding: 0;
+}
+
+.inspector.collapsed .inspectorToggle:not(:disabled):hover {
+  border-color: var(--acc);
+  background: var(--bg2);
+  color: var(--acc);
 }
 
 .inspectorToggle svg {
