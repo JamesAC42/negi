@@ -2781,6 +2781,8 @@ function LibraryView({
   const [tagFilter, setTagFilter] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [showRoots, setShowRoots] = useState(false);
+  const albumLibraryRef = useRef<HTMLElement | null>(null);
+  const [visibleAlbumRange, setVisibleAlbumRange] = useState({ start: 0, end: 16 });
   const activeFilterCount =
     (formatFilter !== "all" ? 1 : 0) +
     (missingFilter !== "present" ? 1 : 0) +
@@ -2803,6 +2805,52 @@ function LibraryView({
   );
   const albumGroups = useMemo(() => groupLibraryFilesByAlbum(filteredFiles), [filteredFiles]);
   const visibleQueueFileIds = useMemo(() => albumGroups.flatMap((group) => group.files.map((file) => file.id)), [albumGroups]);
+  const albumGroupHeights = useMemo(
+    () => albumGroups.map((group) => getEstimatedLibraryAlbumGroupHeight(group)),
+    [albumGroups]
+  );
+  const albumGroupOffsets = useMemo(() => getVirtualOffsets(albumGroupHeights), [albumGroupHeights]);
+  const albumGroupTotalHeight = albumGroupOffsets[albumGroupOffsets.length - 1] ?? 0;
+  const boundedVisibleAlbumRange = useMemo(
+    () => ({
+      start: Math.min(visibleAlbumRange.start, albumGroups.length),
+      end: Math.min(Math.max(visibleAlbumRange.end, visibleAlbumRange.start + 1), albumGroups.length)
+    }),
+    [albumGroups.length, visibleAlbumRange.end, visibleAlbumRange.start]
+  );
+  const virtualAlbumGroups = useMemo(
+    () => albumGroups.slice(boundedVisibleAlbumRange.start, boundedVisibleAlbumRange.end),
+    [albumGroups, boundedVisibleAlbumRange.end, boundedVisibleAlbumRange.start]
+  );
+  const virtualTopPadding = albumGroupOffsets[boundedVisibleAlbumRange.start] ?? 0;
+  const virtualBottomPadding = Math.max(0, albumGroupTotalHeight - (albumGroupOffsets[boundedVisibleAlbumRange.end] ?? albumGroupTotalHeight));
+
+  useEffect(() => {
+    const list = albumLibraryRef.current;
+    const scroller = list?.closest(".centerPane") as HTMLElement | null;
+    if (!list || !scroller || albumGroups.length === 0) {
+      setVisibleAlbumRange({ start: 0, end: Math.min(albumGroups.length, 16) });
+      return;
+    }
+
+    const updateVisibleRange = () => {
+      const listTop = list.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      const overscan = 900;
+      const viewportTop = Math.max(0, scroller.scrollTop - listTop - overscan);
+      const viewportBottom = Math.min(albumGroupTotalHeight, scroller.scrollTop - listTop + scroller.clientHeight + overscan);
+      const start = Math.max(0, getVirtualIndexBeforeOffset(albumGroupOffsets, viewportTop) - 1);
+      const end = Math.min(albumGroups.length, getVirtualIndexAfterOffset(albumGroupOffsets, viewportBottom) + 2);
+      setVisibleAlbumRange((current) => (current.start === start && current.end === end ? current : { start, end }));
+    };
+
+    updateVisibleRange();
+    scroller.addEventListener("scroll", updateVisibleRange, { passive: true });
+    window.addEventListener("resize", updateVisibleRange);
+    return () => {
+      scroller.removeEventListener("scroll", updateVisibleRange);
+      window.removeEventListener("resize", updateVisibleRange);
+    };
+  }, [albumGroupOffsets, albumGroupTotalHeight, albumGroups.length]);
 
   return (
     <>
@@ -3081,7 +3129,7 @@ function LibraryView({
       </section>
       ) : null}
 
-      <section className="albumLibrary" aria-label="Library albums">
+      <section className="albumLibrary" ref={albumLibraryRef} aria-label="Library albums">
         {files.length === 0 ? (
           <div className="emptyState">
             {selectedRoot ? "No audio files indexed for this search." : "Add a library root to begin indexing local music."}
@@ -3089,123 +3137,127 @@ function LibraryView({
         ) : filteredFiles.length === 0 ? (
           <div className="emptyState">No indexed files match the current Library filters.</div>
         ) : (
-          albumGroups.map((group) => (
-            <section className="libraryAlbumGroup" key={group.key} aria-label={`${group.artist} - ${group.album}`}>
-              <div className="libraryAlbumArt">
-                <Artwork className="albumGroupArt" src={artworkFileUrl(group.files[0].id)} />
-              </div>
-              <div className="libraryAlbumContent">
-                <div className="libraryAlbumHeader">
-                  <div>
-                    <button className="libraryAlbumTitleButton" type="button" onClick={() => onOpenAlbumPage(group)}>
-                      <strong>{group.album}</strong>
-                    </button>
-                    <span>
-                      <button className="libraryAlbumArtistButton" type="button" onClick={() => onOpenArtistPage(group.artist)}>
-                        {group.artist}
+          <>
+            {virtualTopPadding > 0 ? <div className="virtualAlbumSpacer" style={{ height: `${virtualTopPadding}px` }} /> : null}
+            {virtualAlbumGroups.map((group) => (
+              <section className="libraryAlbumGroup" key={group.key} aria-label={`${group.artist} - ${group.album}`}>
+                <div className="libraryAlbumArt">
+                  <Artwork className="albumGroupArt" src={artworkFileUrl(group.files[0].id)} />
+                </div>
+                <div className="libraryAlbumContent">
+                  <div className="libraryAlbumHeader">
+                    <div>
+                      <button className="libraryAlbumTitleButton" type="button" onClick={() => onOpenAlbumPage(group)}>
+                        <strong>{group.album}</strong>
                       </button>
-                      {group.year ? ` · ${group.year}` : ""} · {group.files.length} track{group.files.length === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  <span>{group.formats.join("/")}</span>
-                </div>
-                <div className="albumTrackHeader">
-                  <span>Select</span>
-                  <span>Play</span>
-                  <span>#</span>
-                  <span>Title</span>
-                  <span>Duration</span>
-                  <span>Size</span>
-                  <span>Format</span>
-                  <span>Listens</span>
-                  <span>Status</span>
-                  <span>Actions</span>
-                </div>
-                <div className="albumTrackRows">
-                  {group.files.map((file) => {
-                    const tags = file.displayTags;
-                    const isCurrent = playback.currentFileId === file.id;
-                    return (
-                      <div className={isCurrent ? "albumTrackRow active" : "albumTrackRow"} key={file.id}>
-                        <label className="rowSelect" title="Select for bulk actions">
-                          <input
-                            checked={selectedFileIds.has(file.id)}
-                            type="checkbox"
-                            onChange={() => onToggleFileSelection(file.id)}
-                          />
-                        </label>
-                        <button
-                          aria-label={
-                            isCurrent && playback.status === "playing"
-                              ? `Pause ${tags.title ?? file.filename}`
-                              : `Play ${tags.title ?? file.filename}`
-                          }
-                          className={isCurrent ? "rowPlay active" : "rowPlay"}
-                          disabled={playbackBusy}
-                          type="button"
-                          onClick={() => void onPlayFile(file.id, visibleQueueFileIds)}
-                        >
-                          <TransportIcon shape={isCurrent && playback.status === "playing" ? "pause" : "play"} />
+                      <span>
+                        <button className="libraryAlbumArtistButton" type="button" onClick={() => onOpenArtistPage(group.artist)}>
+                          {group.artist}
                         </button>
-                        <span>{formatTrackNumber(file)}</span>
-                        <span className="trackTitle" title={file.path}>{tags.title ?? file.filename}</span>
-                        <span>{file.durationMs == null ? "-" : formatTime(file.durationMs)}</span>
-                        <span>{formatBytes(file.sizeBytes)}</span>
-                        <span>{formatFileFormat(file)}</span>
-                        <span title={formatListenTooltip(file)}>{formatListenStats(file)}</span>
-                        <span className={file.missing ? "statusPill warning" : "statusPill"}>{file.scanStatus}</span>
-                        <span className="rowActions">
-                          <select
-                            aria-label={`Rating for ${tags.title ?? file.filename}`}
-                            title="Rating"
-                            value={file.rating ?? ""}
-                            onChange={(event) =>
-                              void onProposeRating(file.id, event.target.value === "" ? null : Number(event.target.value))
+                        {group.year ? ` · ${group.year}` : ""} · {group.files.length} track{group.files.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <span>{group.formats.join("/")}</span>
+                  </div>
+                  <div className="albumTrackHeader">
+                    <span>Select</span>
+                    <span>Play</span>
+                    <span>#</span>
+                    <span>Title</span>
+                    <span>Duration</span>
+                    <span>Size</span>
+                    <span>Format</span>
+                    <span>Listens</span>
+                    <span>Status</span>
+                    <span>Actions</span>
+                  </div>
+                  <div className="albumTrackRows">
+                    {group.files.map((file) => {
+                      const tags = file.displayTags;
+                      const isCurrent = playback.currentFileId === file.id;
+                      return (
+                        <div className={isCurrent ? "albumTrackRow active" : "albumTrackRow"} key={file.id}>
+                          <label className="rowSelect" title="Select for bulk actions">
+                            <input
+                              checked={selectedFileIds.has(file.id)}
+                              type="checkbox"
+                              onChange={() => onToggleFileSelection(file.id)}
+                            />
+                          </label>
+                          <button
+                            aria-label={
+                              isCurrent && playback.status === "playing"
+                                ? `Pause ${tags.title ?? file.filename}`
+                                : `Play ${tags.title ?? file.filename}`
                             }
-                          >
-                            <option value="">–</option>
-                            <option value="5">5</option>
-                            <option value="4">4</option>
-                            <option value="3">3</option>
-                            <option value="2">2</option>
-                            <option value="1">1</option>
-                            <option value="0">0</option>
-                          </select>
-                          <button
-                            aria-label="Like"
-                            className={file.liked ? "iconBtn active" : "iconBtn"}
-                            title={file.liked ? "Unlike" : "Like"}
+                            className={isCurrent ? "rowPlay active" : "rowPlay"}
+                            disabled={playbackBusy}
                             type="button"
-                            onClick={() => void onProposeFavoriteStatus(file.id, file.liked ? "neutral" : "liked")}
+                            onClick={() => void onPlayFile(file.id, visibleQueueFileIds)}
                           >
-                            <ActionIcon shape="like" />
+                            <TransportIcon shape={isCurrent && playback.status === "playing" ? "pause" : "play"} />
                           </button>
-                          <button
-                            aria-label="Dislike"
-                            className={file.disliked ? "iconBtn active" : "iconBtn"}
-                            title={file.disliked ? "Remove dislike" : "Dislike"}
-                            type="button"
-                            onClick={() => void onProposeFavoriteStatus(file.id, file.disliked ? "neutral" : "disliked")}
-                          >
-                            <ActionIcon shape="dislike" />
-                          </button>
-                          <button aria-label="Tag diagnostics" className="iconBtn" title="Tag diagnostics" type="button" onClick={() => void onInspectFile(file.id)}>
-                            <ActionIcon shape="tags" />
-                          </button>
-                          <button aria-label="Edit metadata" className="iconBtn" title="Edit metadata" type="button" onClick={() => onEditFile(file)}>
-                            <ActionIcon shape="edit" />
-                          </button>
-                          <button aria-label="Remove from index" className="iconBtn danger" title="Remove from index" type="button" onClick={() => void onRemoveFile(file)}>
-                            <ActionIcon shape="remove" />
-                          </button>
-                        </span>
-                      </div>
-                    );
-                  })}
+                          <span>{formatTrackNumber(file)}</span>
+                          <span className="trackTitle" title={file.path}>{tags.title ?? file.filename}</span>
+                          <span>{file.durationMs == null ? "-" : formatTime(file.durationMs)}</span>
+                          <span>{formatBytes(file.sizeBytes)}</span>
+                          <span>{formatFileFormat(file)}</span>
+                          <span title={formatListenTooltip(file)}>{formatListenStats(file)}</span>
+                          <span className={file.missing ? "statusPill warning" : "statusPill"}>{file.scanStatus}</span>
+                          <span className="rowActions">
+                            <select
+                              aria-label={`Rating for ${tags.title ?? file.filename}`}
+                              title="Rating"
+                              value={file.rating ?? ""}
+                              onChange={(event) =>
+                                void onProposeRating(file.id, event.target.value === "" ? null : Number(event.target.value))
+                              }
+                            >
+                              <option value="">–</option>
+                              <option value="5">5</option>
+                              <option value="4">4</option>
+                              <option value="3">3</option>
+                              <option value="2">2</option>
+                              <option value="1">1</option>
+                              <option value="0">0</option>
+                            </select>
+                            <button
+                              aria-label="Like"
+                              className={file.liked ? "iconBtn active" : "iconBtn"}
+                              title={file.liked ? "Unlike" : "Like"}
+                              type="button"
+                              onClick={() => void onProposeFavoriteStatus(file.id, file.liked ? "neutral" : "liked")}
+                            >
+                              <ActionIcon shape="like" />
+                            </button>
+                            <button
+                              aria-label="Dislike"
+                              className={file.disliked ? "iconBtn active" : "iconBtn"}
+                              title={file.disliked ? "Remove dislike" : "Dislike"}
+                              type="button"
+                              onClick={() => void onProposeFavoriteStatus(file.id, file.disliked ? "neutral" : "disliked")}
+                            >
+                              <ActionIcon shape="dislike" />
+                            </button>
+                            <button aria-label="Tag diagnostics" className="iconBtn" title="Tag diagnostics" type="button" onClick={() => void onInspectFile(file.id)}>
+                              <ActionIcon shape="tags" />
+                            </button>
+                            <button aria-label="Edit metadata" className="iconBtn" title="Edit metadata" type="button" onClick={() => onEditFile(file)}>
+                              <ActionIcon shape="edit" />
+                            </button>
+                            <button aria-label="Remove from index" className="iconBtn danger" title="Remove from index" type="button" onClick={() => void onRemoveFile(file)}>
+                              <ActionIcon shape="remove" />
+                            </button>
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            </section>
-          ))
+              </section>
+            ))}
+            {virtualBottomPadding > 0 ? <div className="virtualAlbumSpacer" style={{ height: `${virtualBottomPadding}px` }} /> : null}
+          </>
         )}
       </section>
     </>
@@ -7043,6 +7095,46 @@ function groupLibraryFilesByAlbum(files: LibraryFile[]): LibraryAlbumGroup[] {
         compareText(left.album, right.album) ||
         compareText(left.year ?? "", right.year ?? "")
     );
+}
+
+function getEstimatedLibraryAlbumGroupHeight(group: LibraryAlbumGroup): number {
+  return 128 + group.files.length * 37;
+}
+
+function getVirtualOffsets(heights: number[]): number[] {
+  const offsets = [0];
+  for (const height of heights) {
+    offsets.push(offsets[offsets.length - 1] + height);
+  }
+  return offsets;
+}
+
+function getVirtualIndexBeforeOffset(offsets: number[], offset: number): number {
+  let low = 0;
+  let high = offsets.length - 1;
+  while (low < high) {
+    const middle = Math.floor((low + high + 1) / 2);
+    if (offsets[middle] <= offset) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return low;
+}
+
+function getVirtualIndexAfterOffset(offsets: number[], offset: number): number {
+  let low = 0;
+  let high = offsets.length - 1;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (offsets[middle] < offset) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
 }
 
 function sortAlbumTrackFiles(files: LibraryFile[]): LibraryFile[] {
