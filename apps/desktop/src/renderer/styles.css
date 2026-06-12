@@ -3054,24 +3054,50 @@ span.artFallback svg {
   align-items: center;
   justify-content: flex-start;
   min-width: 0;
-  overflow: hidden;
-  padding: 1.25rem;
+  overflow: visible;
+  perspective: 52rem;
+  perspective-origin: 48% 45%;
+  padding: 1.75rem 1.25rem;
 }
 
-.artistHeroAlbumArt {
+.artistHeroAlbumShell {
+  --lift: 0;
+  --tilt-x: 0deg;
+  --tilt-y: 0deg;
+  position: relative;
   flex: 0 0 clamp(8.75rem, 11.5vw, 11.75rem);
   width: clamp(8.75rem, 11.5vw, 11.75rem);
   aspect-ratio: 1;
+  display: block;
+  transform: translate3d(0, var(--lift), 0) rotateX(var(--tilt-x)) rotateY(var(--tilt-y));
+  transform-style: preserve-3d;
+  transition:
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    filter 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+
+.artistHeroAlbumShell:hover {
+  filter: brightness(1.04);
+}
+
+.artistHeroAlbumShell + .artistHeroAlbumShell {
+  margin-left: clamp(-6.125rem, -5.9vw, -4.25rem);
+}
+
+.artistHeroAlbumArt {
+  width: 100%;
+  height: 100%;
   border: 0.0625rem solid var(--line2);
   border-radius: var(--r-s);
   object-fit: cover;
   background: var(--bg2);
-  opacity: 0.84;
-  box-shadow: -0.5rem 0 0.875rem rgb(0 0 0 / 26%);
-}
-
-.artistHeroAlbumArt + .artistHeroAlbumArt {
-  margin-left: clamp(-6.125rem, -5.9vw, -4.25rem);
+  opacity: 1;
+  box-shadow:
+    -0.5rem 0 0.875rem rgb(0 0 0 / 26%),
+    0 1.25rem 2.25rem rgb(0 0 0 / 18%);
+  display: block;
+  transform: translateZ(0.01rem);
 }
 
 .artistHero h2 {

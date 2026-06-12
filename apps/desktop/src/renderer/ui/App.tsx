@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, ReactElement } from "react";
+import type {
+  CSSProperties,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactElement
+} from "react";
 import {
   clusterDiscoveryGroups,
   filterDiscoveryGroups,
@@ -2467,6 +2474,43 @@ function Artwork({ src, className }: { src: string | null; className: string }):
     );
   }
   return <img alt="" className={className} loading="lazy" src={src} onError={() => setFailedSrc(src)} />;
+}
+
+function ArtistHeroAlbumArtwork({
+  album,
+  index,
+  total
+}: {
+  album: AlbumGroupItem;
+  index: number;
+  total: number;
+}): ReactElement {
+  const handlePointerMove = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    const cover = event.currentTarget;
+    const rect = cover.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width - 0.5;
+    const y = (event.clientY - rect.top) / rect.height - 0.5;
+    cover.style.setProperty("--tilt-x", `${(-y * 8).toFixed(2)}deg`);
+    cover.style.setProperty("--tilt-y", `${(x * 10).toFixed(2)}deg`);
+    cover.style.setProperty("--lift", "-0.7rem");
+  };
+  const handlePointerLeave = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    const cover = event.currentTarget;
+    cover.style.removeProperty("--tilt-x");
+    cover.style.removeProperty("--tilt-y");
+    cover.style.removeProperty("--lift");
+  };
+
+  return (
+    <span
+      className="artistHeroAlbumShell"
+      onPointerLeave={handlePointerLeave}
+      onPointerMove={handlePointerMove}
+      style={{ zIndex: total + index } as CSSProperties}
+    >
+      <Artwork className="artistHeroAlbumArt" src={artworkAlbumUrl(album.id)} />
+    </span>
+  );
 }
 
 function ActionIcon({ shape }: { shape: "like" | "dislike" | "tags" | "edit" | "remove" }): ReactElement {
@@ -6314,8 +6358,8 @@ function ArtistDetailView({
       <div className="artistHero">
         {heroAlbum ? <Artwork className="artistHeroFallback" src={artworkAlbumUrl(heroAlbum.id)} /> : null}
         <div className="artistHeroAlbums" aria-hidden="true">
-          {heroAlbums.map((album) => (
-            <Artwork className="artistHeroAlbumArt" key={album.id} src={artworkAlbumUrl(album.id)} />
+          {heroAlbums.map((album, index) => (
+            <ArtistHeroAlbumArtwork album={album} index={index} key={album.id} total={heroAlbums.length} />
           ))}
         </div>
         <div className="artistHeroContent">
