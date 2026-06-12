@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, ReactElement } from "react";
+import type { CSSProperties, FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, ReactElement } from "react";
 import {
   clusterDiscoveryGroups,
   filterDiscoveryGroups,
@@ -212,6 +212,17 @@ type AlbumFacetFilter = { genre: string; decade: string };
 type ArtistViewTarget = { key: number; artist: string };
 type AlbumViewTarget = { key: number; albumId: string };
 type ArtistSongSortMode = "listens" | "ranking" | "albumYear";
+type AppearanceMode = "dark" | "light";
+type AccentColorId = "lime" | "cyan" | "amber" | "rose" | "violet";
+type DisplayFontId = "space" | "mono" | "system" | "wide";
+type SavedBackgroundImage = { id: string; name: string; path: string; addedAt: string };
+type AppearanceSettings = {
+  accent: AccentColorId;
+  backgroundImagePath: string | null;
+  backgroundImages: SavedBackgroundImage[];
+  displayFont: DisplayFontId;
+  mode: AppearanceMode;
+};
 
 const emptyDuplicates: DuplicateGroupsResponse = { groups: [], totalGroups: 0, totalFiles: 0 };
 const emptyMetadataGaps: MetadataGapsResponse = { items: [], total: 0 };
@@ -248,6 +259,49 @@ const emptyTasteProfile: TasteProfileResponse = {
 };
 
 const navItems = ["Library", "Artists", "Albums", "Duplicates", "Imports", "Operations", "Discovery", "Playlists", "Agent", "Jobs", "Settings"];
+const appearanceStorageKey = "music-os:appearance:v1";
+const defaultAppearanceSettings: AppearanceSettings = {
+  accent: "lime",
+  backgroundImagePath: null,
+  backgroundImages: [],
+  displayFont: "space",
+  mode: "dark"
+};
+const accentPalettes: Record<AccentColorId, { label: string; dark: AccentPalette; light: AccentPalette }> = {
+  lime: {
+    label: "Lime",
+    dark: { acc: "#c3f53c", accDim: "rgba(195, 245, 60, 0.12)", accInk: "#10130a", accLine: "rgba(195, 245, 60, 0.38)", okLine: "#4c5f2c" },
+    light: { acc: "#6e9f00", accDim: "rgba(110, 159, 0, 0.14)", accInk: "#f8fbf0", accLine: "rgba(110, 159, 0, 0.36)", okLine: "#b8cc86" }
+  },
+  cyan: {
+    label: "Cyan",
+    dark: { acc: "#62d7f4", accDim: "rgba(98, 215, 244, 0.13)", accInk: "#061014", accLine: "rgba(98, 215, 244, 0.4)", okLine: "#2d5965" },
+    light: { acc: "#007b95", accDim: "rgba(0, 123, 149, 0.13)", accInk: "#effcff", accLine: "rgba(0, 123, 149, 0.34)", okLine: "#8fc3cf" }
+  },
+  amber: {
+    label: "Amber",
+    dark: { acc: "#f2b84b", accDim: "rgba(242, 184, 75, 0.14)", accInk: "#160f04", accLine: "rgba(242, 184, 75, 0.38)", okLine: "#6b5528" },
+    light: { acc: "#a86600", accDim: "rgba(168, 102, 0, 0.13)", accInk: "#fff8ec", accLine: "rgba(168, 102, 0, 0.34)", okLine: "#d8b983" }
+  },
+  rose: {
+    label: "Rose",
+    dark: { acc: "#ff7aa7", accDim: "rgba(255, 122, 167, 0.13)", accInk: "#17070d", accLine: "rgba(255, 122, 167, 0.38)", okLine: "#6a3348" },
+    light: { acc: "#b83d68", accDim: "rgba(184, 61, 104, 0.12)", accInk: "#fff3f7", accLine: "rgba(184, 61, 104, 0.34)", okLine: "#dda0b5" }
+  },
+  violet: {
+    label: "Violet",
+    dark: { acc: "#a994ff", accDim: "rgba(169, 148, 255, 0.13)", accInk: "#0d091d", accLine: "rgba(169, 148, 255, 0.38)", okLine: "#514778" },
+    light: { acc: "#6954bb", accDim: "rgba(105, 84, 187, 0.12)", accInk: "#f7f4ff", accLine: "rgba(105, 84, 187, 0.34)", okLine: "#b1a8db" }
+  }
+};
+const displayFonts: Record<DisplayFontId, { label: string; value: string }> = {
+  space: { label: "Space Grotesk", value: "\"Space Grotesk Variable\", \"Space Grotesk\", \"JetBrains Mono Variable\", sans-serif" },
+  mono: { label: "JetBrains Mono", value: "\"JetBrains Mono Variable\", \"JetBrains Mono\", ui-monospace, monospace" },
+  system: { label: "System Sans", value: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif" },
+  wide: { label: "Wide System", value: "\"Arial Black\", \"Arial\", ui-sans-serif, system-ui, sans-serif" }
+};
+
+type AccentPalette = { acc: string; accDim: string; accInk: string; accLine: string; okLine: string };
 
 export function App(): ReactElement {
   const discoverySearchRequestId = useRef(0);
@@ -331,6 +385,7 @@ export function App(): ReactElement {
   const [playbackBusy, setPlaybackBusy] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
+  const [appearance, setAppearance] = useState<AppearanceSettings>(() => loadAppearanceSettings());
   const [artistsViewResetKey, setArtistsViewResetKey] = useState(0);
   const [artistViewTarget, setArtistViewTarget] = useState<ArtistViewTarget | null>(null);
   const [albumViewTarget, setAlbumViewTarget] = useState<AlbumViewTarget | null>(null);
@@ -348,6 +403,10 @@ export function App(): ReactElement {
     volumePercent: 100,
     error: null
   });
+
+  useEffect(() => {
+    window.localStorage.setItem(appearanceStorageKey, JSON.stringify(appearance));
+  }, [appearance]);
 
   async function refreshLibrary(query = search): Promise<void> {
     try {
@@ -1503,6 +1562,28 @@ export function App(): ReactElement {
     setActiveView("Albums");
   }
 
+  async function handleSelectBackgroundImage(): Promise<void> {
+    const path = await window.musicOs?.selectBackgroundImage();
+    if (!path) {
+      return;
+    }
+
+    setAppearance((current) => {
+      const existing = current.backgroundImages.filter((image) => image.path !== path);
+      const nextImage: SavedBackgroundImage = {
+        id: crypto.randomUUID(),
+        name: basenameFromPath(path),
+        path,
+        addedAt: new Date().toISOString()
+      };
+      return {
+        ...current,
+        backgroundImagePath: path,
+        backgroundImages: [nextImage, ...existing].slice(0, 12)
+      };
+    });
+  }
+
   async function handleAgentSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const message = agentInput.trim();
@@ -1892,6 +1973,8 @@ export function App(): ReactElement {
     () => (playback.currentFileId ? files.find((file) => file.id === playback.currentFileId) ?? null : null),
     [files, playback.currentFileId]
   );
+  const appearanceStyle = useMemo(() => getAppearanceStyle(appearance), [appearance]);
+  const appShellClassName = `appShell ${inspectorCollapsed ? "inspectorCollapsed " : ""}theme-${appearance.mode}`.trim();
   const subtitle = useMemo(() => {
     if (total === 0) {
       return "Add a folder and scan local audio files.";
@@ -1900,7 +1983,7 @@ export function App(): ReactElement {
   }, [total]);
 
   return (
-    <main className={inspectorCollapsed ? "appShell inspectorCollapsed" : "appShell"}>
+    <main className={appShellClassName} style={appearanceStyle}>
       <aside className="sidebar">
         <div className="brand">
           <span className="brandMark">MO</span>
@@ -2111,9 +2194,12 @@ export function App(): ReactElement {
           <JobsView jobsState={jobsState} selectedJob={selectedJobDetail} onInspect={handleInspectJob} onRefresh={refreshJobs} />
         ) : activeView === "Settings" ? (
           <SettingsView
+            appearance={appearance}
             draft={tasteProfileDraft}
             state={tasteProfileState}
+            setAppearance={setAppearance}
             setDraft={setTasteProfileDraft}
+            onSelectBackgroundImage={handleSelectBackgroundImage}
             onSave={handleSaveTasteProfile}
           />
         ) : (
@@ -4158,21 +4244,133 @@ const tasteListFields: Array<{ key: keyof Pick<
 ];
 
 function SettingsView({
+  appearance,
   draft,
   state,
+  setAppearance,
   setDraft,
+  onSelectBackgroundImage,
   onSave
 }: {
+  appearance: AppearanceSettings;
   draft: TasteProfile;
   state: TasteProfileState;
+  setAppearance(settings: AppearanceSettings | ((current: AppearanceSettings) => AppearanceSettings)): void;
   setDraft(profile: TasteProfile): void;
+  onSelectBackgroundImage(): Promise<void>;
   onSave(): Promise<void>;
 }): ReactElement {
   const latest = "profile" in state ? state.profile : emptyTasteProfile;
+  const accentOptions = Object.entries(accentPalettes) as Array<[AccentColorId, (typeof accentPalettes)[AccentColorId]]>;
+  const fontOptions = Object.entries(displayFonts) as Array<[DisplayFontId, (typeof displayFonts)[DisplayFontId]]>;
 
   return (
     <>
       {state.status === "error" ? <div className="inlineError">{state.message}</div> : null}
+      <section className="settingsPanel appearancePanel" aria-label="Appearance preferences">
+        <div>
+          <strong>Appearance</strong>
+          <span>Customize the app theme, highlight color, display type, and main background.</span>
+        </div>
+        <div className="appearanceGrid">
+          <label className="settingsField compact">
+            <span>Mode</span>
+            <select
+              value={appearance.mode}
+              onChange={(event) =>
+                setAppearance((current) => ({
+                  ...current,
+                  mode: event.target.value as AppearanceMode,
+                  accent: isAccentColorId(current.accent) ? current.accent : defaultAppearanceSettings.accent
+                }))
+              }
+            >
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </label>
+          <label className="settingsField compact">
+            <span>Display font</span>
+            <select
+              value={appearance.displayFont}
+              onChange={(event) =>
+                setAppearance((current) => ({
+                  ...current,
+                  displayFont: event.target.value as DisplayFontId
+                }))
+              }
+            >
+              {fontOptions.map(([id, font]) => (
+                <option key={id} value={id}>
+                  {font.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="appearanceSwatches" aria-label="Highlight color">
+          {accentOptions.map(([id, palette]) => {
+            const color = palette[appearance.mode].acc;
+            return (
+              <button
+                aria-label={`Use ${palette.label} highlight`}
+                className={appearance.accent === id ? "colorSwatch active" : "colorSwatch"}
+                key={id}
+                style={{ "--swatch": color } as CSSProperties}
+                title={palette.label}
+                type="button"
+                onClick={() => setAppearance((current) => ({ ...current, accent: id }))}
+              >
+                <span>{palette.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="backgroundPicker">
+          <div>
+            <strong>Background image</strong>
+            <span>{appearance.backgroundImagePath ? basenameFromPath(appearance.backgroundImagePath) : "No image selected."}</span>
+          </div>
+          <button type="button" onClick={() => void onSelectBackgroundImage()}>
+            Choose Image
+          </button>
+          <button
+            className="secondary"
+            disabled={!appearance.backgroundImagePath}
+            type="button"
+            onClick={() => setAppearance((current) => ({ ...current, backgroundImagePath: null }))}
+          >
+            Clear
+          </button>
+        </div>
+        {appearance.backgroundImages.length > 0 ? (
+          <div className="backgroundHistory" aria-label="Saved background images">
+            {appearance.backgroundImages.map((image) => (
+              <div className={appearance.backgroundImagePath === image.path ? "backgroundHistoryItem active" : "backgroundHistoryItem"} key={image.id}>
+                <button type="button" onClick={() => setAppearance((current) => ({ ...current, backgroundImagePath: image.path }))}>
+                  <span>{image.name}</span>
+                  <small>{image.path}</small>
+                </button>
+                <button
+                  aria-label={`Remove ${image.name}`}
+                  className="secondary"
+                  type="button"
+                  onClick={() =>
+                    setAppearance((current) => ({
+                      ...current,
+                      backgroundImagePath: current.backgroundImagePath === image.path ? null : current.backgroundImagePath,
+                      backgroundImages: current.backgroundImages.filter((item) => item.id !== image.id)
+                    }))
+                  }
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
       <section className="settingsHeader">
         <div>
           <strong>Taste Profile</strong>
@@ -7418,6 +7616,111 @@ export function mergePlaybackState(
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function loadAppearanceSettings(): AppearanceSettings {
+  try {
+    const raw = window.localStorage.getItem(appearanceStorageKey);
+    if (!raw) {
+      return defaultAppearanceSettings;
+    }
+    const value = JSON.parse(raw) as Partial<AppearanceSettings>;
+    const mode = value.mode === "light" || value.mode === "dark" ? value.mode : defaultAppearanceSettings.mode;
+    const accent = isAccentColorId(value.accent) ? value.accent : defaultAppearanceSettings.accent;
+    const displayFont = isDisplayFontId(value.displayFont) ? value.displayFont : defaultAppearanceSettings.displayFont;
+    const backgroundImages = Array.isArray(value.backgroundImages)
+      ? value.backgroundImages.filter(isSavedBackgroundImage).slice(0, 12)
+      : [];
+    const backgroundImagePath =
+      typeof value.backgroundImagePath === "string" && value.backgroundImagePath.trim() ? value.backgroundImagePath : null;
+    return { accent, backgroundImagePath, backgroundImages, displayFont, mode };
+  } catch {
+    return defaultAppearanceSettings;
+  }
+}
+
+function getAppearanceStyle(settings: AppearanceSettings): CSSProperties {
+  const theme = settings.mode === "light" ? getLightThemeVariables() : getDarkThemeVariables();
+  const accent = accentPalettes[settings.accent][settings.mode];
+  const backgroundUrl = settings.backgroundImagePath ? pathToBackgroundUrl(settings.backgroundImagePath) : "";
+  return {
+    ...theme,
+    "--acc": accent.acc,
+    "--acc-dim": accent.accDim,
+    "--acc-ink": accent.accInk,
+    "--acc-line": accent.accLine,
+    "--app-bg-image": backgroundUrl ? `url("${backgroundUrl}")` : "none",
+    "--font-head": displayFonts[settings.displayFont].value,
+    "--ok-line": accent.okLine
+  } as CSSProperties;
+}
+
+function getDarkThemeVariables(): Record<string, string> {
+  return {
+    "--bg0": "#0b0d10",
+    "--bg1": "#10131a",
+    "--bg2": "#151923",
+    "--bg3": "#1b2130",
+    "--center-bg-tint": "rgba(11, 13, 16, 0.78)",
+    "--center-bg-vignette": "rgba(11, 13, 16, 0.96)",
+    "--line": "#1f2633",
+    "--line2": "#2b3445",
+    "--panel-bg0": "rgba(11, 13, 16, 0.91)",
+    "--panel-bg1": "rgba(16, 19, 26, 0.92)",
+    "--panel-bg2": "rgba(21, 25, 35, 0.9)",
+    "--panel-bg3": "rgba(27, 33, 48, 0.9)",
+    "--tx0": "#e9eef5",
+    "--tx1": "#aab3c5",
+    "--tx2": "#69748c"
+  };
+}
+
+function getLightThemeVariables(): Record<string, string> {
+  return {
+    "--bg0": "#eef1ed",
+    "--bg1": "#f8faf6",
+    "--bg2": "#eef2ec",
+    "--bg3": "#e4eadf",
+    "--center-bg-tint": "rgba(238, 241, 237, 0.76)",
+    "--center-bg-vignette": "rgba(238, 241, 237, 0.96)",
+    "--line": "#d8dfd4",
+    "--line2": "#c1ccbd",
+    "--panel-bg0": "rgba(238, 241, 237, 0.9)",
+    "--panel-bg1": "rgba(248, 250, 246, 0.92)",
+    "--panel-bg2": "rgba(238, 242, 236, 0.9)",
+    "--panel-bg3": "rgba(228, 234, 223, 0.9)",
+    "--tx0": "#151a17",
+    "--tx1": "#4f5c55",
+    "--tx2": "#77857c"
+  };
+}
+
+function isAccentColorId(value: unknown): value is AccentColorId {
+  return typeof value === "string" && value in accentPalettes;
+}
+
+function isDisplayFontId(value: unknown): value is DisplayFontId {
+  return typeof value === "string" && value in displayFonts;
+}
+
+function isSavedBackgroundImage(value: unknown): value is SavedBackgroundImage {
+  if (value == null || typeof value !== "object") {
+    return false;
+  }
+  const item = value as Partial<SavedBackgroundImage>;
+  return typeof item.id === "string" && typeof item.name === "string" && typeof item.path === "string" && typeof item.addedAt === "string";
+}
+
+function pathToBackgroundUrl(path: string): string {
+  const normalized = path.replaceAll("\\", "/");
+  const drivePath = normalized.match(/^([a-zA-Z]):\/(.*)$/);
+  if (drivePath) {
+    return encodeURI(`file:///${drivePath[1]}:/${drivePath[2]}`);
+  }
+  if (normalized.startsWith("/")) {
+    return encodeURI(`file://${normalized}`);
+  }
+  return encodeURI(normalized);
 }
 
 function getViewSubtitle(view: string): string {

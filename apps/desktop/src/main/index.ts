@@ -34,6 +34,22 @@ ipcMain.handle("dialog:select-import-folder", async () => {
   return result.filePaths.map(toWslPath);
 });
 
+ipcMain.handle("dialog:select-background-image", async () => {
+  const result = await dialog.showOpenDialog({
+    filters: [
+      {
+        name: "Images",
+        extensions: ["jpg", "jpeg", "png", "webp", "gif", "avif"]
+      }
+    ],
+    properties: ["openFile"]
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  return toWslPath(result.filePaths[0]);
+});
+
 async function createWindow(): Promise<void> {
   const window = new BrowserWindow({
     width: 1280,

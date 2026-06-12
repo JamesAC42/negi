@@ -9,6 +9,7 @@ export interface MusicOsBridge {
   selectLibraryFolder(): Promise<string | null>;
   selectImportFiles(): Promise<string[]>;
   selectImportFolder(): Promise<string[]>;
+  selectBackgroundImage(): Promise<string | null>;
 }
 
 const bridge: MusicOsBridge = {
@@ -27,6 +28,9 @@ const bridge: MusicOsBridge = {
   },
   async selectImportFolder() {
     return ipcRenderer.invoke("dialog:select-import-folder") as Promise<string[]>;
+  },
+  async selectBackgroundImage() {
+    return ipcRenderer.invoke("dialog:select-background-image") as Promise<string | null>;
   }
 };
 
