@@ -2677,6 +2677,22 @@ function DownloadIcon(): ReactElement {
   );
 }
 
+function DiscoveryLoadingState({ query }: { query: string }): ReactElement {
+  return (
+    <div className="discoveryLoadingState" role="status" aria-live="polite">
+      <div className="discoveryLoadingMark" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div>
+        <strong>Searching slskd</strong>
+        <span>{query ? `Waiting for sources matching "${query}".` : "Waiting for source responses."}</span>
+      </div>
+    </div>
+  );
+}
+
 function NowPlayingActions({
   file,
   variant,
@@ -4969,9 +4985,6 @@ function DiscoveryView({
               onChange={(event) => setPastedListText(event.target.value)}
             />
             <div className="discoveryListParserFooter">
-              <span className="muted">
-                {parsedListState.message ?? "Parsed rows are checked against the indexed library and can launch Discovery searches."}
-              </span>
               <button
                 className="secondary"
                 disabled={!pastedListText.trim() || parsedListState.status === "parsing"}
@@ -5142,13 +5155,15 @@ function DiscoveryView({
                 </div>
               )
             ) : releaseFilteredClusters.length === 0 ? (
-              <div className="emptyState">
-                {discoveryState.status === "searching"
-                  ? "Searching slskd."
-                  : discoveryState.results.length > 0
+              discoveryState.status === "searching" ? (
+                <DiscoveryLoadingState query={discoveryState.query} />
+              ) : (
+                <div className="emptyState">
+                  {discoveryState.results.length > 0
                     ? "No results match the active Discovery filters."
                     : "Search results will appear here. Downloads will be staged through Imports in the next step."}
-              </div>
+                </div>
+              )
             ) : (
               <>
                 {visibleClusters.map((cluster) => (

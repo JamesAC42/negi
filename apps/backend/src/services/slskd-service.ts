@@ -160,6 +160,7 @@ export class SlskdService {
     let latest: unknown = {};
     const startedAt = Date.now();
     const deadline = startedAt + timeoutMs + slskdSearchGraceMs();
+    let completedEmptyAt: number | null = null;
     for (let attempt = 0; Date.now() < deadline; attempt += 1) {
       await delay(searchPollDelayMs(attempt));
       latest = await this.fetchJson(`/api/v0/searches/${encodeURIComponent(searchId)}?includeResponses=true`, {
@@ -168,10 +169,21 @@ export class SlskdService {
       const state = asRecord(latest);
       const results = extractResults(latest);
       if (state && (state.isComplete === true || stringValue(state.state)?.toLowerCase().includes("completed"))) {
-        if (results.length === 0 && searchReportedResultCount(state) > 0 && Date.now() < deadline) {
-          continue;
+        if (results.length > 0) {
+          return latest;
+        }
+        if (Date.now() < deadline) {
+          completedEmptyAt ??= Date.now();
+          if (
+            searchReportedResultCount(state) > 0 ||
+            Date.now() - completedEmptyAt < slskdSearchCompletedEmptyGraceMs()
+          ) {
+            continue;
+          }
         }
         return latest;
+      } else {
+        completedEmptyAt = null;
       }
       if (results.length >= responseLimit || (results.length > 0 && Date.now() - startedAt >= slskdSearchPartialAfterMs())) {
         return latest;
@@ -269,7 +281,7 @@ export class SlskdService {
         ...authHeaders(this.config),
         ...init.headers
       },
-      signal: AbortSignal.timeout(20000)
+      signal: AbortSignal.timeout(slskdRequestTimeoutMs())
     });
     const text = await response.text();
     if (!response.ok) {
@@ -287,22 +299,30 @@ function delay(ms: number): Promise<void> {
 }
 
 function slskdSearchTimeoutMs(): number {
-  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_TIMEOUT_MS", 20_000);
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_TIMEOUT_MS", 60_000);
 }
 
 function slskdSearchGraceMs(): number {
-  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_GRACE_MS", 5_000);
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_GRACE_MS", 20_000);
 }
 
 function slskdSearchPartialAfterMs(): number {
-  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_PARTIAL_AFTER_MS", 2_500);
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_PARTIAL_AFTER_MS", 8_000);
+}
+
+function slskdSearchCompletedEmptyGraceMs(): number {
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_COMPLETED_EMPTY_GRACE_MS", 8_000);
+}
+
+function slskdRequestTimeoutMs(): number {
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_REQUEST_TIMEOUT_MS", 45_000);
 }
 
 function searchPollDelayMs(attempt: number): number {
   if (attempt === 0) {
-    return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_INITIAL_POLL_MS", 150);
+    return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_INITIAL_POLL_MS", 100);
   }
-  return Math.min(readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_POLL_MAX_MS", 900), 250 + attempt * 150);
+  return Math.min(readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_POLL_MAX_MS", 500), 175 + attempt * 100);
 }
 
 function searchReportedResultCount(state: Record<string, unknown>): number {
