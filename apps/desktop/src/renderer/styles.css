@@ -2358,14 +2358,19 @@ span.artFallback svg {
   color: var(--tx0);
 }
 
+.backgroundModes {
+  display: grid;
+  gap: 0.625rem;
+  border-top: 0.0625rem solid var(--line);
+  padding-top: 0.75rem;
+}
+
 .backgroundPicker {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 0.625rem;
   min-width: 0;
-  border-top: 0.0625rem solid var(--line);
-  padding-top: 0.75rem;
 }
 
 .backgroundPicker div {

@@ -217,10 +217,12 @@ type AccentColorId = "lime" | "cyan" | "amber" | "rose" | "violet";
 type DisplayFontId = "space" | "mono" | "system" | "wide";
 type SelectedBackgroundImage = { path: string; url: string };
 type SavedBackgroundImage = { id: string; name: string; path: string; url: string; addedAt: string };
+type AppearanceBackgrounds = Record<AppearanceMode, SelectedBackgroundImage | null>;
 type AppearanceSettings = {
   accent: AccentColorId;
   backgroundImagePath: string | null;
   backgroundImageUrl: string | null;
+  backgroundDefaults: AppearanceBackgrounds;
   backgroundImages: SavedBackgroundImage[];
   displayFont: DisplayFontId;
   mode: AppearanceMode;
@@ -266,10 +268,12 @@ const defaultAppearanceSettings: AppearanceSettings = {
   accent: "lime",
   backgroundImagePath: null,
   backgroundImageUrl: null,
+  backgroundDefaults: { dark: null, light: null },
   backgroundImages: [],
   displayFont: "space",
   mode: "dark"
 };
+const appearanceModes: AppearanceMode[] = ["dark", "light"];
 const accentPalettes: Record<AccentColorId, { label: string; dark: AccentPalette; light: AccentPalette }> = {
   lime: {
     label: "Lime",
@@ -1565,7 +1569,7 @@ export function App(): ReactElement {
     setActiveView("Albums");
   }
 
-  async function handleSelectBackgroundImage(): Promise<void> {
+  async function handleSelectBackgroundImage(mode: AppearanceMode): Promise<void> {
     const image = (await window.musicOs?.selectBackgroundImage()) as SelectedBackgroundImage | null | undefined;
     if (!image) {
       return;
@@ -1582,6 +1586,10 @@ export function App(): ReactElement {
       };
       return {
         ...current,
+        backgroundDefaults: {
+          ...current.backgroundDefaults,
+          [mode]: image
+        },
         backgroundImagePath: image.path,
         backgroundImageUrl: image.url,
         backgroundImages: [nextImage, ...existing].slice(0, 12)
@@ -4264,7 +4272,7 @@ function SettingsView({
   state: TasteProfileState;
   setAppearance(settings: AppearanceSettings | ((current: AppearanceSettings) => AppearanceSettings)): void;
   setDraft(profile: TasteProfile): void;
-  onSelectBackgroundImage(): Promise<void>;
+  onSelectBackgroundImage(mode: AppearanceMode): Promise<void>;
   onSave(): Promise<void>;
 }): ReactElement {
   const latest = "profile" in state ? state.profile : emptyTasteProfile;
@@ -4333,30 +4341,51 @@ function SettingsView({
             );
           })}
         </div>
-        <div className="backgroundPicker">
-          <div>
-            <strong>Background image</strong>
-            <span>{appearance.backgroundImagePath ? basenameFromPath(appearance.backgroundImagePath) : "No image selected."}</span>
-          </div>
-          <button type="button" onClick={() => void onSelectBackgroundImage()}>
-            Choose Image
-          </button>
-          <button
-            className="secondary"
-            disabled={!appearance.backgroundImagePath}
-            type="button"
-            onClick={() => setAppearance((current) => ({ ...current, backgroundImagePath: null, backgroundImageUrl: null }))}
-          >
-            Clear
-          </button>
+        <div className="backgroundModes" aria-label="Mode background images">
+          {appearanceModes.map((mode) => {
+            const modeBackground = appearance.backgroundDefaults[mode];
+            return (
+              <div className="backgroundPicker" key={mode}>
+                <div>
+                  <strong>{mode === "dark" ? "Dark background" : "Light background"}</strong>
+                  <span>{modeBackground ? basenameFromPath(modeBackground.path) : "No image selected."}</span>
+                </div>
+                <button type="button" onClick={() => void onSelectBackgroundImage(mode)}>
+                  Choose Image
+                </button>
+                <button
+                  className="secondary"
+                  disabled={!modeBackground}
+                  type="button"
+                  onClick={() =>
+                    setAppearance((current) => ({
+                      ...current,
+                      backgroundDefaults: { ...current.backgroundDefaults, [mode]: null },
+                      backgroundImagePath: current.mode === mode ? null : current.backgroundImagePath,
+                      backgroundImageUrl: current.mode === mode ? null : current.backgroundImageUrl
+                    }))
+                  }
+                >
+                  Clear
+                </button>
+              </div>
+            );
+          })}
         </div>
         {appearance.backgroundImages.length > 0 ? (
           <div className="backgroundHistory" aria-label="Saved background images">
             {appearance.backgroundImages.map((image) => (
-              <div className={appearance.backgroundImagePath === image.path ? "backgroundHistoryItem active" : "backgroundHistoryItem"} key={image.id}>
+              <div className={appearance.backgroundDefaults[appearance.mode]?.path === image.path ? "backgroundHistoryItem active" : "backgroundHistoryItem"} key={image.id}>
                 <button
                   type="button"
-                  onClick={() => setAppearance((current) => ({ ...current, backgroundImagePath: image.path, backgroundImageUrl: image.url }))}
+                  onClick={() =>
+                    setAppearance((current) => ({
+                      ...current,
+                      backgroundDefaults: { ...current.backgroundDefaults, [current.mode]: { path: image.path, url: image.url } },
+                      backgroundImagePath: image.path,
+                      backgroundImageUrl: image.url
+                    }))
+                  }
                 >
                   <span>{image.name}</span>
                   <small>{image.path}</small>
@@ -4368,6 +4397,10 @@ function SettingsView({
                   onClick={() =>
                     setAppearance((current) => ({
                       ...current,
+                      backgroundDefaults: {
+                        dark: current.backgroundDefaults.dark?.path === image.path ? null : current.backgroundDefaults.dark,
+                        light: current.backgroundDefaults.light?.path === image.path ? null : current.backgroundDefaults.light
+                      },
                       backgroundImagePath: current.backgroundImagePath === image.path ? null : current.backgroundImagePath,
                       backgroundImageUrl: current.backgroundImagePath === image.path ? null : current.backgroundImageUrl,
                       backgroundImages: current.backgroundImages.filter((item) => item.id !== image.id)
@@ -7648,7 +7681,9 @@ function loadAppearanceSettings(): AppearanceSettings {
       typeof value.backgroundImageUrl === "string" && value.backgroundImageUrl.trim()
         ? value.backgroundImageUrl
         : backgroundImages.find((image) => image.path === backgroundImagePath)?.url ?? (backgroundImagePath ? pathToBackgroundUrl(backgroundImagePath) : null);
-    return { accent, backgroundImagePath, backgroundImageUrl, backgroundImages, displayFont, mode };
+    const legacyBackground = backgroundImagePath && backgroundImageUrl ? { path: backgroundImagePath, url: backgroundImageUrl } : null;
+    const backgroundDefaults = normalizeAppearanceBackgrounds(value.backgroundDefaults, legacyBackground);
+    return { accent, backgroundDefaults, backgroundImagePath, backgroundImageUrl, backgroundImages, displayFont, mode };
   } catch {
     return defaultAppearanceSettings;
   }
@@ -7657,7 +7692,8 @@ function loadAppearanceSettings(): AppearanceSettings {
 function getAppearanceStyle(settings: AppearanceSettings): CSSProperties {
   const theme = settings.mode === "light" ? getLightThemeVariables() : getDarkThemeVariables();
   const accent = accentPalettes[settings.accent][settings.mode];
-  const backgroundUrl = settings.backgroundImageUrl ?? (settings.backgroundImagePath ? pathToBackgroundUrl(settings.backgroundImagePath) : "");
+  const background = settings.backgroundDefaults[settings.mode];
+  const backgroundUrl = background?.url ?? "";
   return {
     ...theme,
     "--acc": accent.acc,
@@ -7718,6 +7754,33 @@ function isAccentColorId(value: unknown): value is AccentColorId {
 
 function isDisplayFontId(value: unknown): value is DisplayFontId {
   return typeof value === "string" && value in displayFonts;
+}
+
+function normalizeAppearanceBackgrounds(value: unknown, fallback: SelectedBackgroundImage | null): AppearanceBackgrounds {
+  if (value == null || typeof value !== "object") {
+    return { dark: fallback, light: fallback };
+  }
+  const item = value as Partial<Record<AppearanceMode, SelectedBackgroundImage>>;
+  const hasDark = Object.prototype.hasOwnProperty.call(item, "dark");
+  const hasLight = Object.prototype.hasOwnProperty.call(item, "light");
+  return {
+    dark: hasDark ? normalizeSelectedBackgroundImage(item.dark) : fallback,
+    light: hasLight ? normalizeSelectedBackgroundImage(item.light) : fallback
+  };
+}
+
+function normalizeSelectedBackgroundImage(value: unknown): SelectedBackgroundImage | null {
+  if (value == null || typeof value !== "object") {
+    return null;
+  }
+  const item = value as Partial<SelectedBackgroundImage>;
+  if (typeof item.path !== "string" || !item.path.trim()) {
+    return null;
+  }
+  return {
+    path: item.path,
+    url: typeof item.url === "string" && item.url.trim() ? item.url : pathToBackgroundUrl(item.path)
+  };
 }
 
 function normalizeSavedBackgroundImage(value: unknown): SavedBackgroundImage | null {
