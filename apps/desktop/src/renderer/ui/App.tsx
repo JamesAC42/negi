@@ -2171,18 +2171,14 @@ export function App(): ReactElement {
             setSortMode={setDiscoverySort}
             onGroupSelect={toggleDiscoveryGroupSelection}
             onDownloadSelection={handleProposeDiscoveryDownload}
-            onCancelDownload={handleCancelDiscoveryDownload}
             onInspectGroup={setInspectedDiscoveryGroupId}
-            onOpenImports={() => setActiveView("Imports")}
+            onOpenJobs={() => setActiveView("Jobs")}
             onRefreshHealth={refreshDiscoveryHealth}
             onProposeSavedCandidateDownload={handleProposeSavedDiscoveryCandidateDownload}
             onRemoveSavedCandidate={handleRemoveSavedDiscoveryCandidate}
-            onRetryDownload={handleRetryDiscoveryDownload}
             onSaveCandidate={handleSaveDiscoveryCandidate}
             onSaveParsedList={handleSaveParsedDiscoveryList}
             onSearchParsedItem={handleSearchParsedDiscoveryItem}
-            onSendCandidateToAgent={handleSendDiscoveryCandidateToAgent}
-            onSendSavedCandidateToAgent={handleSendSavedDiscoveryCandidateToAgent}
             onLoadSavedList={handleLoadSavedDiscoveryList}
             onSearchSavedListMissing={handleSearchSavedDiscoveryListMissing}
             onParseList={handleParseDiscoveryList}
@@ -2581,6 +2577,16 @@ function StarIcon(): ReactElement {
   return (
     <svg aria-hidden="true" viewBox="0 0 16 16">
       <path d="m8 1.9 1.8 3.7 4.1.6-3 2.9.7 4.1L8 11.3l-3.6 1.9.7-4.1-3-2.9 4.1-.6z" />
+    </svg>
+  );
+}
+
+function DownloadIcon(): ReactElement {
+  return (
+    <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" viewBox="0 0 16 16">
+      <path d="M8 2.5v7" />
+      <path d="m4.8 7.2 3.2 3.3 3.2-3.3" />
+      <path d="M3 12.8h10" />
     </svg>
   );
 }
@@ -4647,18 +4653,14 @@ function DiscoveryView({
   setSortMode,
   onGroupSelect,
   onDownloadSelection,
-  onCancelDownload,
   onInspectGroup,
-  onOpenImports,
+  onOpenJobs,
   onRefreshHealth,
   onProposeSavedCandidateDownload,
   onRemoveSavedCandidate,
-  onRetryDownload,
   onSaveCandidate,
   onSaveParsedList,
   onSearchParsedItem,
-  onSendCandidateToAgent,
-  onSendSavedCandidateToAgent,
   onLoadSavedList,
   onSearchSavedListMissing,
   onParseList,
@@ -4696,18 +4698,14 @@ function DiscoveryView({
   setSortMode(value: DiscoverySort): void;
   onGroupSelect(group: DiscoveryGroup): void;
   onDownloadSelection(): Promise<void>;
-  onCancelDownload(jobId: string): Promise<void>;
   onInspectGroup(groupId: string): void;
-  onOpenImports(): void;
+  onOpenJobs(): void;
   onRefreshHealth(): Promise<void>;
   onProposeSavedCandidateDownload(candidate: SavedDiscoveryCandidate): Promise<void>;
   onRemoveSavedCandidate(candidateId: string): Promise<void>;
-  onRetryDownload(jobId: string): Promise<void>;
   onSaveCandidate(group: DiscoveryGroup): Promise<void>;
   onSaveParsedList(): Promise<void>;
   onSearchParsedItem(item: AgentParsedListItem): Promise<void>;
-  onSendCandidateToAgent(group: DiscoveryGroup): Promise<void>;
-  onSendSavedCandidateToAgent(candidate: SavedDiscoveryCandidate): Promise<void>;
   onLoadSavedList(list: SavedDiscoveryList): void;
   onSearchSavedListMissing(list: SavedDiscoveryList): Promise<void>;
   onParseList(event: FormEvent<HTMLFormElement>): Promise<void>;
@@ -4741,17 +4739,12 @@ function DiscoveryView({
     [discoveryState.results, groupingQuery, libraryFiles]
   );
   const [releaseFilter, setReleaseFilter] = useState<DiscoveryReleaseFilter>("recommended");
-  const [visibleClusterLimit, setVisibleClusterLimit] = useState(24);
+  const [visibleClusterLimit, setVisibleClusterLimit] = useState(10);
+  const [discoverySearchMode, setDiscoverySearchMode] = useState<"search" | "list">("search");
+  const [discoveryMainView, setDiscoveryMainView] = useState<"results" | "saved">("results");
   const releaseFilteredClusters = useMemo(
     () => filterDiscoveryClustersByRelease(clusters, libraryFiles, releaseFilter),
     [clusters, libraryFiles, releaseFilter]
-  );
-  const topCandidateClusters = useMemo(
-    () =>
-      releaseFilteredClusters
-        .filter((cluster) => cluster.bestGroup.availableCount > 0)
-        .slice(0, 6),
-    [releaseFilteredClusters]
   );
   const visibleClusters = releaseFilteredClusters.slice(0, visibleClusterLimit);
   const hiddenClusterCount = Math.max(0, releaseFilteredClusters.length - visibleClusters.length);
@@ -4760,6 +4753,10 @@ function DiscoveryView({
   const selectedFileCount = discoveryState.results.filter((result) => selectedFileIds.has(result.id) && !result.isLocked && isAudioDiscoveryResult(result)).length;
   const downloadsConfigured = discoveryState.health?.downloadsConfigured === true;
   const canDownload = selectedFileCount > 0 && downloadState.status !== "working" && downloadsConfigured;
+  const downloadButtonLabel =
+    downloadState.status === "working"
+      ? "Creating Download Batch"
+      : `Download ${selectedFileCount.toLocaleString()} File${selectedFileCount === 1 ? "" : "s"}`;
   const [parsedListFilter, setParsedListFilter] = useState<"all" | "missing" | "owned">("all");
   const visibleParsedListItems = parsedListState.items.filter((item) =>
     parsedListFilter === "missing"
@@ -4771,73 +4768,93 @@ function DiscoveryView({
   const firstMissingParsedItem = parsedListState.items.find((item) => item.ownedMatchCount === 0) ?? null;
   const missingParsedCount = parsedListState.items.filter((item) => item.ownedMatchCount === 0).length;
   const activeDownloadCount = downloadJobs.filter((job) => job.status === "queued" || job.status === "running").length;
-  const stagedDownloadCount = downloadJobs.reduce((totalCount, job) => totalCount + job.completedCount, 0);
-  const discoveryStatusLabel = discoveryState.health?.reachable ? "Connected" : "Needs Check";
   const discoveryStatusDetail = discoveryState.health?.message ?? discoveryState.health?.url ?? "Check slskd before searching.";
 
   useEffect(() => {
-    setVisibleClusterLimit(24);
+    setVisibleClusterLimit(10);
   }, [availabilityFilter, discoveryState.results, formatFilter, groupingQuery, libraryFilter, releaseFilter, sortMode]);
 
   return (
     <section className="discoveryControls discoveryPage" aria-label="Discovery">
       <section className="discoveryHero">
         <div className="discoveryHeroCopy">
-          <span className="eyebrow">Discovery</span>
-          <h2>Find, compare, and stage albums.</h2>
-          <p>Search slskd, review candidate folders against your library, then create a reviewable download batch for Imports.</p>
-        </div>
-        <form className="discoverySearchForm" onSubmit={(event) => void onSearch(event)}>
-          <label>
-            <span>Source</span>
-            <select
-              aria-label="Discovery source"
-              value={discoverySource}
-              onChange={(event) => setDiscoverySource(event.target.value as DiscoverySource)}
+          <h2>Discovery</h2>
+          <div className="segmentedControl" aria-label="Discovery mode">
+            <button
+              className={discoverySearchMode === "search" ? "active" : ""}
+              type="button"
+              onClick={() => setDiscoverySearchMode("search")}
             >
-              <option value="slskd">slskd</option>
-            </select>
-          </label>
-          <label className="discoverySearchInput">
-            <span>Search</span>
-            <input
-              aria-label="Search Discovery source"
-              placeholder={discoverySource === "slskd" ? "Artist, album, catalog number, or pasted-list query" : "Search Discovery"}
-              value={discoveryQuery}
-              onChange={(event) => setDiscoveryQuery(event.target.value)}
+              Search
+            </button>
+            <button
+              className={discoverySearchMode === "list" ? "active" : ""}
+              type="button"
+              onClick={() => setDiscoverySearchMode("list")}
+            >
+              List
+            </button>
+          </div>
+        </div>
+        {discoverySearchMode === "search" ? (
+          <form className="discoverySearchForm" onSubmit={(event) => void onSearch(event)}>
+            <label>
+              <span>Source</span>
+              <select
+                aria-label="Discovery source"
+                value={discoverySource}
+                onChange={(event) => setDiscoverySource(event.target.value as DiscoverySource)}
+              >
+                <option value="slskd">slskd</option>
+              </select>
+            </label>
+            <label className="discoverySearchInput">
+              <span>Search</span>
+              <input
+                aria-label="Search Discovery source"
+                placeholder={discoverySource === "slskd" ? "Artist, album, catalog number, or pasted-list query" : "Search Discovery"}
+                value={discoveryQuery}
+                onChange={(event) => setDiscoveryQuery(event.target.value)}
+              />
+            </label>
+            <button disabled={discoveryState.status === "searching" || !discoveryQuery.trim()} type="submit">
+              {discoveryState.status === "searching" ? "Searching" : "Search"}
+            </button>
+            <button className="secondary" type="button" onClick={() => void onRefreshHealth()}>
+              Check
+            </button>
+          </form>
+        ) : (
+          <form className="discoveryListParser" onSubmit={(event) => void onParseList(event)}>
+            <textarea
+              aria-label="Pasted chart or album list"
+              placeholder={"Paste rows, one item per line. Example: 1. Artist - Album (1980)"}
+              value={pastedListText}
+              onChange={(event) => setPastedListText(event.target.value)}
             />
-          </label>
-          <button disabled={discoveryState.status === "searching" || !discoveryQuery.trim()} type="submit">
-            {discoveryState.status === "searching" ? "Searching" : "Search"}
-          </button>
-          <button className="secondary" type="button" onClick={() => void onRefreshHealth()}>
-            Check
-          </button>
-        </form>
+            <div className="discoveryListParserFooter">
+              <span className="muted">
+                {parsedListState.message ?? "Parsed rows are checked against the indexed library and can launch Discovery searches."}
+              </span>
+              <button
+                className="secondary"
+                disabled={!pastedListText.trim() || parsedListState.status === "parsing"}
+                type="submit"
+              >
+                {parsedListState.status === "parsing" ? "Parsing" : "Parse"}
+              </button>
+              <button
+                className="secondary"
+                disabled={parsedListState.items.length === 0 || parsedListState.status === "parsing"}
+                type="button"
+                onClick={() => void onSaveParsedList()}
+              >
+                Save
+              </button>
+            </div>
+          </form>
+        )}
       </section>
-
-      <div className="discoveryWorkflowStrip" aria-label="Discovery workflow">
-        <div>
-          <span>01</span>
-          <strong>Search</strong>
-          <small>{discoveryStatusLabel}</small>
-        </div>
-        <div>
-          <span>02</span>
-          <strong>Review</strong>
-          <small>{releaseFilteredClusters.length.toLocaleString()} release sections</small>
-        </div>
-        <div>
-          <span>03</span>
-          <strong>Select</strong>
-          <small>{selectedFileCount.toLocaleString()} files staged</small>
-        </div>
-        <div>
-          <span>04</span>
-          <strong>Import</strong>
-          <small>{activeDownloadCount.toLocaleString()} active · {stagedDownloadCount.toLocaleString()} ready</small>
-        </div>
-      </div>
 
       {discoveryState.status === "error" ? <div className="inlineError">{discoveryState.message}</div> : null}
       {downloadState.message ? (
@@ -4862,14 +4879,6 @@ function DiscoveryView({
                     {discoveryState.results.length.toLocaleString()} file result{discoveryState.results.length === 1 ? "" : "s"}
                   </span>
                 </div>
-                <button
-                  disabled={!canDownload}
-                  title={downloadsConfigured ? undefined : "Set MUSIC_OS_SLSKD_DOWNLOAD_DIR before proposing downloads"}
-                  type="button"
-                  onClick={() => void onDownloadSelection()}
-                >
-                  {downloadState.status === "working" ? "Creating Batch" : `Propose ${selectedFileCount.toLocaleString()} File${selectedFileCount === 1 ? "" : "s"}`}
-                </button>
               </div>
               <div className="discoveryRefiners">
                 <label>
@@ -4924,27 +4933,17 @@ function DiscoveryView({
             </section>
           ) : null}
 
-          {topCandidateClusters.length > 0 ? (
-            <section className="discoveryHighlights" aria-label="Top Discovery candidates">
-              <div className="discoveryHighlightsHeader">
-                <div>
-                  <span className="eyebrow">Best Matches</span>
-                  <strong>Start with these candidates</strong>
-                  <span>Stageable releases ranked by query match, source quality, and library usefulness.</span>
-                </div>
-              </div>
-              <div className="discoveryHighlightGrid">
-                {topCandidateClusters.map((cluster) => (
-                  <DiscoveryHighlightCard
-                    cluster={cluster}
-                    key={cluster.id}
-                    libraryMatch={summarizeDiscoveryLibraryMatch(cluster.bestGroup, libraryFiles)}
-                    selectedFileIds={selectedFileIds}
-                    onGroupSelect={onGroupSelect}
-                    onInspectGroup={onInspectGroup}
-                  />
-                ))}
-              </div>
+          {discoveryState.results.length > 0 ? (
+            <section className="discoveryDownloadAction" aria-label="Discovery download action">
+              <button
+                disabled={!canDownload}
+                title={downloadsConfigured ? undefined : "Set MUSIC_OS_SLSKD_DOWNLOAD_DIR before proposing downloads"}
+                type="button"
+                onClick={() => void onDownloadSelection()}
+              >
+                <DownloadIcon />
+                <span>{downloadButtonLabel}</span>
+              </button>
             </section>
           ) : null}
 
@@ -4952,13 +4951,61 @@ function DiscoveryView({
             <div className="discoveryResultsHeader">
               <div>
                 <span className="eyebrow">Browse Sources</span>
-                <strong>{groupingQuery ? `Results for "${groupingQuery}"` : "Search results"}</strong>
+                <strong>{discoveryMainView === "results" ? (groupingQuery ? `Results for "${groupingQuery}"` : "Search results") : "Saved candidates"}</strong>
               </div>
-              {selectedFileCount > 0 ? (
-                <span className="statusPill">{selectedFileCount.toLocaleString()} selected files</span>
-              ) : null}
+              <div className="segmentedControl" aria-label="Discovery result view">
+                <button
+                  className={discoveryMainView === "results" ? "active" : ""}
+                  type="button"
+                  onClick={() => setDiscoveryMainView("results")}
+                >
+                  Results
+                </button>
+                <button
+                  className={discoveryMainView === "saved" ? "active" : ""}
+                  type="button"
+                  onClick={() => setDiscoveryMainView("saved")}
+                >
+                  Saved
+                </button>
+              </div>
             </div>
-            {releaseFilteredClusters.length === 0 ? (
+            {discoveryMainView === "saved" ? (
+              savedCandidates.length === 0 ? (
+                <div className="emptyState">Saved candidates will appear here after you save a source.</div>
+              ) : (
+                <div className="savedDiscoveryList savedDiscoveryListMain">
+                  {savedCandidates.map((candidate) => (
+                    <div className="savedDiscoveryItem" key={candidate.id}>
+                      <div>
+                        <strong title={candidate.folder ?? undefined}>
+                          {candidate.releaseArtist ? `${candidate.releaseArtist} - ${candidate.releaseTitle}` : candidate.releaseTitle}
+                        </strong>
+                        <span>
+                          {candidate.username ?? "unknown user"} · {candidate.resultCount.toLocaleString()} file
+                          {candidate.resultCount === 1 ? "" : "s"} · {candidate.qualityLabel}
+                          {candidate.primaryFormat ? ` · ${candidate.primaryFormat}` : ""}
+                        </span>
+                      </div>
+                      <div className="savedDiscoveryActions">
+                        <button
+                          className="compactButton"
+                          disabled={candidate.availableCount === 0 || downloadState.status === "working" || !downloadsConfigured}
+                          title={downloadsConfigured ? undefined : "Set MUSIC_OS_SLSKD_DOWNLOAD_DIR before proposing downloads"}
+                          type="button"
+                          onClick={() => void onProposeSavedCandidateDownload(candidate)}
+                        >
+                          Download
+                        </button>
+                        <button className="secondary compactButton" type="button" onClick={() => void onRemoveSavedCandidate(candidate.id)}>
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : releaseFilteredClusters.length === 0 ? (
               <div className="emptyState">
                 {discoveryState.status === "searching"
                   ? "Searching slskd."
@@ -4980,7 +5027,6 @@ function DiscoveryView({
                     onGroupSelect={onGroupSelect}
                     onInspectGroup={onInspectGroup}
                     onSaveCandidate={onSaveCandidate}
-                    onSendCandidateToAgent={onSendCandidateToAgent}
                     onToggleCluster={onToggleCluster}
                     onToggleFileSelect={onToggleFileSelect}
                     onToggleGroup={onToggleGroup}
@@ -4990,9 +5036,9 @@ function DiscoveryView({
                   <button
                     className="secondary discoveryShowMore"
                     type="button"
-                    onClick={() => setVisibleClusterLimit((current) => current + 24)}
+                    onClick={() => setVisibleClusterLimit((current) => current + 10)}
                   >
-                    Show 24 More ({hiddenClusterCount.toLocaleString()} hidden)
+                    Show 10 More ({hiddenClusterCount.toLocaleString()} hidden)
                   </button>
                 ) : null}
               </>
@@ -5019,52 +5065,15 @@ function DiscoveryView({
               selectedFileCount={inspectedGroup.files.filter((file) => !file.isLocked && isAudioDiscoveryResult(file) && selectedFileIds.has(file.id)).length}
               saved={savedCandidates.some((candidate) => candidate.candidateKey === inspectedGroup.id)}
               onSave={() => onSaveCandidate(inspectedGroup)}
-              onSendToAgent={() => onSendCandidateToAgent(inspectedGroup)}
               onSelect={() => onGroupSelect(inspectedGroup)}
             />
           ) : (
             <section className="discoveryCandidateDetail isEmpty" aria-label="Discovery candidate detail">
               <span className="eyebrow">Candidate Detail</span>
               <strong>Select a source to inspect it.</strong>
-              <span>Use Inspect on any result to see library match, quality flags, preview files, and agent handoff options.</span>
+              <span>Use Inspect on any result to see library match, quality flags, preview files, and staging options.</span>
             </section>
           )}
-
-          <form className="discoveryListParser" onSubmit={(event) => void onParseList(event)}>
-            <div className="discoveryPanelHeader">
-              <div>
-                <span className="eyebrow">List Search</span>
-                <strong>Paste a chart or wantlist</strong>
-              </div>
-              {parsedListState.items.length > 0 ? <span>{missingParsedCount.toLocaleString()} missing</span> : null}
-            </div>
-            <textarea
-              aria-label="Pasted chart or album list"
-              placeholder={"Paste rows, one item per line. Example: 1. Artist - Album (1980)"}
-              value={pastedListText}
-              onChange={(event) => setPastedListText(event.target.value)}
-            />
-            <div className="discoveryListParserFooter">
-              <span className="muted">
-                {parsedListState.message ?? "Parsed rows are checked against the indexed library and can launch Discovery searches."}
-              </span>
-              <button
-                className="secondary"
-                disabled={!pastedListText.trim() || parsedListState.status === "parsing"}
-                type="submit"
-              >
-                {parsedListState.status === "parsing" ? "Parsing" : "Parse"}
-              </button>
-              <button
-                className="secondary"
-                disabled={parsedListState.items.length === 0 || parsedListState.status === "parsing"}
-                type="button"
-                onClick={() => void onSaveParsedList()}
-              >
-                Save
-              </button>
-            </div>
-          </form>
 
           {parsedListState.items.length > 0 ? (
             <section className="parsedDiscoveryList" aria-label="Parsed Discovery list">
@@ -5119,93 +5128,17 @@ function DiscoveryView({
           ) : null}
 
           {downloadJobs.length > 0 ? (
-            <section className="downloadJobs" aria-label="Discovery download jobs">
+            <section className="downloadJobsCompact" aria-label="Discovery download jobs">
               <div className="discoveryPanelHeader">
                 <div>
                   <span className="eyebrow">Transfers</span>
-                  <strong>Download staging</strong>
+                  <strong>Download jobs</strong>
                 </div>
                 <span>{activeDownloadCount.toLocaleString()} active</span>
               </div>
-              {downloadJobs.map((job) => (
-                <div className="downloadJob" key={job.id}>
-                  <div className="downloadJobMain">
-                    <strong>
-                      {job.selectedCount.toLocaleString()} selected · {job.completedCount.toLocaleString()} staged
-                    </strong>
-                    <div className="progressRail">
-                      <div className="progressFill" style={{ width: `${Math.round(job.progress * 100)}%` }} />
-                    </div>
-                    <span>{formatDiscoveryDownloadMessage(job)}</span>
-                  </div>
-                  <span className={job.status === "failed" || job.status === "cancelled" ? "statusPill warning" : "statusPill"}>
-                    {job.status}
-                  </span>
-                  <div className="rootActions">
-                    <button disabled={!job.imported} type="button" onClick={onOpenImports}>
-                      Import
-                    </button>
-                    <button
-                      className="secondary"
-                      disabled={job.status !== "failed" && job.status !== "cancelled"}
-                      type="button"
-                      onClick={() => void onRetryDownload(job.id)}
-                    >
-                      Retry
-                    </button>
-                    <button
-                      className="secondary"
-                      disabled={job.status !== "queued" && job.status !== "running"}
-                      type="button"
-                      onClick={() => void onCancelDownload(job.id)}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </section>
-          ) : null}
-
-          {savedCandidates.length > 0 ? (
-            <section className="savedDiscoveryCandidates" aria-label="Saved Discovery candidates">
-              <div className="savedDiscoveryHeader">
-                <strong>Saved Candidates</strong>
-                <span>{savedCandidates.length.toLocaleString()} source candidate{savedCandidates.length === 1 ? "" : "s"}</span>
-              </div>
-              <div className="savedDiscoveryList">
-                {savedCandidates.slice(0, 8).map((candidate) => (
-                  <div className="savedDiscoveryItem" key={candidate.id}>
-                    <div>
-                      <strong title={candidate.folder ?? undefined}>
-                        {candidate.releaseArtist ? `${candidate.releaseArtist} - ${candidate.releaseTitle}` : candidate.releaseTitle}
-                      </strong>
-                      <span>
-                        {candidate.username ?? "unknown user"} · {candidate.resultCount.toLocaleString()} file
-                        {candidate.resultCount === 1 ? "" : "s"} · {candidate.qualityLabel}
-                        {candidate.primaryFormat ? ` · ${candidate.primaryFormat}` : ""}
-                      </span>
-                    </div>
-                    <div className="savedDiscoveryActions">
-                      <button
-                        className="compactButton"
-                        disabled={candidate.availableCount === 0 || downloadState.status === "working" || !downloadsConfigured}
-                        title={downloadsConfigured ? undefined : "Set MUSIC_OS_SLSKD_DOWNLOAD_DIR before proposing downloads"}
-                        type="button"
-                        onClick={() => void onProposeSavedCandidateDownload(candidate)}
-                      >
-                        Propose
-                      </button>
-                      <button className="secondary compactButton" type="button" onClick={() => void onSendSavedCandidateToAgent(candidate)}>
-                        Agent
-                      </button>
-                      <button className="secondary compactButton" type="button" onClick={() => void onRemoveSavedCandidate(candidate.id)}>
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <button type="button" onClick={onOpenJobs}>
+                View Jobs
+              </button>
             </section>
           ) : null}
 
@@ -5357,7 +5290,6 @@ function DiscoveryCandidateDetail({
   selectedFileCount,
   saved,
   onSave,
-  onSendToAgent,
   onSelect
 }: {
   group: DiscoveryGroup;
@@ -5365,7 +5297,6 @@ function DiscoveryCandidateDetail({
   selectedFileCount: number;
   saved: boolean;
   onSave(): void;
-  onSendToAgent(): void;
   onSelect(): void;
 }): ReactElement {
   const warnings = getDiscoveryCandidateWarnings(group, libraryMatch);
@@ -5393,9 +5324,6 @@ function DiscoveryCandidateDetail({
           </button>
           <button className="secondary compactButton" disabled={saved} type="button" onClick={onSave}>
             {saved ? "Saved" : "Save"}
-          </button>
-          <button className="secondary compactButton" type="button" onClick={onSendToAgent}>
-            Send Agent
           </button>
         </div>
       </div>
@@ -5491,7 +5419,6 @@ function DiscoveryClusterResult({
   onGroupSelect,
   onInspectGroup,
   onSaveCandidate,
-  onSendCandidateToAgent,
   onToggleCluster,
   onToggleFileSelect,
   onToggleGroup
@@ -5505,20 +5432,12 @@ function DiscoveryClusterResult({
   onGroupSelect(group: DiscoveryGroup): void;
   onInspectGroup(groupId: string): void;
   onSaveCandidate(group: DiscoveryGroup): Promise<void>;
-  onSendCandidateToAgent(group: DiscoveryGroup): Promise<void>;
   onToggleCluster(clusterId: string): void;
   onToggleFileSelect(fileId: string): void;
   onToggleGroup(groupId: string): void;
 }): ReactElement {
   const hiddenSourceCount = Math.max(0, cluster.groups.length - 3);
   const visibleGroups = expanded ? cluster.groups : cluster.groups.slice(0, 3);
-  const selectedBestCount = cluster.bestGroup.files.filter((file) => !file.isLocked && isAudioDiscoveryResult(file) && selectedFileIds.has(file.id)).length;
-  const bestStageLabel =
-    selectedBestCount > 0
-      ? `${selectedBestCount.toLocaleString()} best selected`
-      : cluster.bestGroup.availableCount > 0
-        ? `Stage Best ${cluster.bestGroup.availableCount.toLocaleString()}`
-        : "Best Locked";
 
   return (
     <section className="discoveryCluster" aria-label={`${cluster.releaseArtist ? `${cluster.releaseArtist} - ` : ""}${cluster.releaseTitle}`}>
@@ -5538,18 +5457,6 @@ function DiscoveryClusterResult({
           </span>
         </div>
         <div className="discoveryClusterActions">
-          <div className="discoveryClusterMeta">
-            <span className={cluster.matchLabel === "weak match" ? "statusPill warning" : "statusPill"}>{cluster.matchLabel}</span>
-            <span className="statusPill">{cluster.qualityLabel}</span>
-          </div>
-          <button
-            className="compactButton"
-            disabled={cluster.bestGroup.availableCount === 0}
-            type="button"
-            onClick={() => onGroupSelect(cluster.bestGroup)}
-          >
-            {bestStageLabel}
-          </button>
           {hiddenSourceCount > 0 ? (
             <button className="secondary compactButton" type="button" onClick={() => onToggleCluster(cluster.id)}>
               {expanded ? "Show Best" : `Show ${hiddenSourceCount.toLocaleString()} More`}
@@ -5569,7 +5476,6 @@ function DiscoveryClusterResult({
             onGroupSelect={onGroupSelect}
             onInspectGroup={onInspectGroup}
             onSaveCandidate={onSaveCandidate}
-            onSendCandidateToAgent={onSendCandidateToAgent}
             onToggleFileSelect={onToggleFileSelect}
             onToggleGroup={onToggleGroup}
           />
@@ -5588,7 +5494,6 @@ function DiscoveryGroupResult({
   onGroupSelect,
   onInspectGroup,
   onSaveCandidate,
-  onSendCandidateToAgent,
   onToggleFileSelect,
   onToggleGroup
 }: {
@@ -5600,7 +5505,6 @@ function DiscoveryGroupResult({
   onGroupSelect(group: DiscoveryGroup): void;
   onInspectGroup(groupId: string): void;
   onSaveCandidate(group: DiscoveryGroup): Promise<void>;
-  onSendCandidateToAgent(group: DiscoveryGroup): Promise<void>;
   onToggleFileSelect(fileId: string): void;
   onToggleGroup(groupId: string): void;
 }): ReactElement {
@@ -5636,6 +5540,26 @@ function DiscoveryGroupResult({
           <span className={libraryMatch.status === "possible_upgrade" ? "warningText" : undefined}>
             Library: {libraryMatch.detail}
           </span>
+          <div className="discoveryGroupPills">
+            <span className={group.matchLabel === "weak match" ? "statusPill warning" : "statusPill"}>{group.matchLabel}</span>
+            <span
+              className={
+                libraryMatch.status === "possible_upgrade"
+                  ? "statusPill warning"
+                  : libraryMatch.status === "already_owned"
+                    ? "statusPill muted"
+                    : "statusPill"
+              }
+            >
+              {libraryMatch.label}
+            </span>
+            <span className="statusPill">{group.qualityLabel}</span>
+            <span className={group.lockedCount > 0 ? "statusPill warning" : "statusPill"}>
+              {group.lockedCount > 0
+                ? `${group.lockedCount.toLocaleString()} locked`
+                : `${availableCount.toLocaleString()} audio`}
+            </span>
+          </div>
           <div className="discoveryTrackPreview" title={group.folder ?? undefined}>
             {group.previewFiles.map((file) => (
               <span key={file.id}>{file.filename}</span>
@@ -5644,24 +5568,6 @@ function DiscoveryGroupResult({
           </div>
         </div>
         <div className="discoveryGroupActions">
-          <span className={group.matchLabel === "weak match" ? "statusPill warning" : "statusPill"}>{group.matchLabel}</span>
-          <span
-            className={
-              libraryMatch.status === "possible_upgrade"
-                ? "statusPill warning"
-                : libraryMatch.status === "already_owned"
-                  ? "statusPill muted"
-                  : "statusPill"
-            }
-          >
-            {libraryMatch.label}
-          </span>
-          <span className="statusPill">{group.qualityLabel}</span>
-          <span className={group.lockedCount > 0 ? "statusPill warning" : "statusPill"}>
-            {group.lockedCount > 0
-              ? `${group.lockedCount.toLocaleString()} locked`
-              : `${availableCount.toLocaleString()} audio`}
-          </span>
           <button className="compactButton" disabled={group.availableCount === 0} type="button" onClick={() => onGroupSelect(group)}>
             {stageLabel}
           </button>
@@ -5670,9 +5576,6 @@ function DiscoveryGroupResult({
           </button>
           <button className="secondary compactButton" type="button" onClick={() => void onSaveCandidate(group)}>
             Save
-          </button>
-          <button className="secondary compactButton" type="button" onClick={() => void onSendCandidateToAgent(group)}>
-            Agent
           </button>
           <button className="secondary compactButton" type="button" onClick={() => onToggleGroup(group.id)}>
             {expanded ? "Hide Files" : "Files"}
