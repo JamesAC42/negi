@@ -1,5 +1,5 @@
 /* ============================================================
-   Music OS — flat terminal-rice design system
+   negi — flat terminal-rice design system
    Fonts: JetBrains Mono Variable (UI/data), Space Grotesk (display)
    ============================================================ */
 
@@ -513,16 +513,10 @@ h2 {
 }
 
 .brandMark {
-  display: grid;
   width: 1.875rem;
   height: 1.875rem;
-  place-items: center;
   border-radius: var(--r-s);
-  background: var(--acc);
-  color: var(--acc-ink);
-  font-family: "JetBrains Mono Variable", monospace;
-  font-size: 0.6875rem;
-  font-weight: 800;
+  object-fit: contain;
 }
 
 .navList {

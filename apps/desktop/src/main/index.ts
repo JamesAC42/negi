@@ -3,6 +3,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const appName = "negi";
+const appIconPath = join(__dirname, "../renderer/negi.png");
+
+app.setName(appName);
+app.setAppUserModelId("com.jamesac42.negi");
 
 ipcMain.handle("dialog:select-library-folder", async () => {
   const result = await dialog.showOpenDialog({
@@ -60,7 +65,8 @@ async function createWindow(): Promise<void> {
     height: 820,
     minWidth: 960,
     minHeight: 640,
-    title: "Music OS",
+    title: appName,
+    icon: appIconPath,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

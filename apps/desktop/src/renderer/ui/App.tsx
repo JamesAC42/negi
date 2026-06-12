@@ -2006,8 +2006,8 @@ export function App(): ReactElement {
     <main className={appShellClassName} style={appearanceStyle}>
       <aside className="sidebar">
         <div className="brand">
-          <span className="brandMark">MO</span>
-          <span>Music OS</span>
+          <img alt="" className="brandMark" src="./negi.png" />
+          <span>negi</span>
         </div>
         <nav className="navList" aria-label="Primary">
           {navItems.map((item) => (
