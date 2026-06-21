@@ -467,10 +467,13 @@ export function App(): ReactElement {
   const reducedMotion = useReducedMotion();
   const effectiveVisualizerMode = getEffectiveVisualizerMode(visualizerMode, visualizerCapabilities, reducedMotion);
   const liveVisualizersEnabled = documentVisible && !reducedMotion;
+  const nowPlayingStreamMode: VisualizerMode = visualizerCapabilities?.spectrogram === "available" && !reducedMotion
+    ? "spectrogram"
+    : effectiveVisualizerMode;
   const barVisualizer = useVisualizerStream(liveVisualizersEnabled && playback.status !== "stopped", "spectrum", playback.currentFileId);
   const modalVisualizer = useVisualizerStream(
     liveVisualizersEnabled && nowPlayingOpen && playback.status !== "stopped",
-    effectiveVisualizerMode,
+    nowPlayingStreamMode,
     playback.currentFileId
   );
   const currentWaveform = useWaveform(playback.currentFileId, documentVisible && playback.status !== "stopped");
@@ -8612,95 +8615,112 @@ function NowPlayingModal({
   const displayArtist = currentFile?.displayTags.artist ?? currentFile?.displayTags.albumartist ?? "Unknown Artist";
   const displayAlbum = currentFile?.displayTags.album ?? "Unknown Album";
   const albumTarget = currentFile ? getFileAlbumTarget(currentFile) : null;
+  const currentQueueNumber = playback.queueIndex == null ? null : playback.queueIndex + 1;
 
   return (
     <div className="modalBackdrop" role="presentation" onMouseDown={onClose}>
       <section
         aria-label="Now playing"
         aria-modal="true"
-        className="nowPlayingModal"
+        className="nowPlayingOverlay"
         role="dialog"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="nowPlayingHero">
-          <div className="nowPlayingVisualStack">
-            {playback.currentFileId ? (
-              <Artwork className="nowPlayingModalArt" src={artworkFileUrl(playback.currentFileId)} />
-            ) : (
-              <span className="nowPlayingModalArt placeholder">
-                <UiIcon name="album" />
-              </span>
-            )}
-            <VisualizerPanel
-              capabilities={visualizerCapabilities}
-              frameRef={visualizerFrameRef}
-              mode={visualizerMode}
-              playback={playback}
-              reducedMotion={reducedMotion}
-              waveformState={waveformState}
-              onMode={onVisualizerMode}
-            />
-          </div>
-          <div className="nowPlayingModalInfo">
-            <span>{playback.status}</span>
-            <h2>{displayTitle}</h2>
-            <button
-              className="nowPlayingMetaLink artist"
-              disabled={!currentFile?.displayTags.artist}
-              type="button"
-              onClick={() => currentFile?.displayTags.artist ? onOpenArtistPage(currentFile.displayTags.artist) : undefined}
-            >
-              {displayArtist}
+        <div className="overlayEdgeReveal left" aria-hidden="true" />
+        <div className="overlayEdgeReveal right" aria-hidden="true" />
+        <VisualizerPanel
+          capabilities={visualizerCapabilities}
+          frameRef={visualizerFrameRef}
+          mode={visualizerMode}
+          playback={playback}
+          reducedMotion={reducedMotion}
+          waveformState={waveformState}
+          onMode={onVisualizerMode}
+        />
+        <div className="nowPlayingCockpit">
+          <header className="overlayTopbar">
+            <div>
+              <span>Now Playing</span>
+              <strong>{currentQueueNumber == null ? "Queue idle" : `${currentQueueNumber} / ${playback.queue.length}`}</strong>
+            </div>
+            <button className="modalClose secondary" type="button" onClick={onClose}>
+              Close
             </button>
-            <button
-              className="nowPlayingMetaLink album"
-              disabled={!albumTarget}
-              type="button"
-              onClick={() => albumTarget ? void onOpenAlbumPage(albumTarget) : undefined}
-            >
-              {displayAlbum}
-            </button>
-            {currentFile ? (
-              <NowPlayingActions
-                file={currentFile}
-                variant="modal"
-                onFavoriteStatus={onFavoriteStatus}
-                onRating={onRating}
-              />
-            ) : null}
-            <div className="nowPlayingModalTime">
-              <span>{formatTime(playback.positionMs)}</span>
+          </header>
+          <div className="nowPlayingFocus">
+            <div className="nowPlayingArtShell">
+              {playback.currentFileId ? (
+                <Artwork className="nowPlayingModalArt" src={artworkFileUrl(playback.currentFileId)} />
+              ) : (
+                <span className="nowPlayingModalArt placeholder">
+                  <UiIcon name="album" />
+                </span>
+              )}
+              <div className="artSignalGlow" aria-hidden="true" />
+            </div>
+            <div className="nowPlayingModalInfo">
+              <span>{playback.status}</span>
+              <h2>{displayTitle}</h2>
               <button
-                aria-label="Seek playback"
-                className="modalProgressSeek"
-                disabled={playbackBusy || playback.status === "stopped" || !playback.durationMs || playback.durationMs <= 0}
+                className="nowPlayingMetaLink artist"
+                disabled={!currentFile?.displayTags.artist}
                 type="button"
-                onClick={(event) => void onSeek(getPointerRatio(event.currentTarget, event.clientX))}
+                onClick={() => currentFile?.displayTags.artist ? onOpenArtistPage(currentFile.displayTags.artist) : undefined}
               >
-              <span className="progressRail">
-                <WaveformCanvas className="modalWaveformRailCanvas" playback={playback} variant="rail" waveform={waveformState.waveform} />
-                <div className="progressFill" key={playback.currentFileId ?? "stopped"} style={{ width: `${getProgressPercent(playback)}%` }} />
-              </span>
+                {displayArtist}
               </button>
-              <span>{formatTime(playback.durationMs)}</span>
+              <button
+                className="nowPlayingMetaLink album"
+                disabled={!albumTarget}
+                type="button"
+                onClick={() => albumTarget ? void onOpenAlbumPage(albumTarget) : undefined}
+              >
+                {displayAlbum}
+              </button>
+              {currentFile ? (
+                <NowPlayingActions
+                  file={currentFile}
+                  variant="modal"
+                  onFavoriteStatus={onFavoriteStatus}
+                  onRating={onRating}
+                />
+              ) : null}
+              <div className="nowPlayingModalTime">
+                <span>{formatTime(playback.positionMs)}</span>
+                <button
+                  aria-label="Seek playback"
+                  className="modalProgressSeek"
+                  disabled={playbackBusy || playback.status === "stopped" || !playback.durationMs || playback.durationMs <= 0}
+                  type="button"
+                  onClick={(event) => void onSeek(getPointerRatio(event.currentTarget, event.clientX))}
+                >
+                  <span className="progressRail">
+                    <WaveformCanvas className="modalWaveformRailCanvas" playback={playback} variant="rail" waveform={waveformState.waveform} />
+                    <div className="progressFill" key={playback.currentFileId ?? "stopped"} style={{ width: `${getProgressPercent(playback)}%` }} />
+                  </span>
+                </button>
+                <span>{formatTime(playback.durationMs)}</span>
+              </div>
+              <div className="overlayControls">
+                <div className="transport modalTransport">
+                  <button disabled={playbackBusy || playback.status === "stopped"} type="button" onClick={() => void onPrevious()}>
+                    <TransportIcon shape="previous" />
+                  </button>
+                  <button className="tPlay" disabled={playbackBusy || playback.status === "stopped"} type="button" onClick={() => void onPauseResume()}>
+                    <TransportIcon shape={playback.status === "playing" ? "pause" : "play"} />
+                  </button>
+                  <button disabled={playbackBusy || playback.status === "stopped"} type="button" onClick={() => void onNext()}>
+                    <TransportIcon shape="next" />
+                  </button>
+                </div>
+                <RepeatControls
+                  disabled={playbackBusy || playback.status === "stopped"}
+                  repeatMode={playback.repeatMode}
+                  variant="modal"
+                  onRepeatMode={onRepeatMode}
+                />
+              </div>
             </div>
-            <div className="transport modalTransport">
-              <button disabled={playbackBusy || playback.status === "stopped"} type="button" onClick={() => void onPrevious()}>
-                <TransportIcon shape="previous" />
-              </button>
-              <button className="tPlay" disabled={playbackBusy || playback.status === "stopped"} type="button" onClick={() => void onPauseResume()}>
-                <TransportIcon shape={playback.status === "playing" ? "pause" : "play"} />
-              </button>
-              <button disabled={playbackBusy || playback.status === "stopped"} type="button" onClick={() => void onNext()}>
-                <TransportIcon shape="next" />
-              </button>
-            </div>
-            <RepeatControls
-              disabled={playbackBusy || playback.status === "stopped"}
-              repeatMode={playback.repeatMode}
-              variant="modal"
-              onRepeatMode={onRepeatMode}
-            />
           </div>
         </div>
         <aside className="nowPlayingQueue" aria-label="Up next">
@@ -8709,9 +8729,7 @@ function NowPlayingModal({
               <strong>Up Next</strong>
               <span>{playback.queue.length.toLocaleString()} item{playback.queue.length === 1 ? "" : "s"}</span>
             </div>
-            <button className="modalClose secondary" type="button" onClick={onClose}>
-              Close
-            </button>
+            <span>Signal queue</span>
           </header>
           <div className="queueRows">
             {queueFiles.length === 0 ? (
@@ -11370,7 +11388,7 @@ function VisualizerPanel({
   return (
     <section className="visualizerPanel" aria-label="Playback visualizer">
       <div className="visualizerToolbar">
-        <span>{statusText}</span>
+        <span>Signal: {statusText}</span>
         <div className="visualizerModes" role="group" aria-label="Visualizer mode">
           <button className={mode === "meter" ? "active" : ""} type="button" onClick={() => onMode("meter")}>
             Meter
@@ -11389,14 +11407,41 @@ function VisualizerPanel({
         </div>
       </div>
       <div className="visualizerStage">
-        {mode === "spectrogram" && spectrogramAvailable ? null : (
+        <div className="visualizerGrid" aria-hidden="true" />
+        <div className="waveformRibbon">
+          <span>Waveform</span>
           <WaveformCanvas className="heroWaveformCanvas" playback={playback} variant="hero" waveform={waveformState.waveform} />
-        )}
-        {mode === "spectrogram" && spectrogramAvailable ? (
+        </div>
+        <div className="meterRail left" aria-hidden="true">
+          <span>L</span>
+          <SpectrumCanvas className="meterRailCanvas" frameRef={frameRef} mode="meter" playing={playback.status === "playing"} />
+          <small>-18</small>
+          <small>-6</small>
+        </div>
+        <div className="meterRail right" aria-hidden="true">
+          <span>R</span>
+          <SpectrumCanvas className="meterRailCanvas" frameRef={frameRef} mode="meter" playing={playback.status === "playing"} />
+          <small>-18</small>
+          <small>-6</small>
+        </div>
+        <div className="spectrumField">
+          <div className="visualizerLabel">
+            <strong>Spectrum</strong>
+            <span>63 Hz</span>
+            <span>1 kHz</span>
+            <span>16 kHz</span>
+          </div>
+          <SpectrumCanvas className="spectrumCanvas" frameRef={frameRef} mode={liveAvailable ? "spectrum" : "meter"} playing={playback.status === "playing"} />
+        </div>
+        <div className="spectrogramFloor">
+          <div className="visualizerLabel">
+            <strong>Spectrogram</strong>
+            <span>-42 dB</span>
+            <span>-12 dB</span>
+            <span>{spectrogramAvailable ? "Live" : "Cached"}</span>
+          </div>
           <SpectrogramCanvas className="spectrogramCanvas" fileId={playback.currentFileId} frameRef={frameRef} />
-        ) : (
-          <SpectrumCanvas className="spectrumCanvas" frameRef={frameRef} mode={mode === "meter" ? "meter" : "spectrum"} playing={playback.status === "playing"} />
-        )}
+        </div>
       </div>
     </section>
   );
