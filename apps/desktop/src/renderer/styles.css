@@ -7253,7 +7253,7 @@ img.playerArt {
   background:
     linear-gradient(90deg, rgb(5 6 8 / 18%), rgb(5 6 8 / 74%) 14%, rgb(5 6 8 / 74%) 86%, rgb(5 6 8 / 18%)),
     rgb(5 6 8 / 42%);
-  padding: 0.75rem;
+  padding: clamp(1.5rem, 3vw, 3rem);
   animation: fadeIn var(--fast) both;
 }
 
@@ -7264,15 +7264,15 @@ img.playerArt {
   grid-template-columns: minmax(0, 1fr) clamp(19rem, 23vw, 26rem);
   grid-template-rows: minmax(0, 1fr);
   gap: 0;
-  width: min(100%, calc(100vw - 1.5rem));
-  height: min(100%, calc(100vh - 1.5rem));
-  min-height: min(42rem, calc(100vh - 1.5rem));
+  width: min(100%, 104rem);
+  height: min(100%, calc(100vh - clamp(3rem, 6vw, 6rem)));
+  min-height: min(40rem, calc(100vh - clamp(3rem, 6vw, 6rem)));
   overflow: hidden;
   border: 0.0625rem solid rgb(104 127 151 / 28%);
   border-radius: var(--r-m);
   background:
     linear-gradient(90deg, rgb(7 10 13 / 0%), rgb(7 10 13 / 42%) 7%, rgb(7 10 13 / 96%) 18%, rgb(9 13 18 / 96%) 76%, rgb(7 10 13 / 50%) 91%, rgb(7 10 13 / 0%)),
-    radial-gradient(circle at 34% 38%, rgb(183 255 44 / 8%), transparent 32%),
+    radial-gradient(circle at 34% 38%, color-mix(in srgb, var(--acc) 8%, transparent), transparent 32%),
     rgb(5 7 10 / 12%);
   box-shadow: 0 1.5rem 6rem rgb(0 0 0 / 58%);
   animation: modalIn var(--med) both;
@@ -7352,13 +7352,13 @@ img.playerArt {
   z-index: 3;
   align-self: center;
   display: grid;
-  grid-template-columns: minmax(14rem, 24rem) minmax(18rem, 27rem);
+  grid-template-columns: minmax(14rem, 23rem) minmax(24rem, 34rem);
   grid-template-rows: auto auto;
   align-items: center;
   gap: clamp(1rem, 3vw, 2rem);
   min-width: 0;
   min-height: 0;
-  width: min(100%, 56rem);
+  width: min(100%, 64rem);
   margin: 0 auto;
   padding: 1rem clamp(0.5rem, 1.8vw, 1.25rem) min(28vh, 16rem);
 }
@@ -7376,13 +7376,13 @@ img.playerArt {
   width: 100%;
   height: 100%;
   min-height: 0;
-  border: 0.0625rem solid rgb(180 255 50 / 28%);
+  border: 0.0625rem solid color-mix(in srgb, var(--acc) 30%, transparent);
   border-radius: var(--r-m);
   background: var(--bg2);
   box-shadow:
     0 0 0 0.0625rem rgb(255 255 255 / 4%) inset,
     0 1rem 3rem rgb(0 0 0 / 46%),
-    0 0 3rem rgb(183 255 44 / 9%);
+    0 0 3rem color-mix(in srgb, var(--acc) 10%, transparent);
   object-fit: cover;
 }
 
@@ -7392,8 +7392,8 @@ img.playerArt {
   z-index: 1;
   border-radius: calc(var(--r-m) + 0.75rem);
   background:
-    linear-gradient(135deg, rgb(183 255 44 / 32%), transparent 35%, rgb(84 221 202 / 20%) 72%, transparent),
-    radial-gradient(circle at 50% 50%, rgb(183 255 44 / 16%), transparent 64%);
+    linear-gradient(135deg, color-mix(in srgb, var(--acc) 34%, transparent), transparent 35%, color-mix(in srgb, var(--acc) 18%, #54ddca 20%) 72%, transparent),
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--acc) 18%, transparent), transparent 64%);
   filter: blur(0.5rem);
   opacity: 0.74;
   pointer-events: none;
@@ -7521,16 +7521,6 @@ img.playerArt {
   background: transparent;
 }
 
-.visualizerGrid {
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(90deg, transparent, rgb(183 255 44 / 6%) 50%, transparent),
-    repeating-linear-gradient(90deg, rgb(104 127 151 / 8%) 0 0.0625rem, transparent 0.0625rem 4rem),
-    repeating-linear-gradient(0deg, rgb(104 127 151 / 7%) 0 0.0625rem, transparent 0.0625rem 3.5rem);
-  mask-image: linear-gradient(90deg, transparent, black 12%, black 80%, transparent);
-}
-
 .waveformRibbon,
 .spectrogramFloor,
 .meterRail {
@@ -7542,11 +7532,14 @@ img.playerArt {
 
 .waveformRibbon {
   top: clamp(3rem, 7vh, 4.75rem);
-  left: clamp(4rem, 12vw, 11rem);
-  right: clamp(2rem, 4vw, 4rem);
+  left: 50%;
+  width: min(58rem, calc(100% - clamp(5rem, 12vw, 12rem)));
+  transform: translateX(-50%);
   height: clamp(3rem, 7vh, 4.75rem);
   border-radius: var(--r-s);
-  opacity: 0.82;
+  opacity: 1;
+  background:
+    linear-gradient(90deg, rgb(4 7 10 / 18%), rgb(4 7 10 / 56%) 12%, rgb(4 7 10 / 56%) 88%, rgb(4 7 10 / 18%));
 }
 
 .spectrogramFloor {
@@ -7688,7 +7681,7 @@ img.playerArt {
 
 .heroWaveformCanvas {
   z-index: 1;
-  opacity: 0.72;
+  opacity: 0.95;
   mix-blend-mode: screen;
 }
 
@@ -7696,14 +7689,14 @@ img.playerArt {
   z-index: 2;
   padding: 2rem 1rem 0.5rem;
   opacity: 0.84;
-  filter: drop-shadow(0 0 0.625rem rgb(183 255 44 / 18%));
+  filter: drop-shadow(0 0 0.625rem color-mix(in srgb, var(--acc) 20%, transparent));
 }
 
 .focusSpectrumCanvas {
   z-index: 1;
   padding: 0.875rem 0.875rem 0.625rem;
   opacity: 0.92;
-  filter: drop-shadow(0 0 0.625rem rgb(183 255 44 / 20%));
+  filter: drop-shadow(0 0 0.625rem color-mix(in srgb, var(--acc) 22%, transparent));
 }
 
 .spectrogramCanvas {
@@ -8174,8 +8167,8 @@ img.playerArt {
   }
 
   .nowPlayingFocus {
-    grid-template-columns: minmax(12rem, 19rem) minmax(16rem, 1fr);
-    width: min(100%, 48rem);
+    grid-template-columns: minmax(12rem, 18rem) minmax(22rem, 1fr);
+    width: min(100%, 56rem);
   }
 
   .meterRail.right {
@@ -8183,7 +8176,7 @@ img.playerArt {
   }
 
   .waveformRibbon {
-    right: clamp(2rem, 4vw, 4rem);
+    width: min(48rem, calc(100% - 5rem));
   }
 }
 
@@ -8379,7 +8372,7 @@ img.playerArt {
   .nowPlayingFocus {
     grid-template-columns: 1fr;
     align-self: start;
-    width: min(100%, 28rem);
+    width: min(100%, 32rem);
     padding-bottom: 12rem;
   }
 
@@ -8390,8 +8383,9 @@ img.playerArt {
   }
 
   .waveformRibbon {
-    left: 1rem;
-    right: 1rem;
+    left: 50%;
+    right: auto;
+    width: calc(100% - 2rem);
   }
 
   .spectrogramFloor {

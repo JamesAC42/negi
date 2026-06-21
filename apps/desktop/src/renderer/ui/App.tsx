@@ -11368,7 +11368,6 @@ function VisualizerPanel({
   return (
     <section className="visualizerPanel" aria-label="Playback visualizer">
       <div className="visualizerStage">
-        <div className="visualizerGrid" aria-hidden="true" />
         <div className="waveformRibbon">
           <WaveformCanvas className="heroWaveformCanvas" playback={playback} variant="hero" waveform={waveformState.waveform} />
         </div>
