@@ -1,4 +1,6 @@
 import { parseFile, selectCover } from "music-metadata";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { dirname, extname } from "node:path";
 import type { BackendConfig } from "../config.js";
 import type { LibraryRepository } from "./library-repository.js";
 
@@ -12,9 +14,12 @@ interface FileArtworkCacheEntry {
   artwork: ArtworkResult | null;
 }
 
-const MAX_FILE_CACHE_ENTRIES = 500;
-const EMBEDDED_PROBE_LIMIT = 4;
+const MAX_FILE_CACHE_ENTRIES = 6000;
+const EMBEDDED_PROBE_LIMIT = 8;
 const MUSICBRAINZ_REQUEST_SPACING_MS = 1100;
+const ALBUM_INDEX_TTL_MS = 10_000;
+const SIDECAR_COVER_NAMES = new Set(["cover", "folder", "front", "album", "artwork"]);
+const SIDECAR_COVER_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 
 /**
  * Serves cover art for indexed audio. File-level art comes from embedded
@@ -24,8 +29,12 @@ const MUSICBRAINZ_REQUEST_SPACING_MS = 1100;
  */
 export class ArtworkService {
   private readonly fileCache = new Map<string, FileArtworkCacheEntry>();
+  private readonly pendingFiles = new Map<string, Promise<ArtworkResult | null>>();
   private readonly albumCache = new Map<string, ArtworkResult | null>();
   private readonly pendingAlbums = new Map<string, Promise<ArtworkResult | null>>();
+  private albumIndexBuiltAt = 0;
+  private readonly albumById = new Map<string, ReturnType<LibraryRepository["listAlbumGroups"]>[number]>();
+  private readonly fileToAlbumId = new Map<string, string>();
   private musicBrainzQueue: Promise<unknown> = Promise.resolve();
 
   constructor(
@@ -50,15 +59,31 @@ export class ArtworkService {
       return cached.artwork;
     }
 
-    const artwork = await extractEmbeddedArtwork(file.path);
+    const pending = this.pendingFiles.get(fileId);
+    if (pending) {
+      return pending;
+    }
+
+    const lookup = extractEmbeddedArtwork(file.path)
+      .then((artwork) => {
+        this.writeFileCache(fileId, file.mtime, artwork);
+        return artwork;
+      })
+      .finally(() => {
+        this.pendingFiles.delete(fileId);
+      });
+    this.pendingFiles.set(fileId, lookup);
+    return lookup;
+  }
+
+  private writeFileCache(fileId: string, mtime: string, artwork: ArtworkResult | null): void {
     if (this.fileCache.size >= MAX_FILE_CACHE_ENTRIES) {
       const oldestKey = this.fileCache.keys().next().value;
       if (oldestKey != null) {
         this.fileCache.delete(oldestKey);
       }
     }
-    this.fileCache.set(fileId, { mtime: file.mtime, artwork });
-    return artwork;
+    this.fileCache.set(fileId, { mtime, artwork });
   }
 
   async getAlbumArtwork(albumId: string): Promise<ArtworkResult | null> {
@@ -84,11 +109,14 @@ export class ArtworkService {
   }
 
   private async resolveAlbumArtwork(albumId: string): Promise<ArtworkResult | null> {
-    const album = this.library
-      .listAlbumGroups(Number.MAX_SAFE_INTEGER)
-      .find((group) => group.id === albumId);
+    const album = this.getAlbumFromIndex(albumId);
     if (!album) {
       return null;
+    }
+
+    const localArtwork = await findSidecarArtwork(album.files.map((file) => file.path));
+    if (localArtwork) {
+      return localArtwork;
     }
 
     for (const file of album.files.slice(0, EMBEDDED_PROBE_LIMIT)) {
@@ -149,12 +177,29 @@ export class ArtworkService {
   }
 
   private findAlbumIdForFile(fileId: string): string | null {
-    for (const album of this.library.listAlbumGroups(Number.MAX_SAFE_INTEGER)) {
-      if (album.files.some((file) => file.id === fileId)) {
-        return album.id;
+    this.refreshAlbumIndex();
+    return this.fileToAlbumId.get(fileId) ?? null;
+  }
+
+  private getAlbumFromIndex(albumId: string): ReturnType<LibraryRepository["listAlbumGroups"]>[number] | null {
+    this.refreshAlbumIndex();
+    return this.albumById.get(albumId) ?? null;
+  }
+
+  private refreshAlbumIndex(): void {
+    if (Date.now() - this.albumIndexBuiltAt < ALBUM_INDEX_TTL_MS && this.albumById.size > 0) {
+      return;
+    }
+    const albums = this.library.listAlbumGroups(Number.MAX_SAFE_INTEGER);
+    this.albumById.clear();
+    this.fileToAlbumId.clear();
+    for (const album of albums) {
+      this.albumById.set(album.id, album);
+      for (const file of album.files) {
+        this.fileToAlbumId.set(file.id, album.id);
       }
     }
-    return null;
+    this.albumIndexBuiltAt = Date.now();
   }
 }
 
@@ -169,6 +214,52 @@ async function extractEmbeddedArtwork(path: string): Promise<ArtworkResult | nul
     // unreadable file or unsupported container: treat as no artwork
   }
   return null;
+}
+
+async function findSidecarArtwork(paths: string[]): Promise<ArtworkResult | null> {
+  const directories = [...new Set(paths.map((path) => dirname(path)))];
+  for (const directory of directories) {
+    try {
+      const entries = await readdir(directory, { withFileTypes: true });
+      const candidates = entries
+        .filter((entry) => entry.isFile())
+        .map((entry) => entry.name)
+        .filter((name) => {
+          const extension = extname(name).toLowerCase();
+          const base = name.slice(0, name.length - extension.length).toLowerCase().trim();
+          return SIDECAR_COVER_EXTENSIONS.has(extension) && SIDECAR_COVER_NAMES.has(base);
+        })
+        .sort((left, right) => sidecarRank(left) - sidecarRank(right) || left.localeCompare(right));
+
+      for (const candidate of candidates) {
+        const path = `${directory}/${candidate}`;
+        const info = await stat(path).catch(() => null);
+        if (!info?.isFile() || info.size <= 0) {
+          continue;
+        }
+        return { data: await readFile(path), mimeType: mimeTypeForImagePath(path) };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+function sidecarRank(name: string): number {
+  const base = name.slice(0, name.length - extname(name).length).toLowerCase().trim();
+  return ["cover", "folder", "front", "album", "artwork"].indexOf(base);
+}
+
+function mimeTypeForImagePath(path: string): string {
+  const extension = extname(path).toLowerCase();
+  if (extension === ".png") {
+    return "image/png";
+  }
+  if (extension === ".webp") {
+    return "image/webp";
+  }
+  return "image/jpeg";
 }
 
 async function searchReleaseIds(artist: string, album: string, userAgent: string): Promise<string[]> {

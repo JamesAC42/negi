@@ -1,16 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type {
   CSSProperties,
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent,
+  MutableRefObject,
   PointerEvent as ReactPointerEvent,
-  ReactElement
+  ReactElement,
+  ReactNode
 } from "react";
 import {
   clusterDiscoveryGroups,
+  createDiscoveryLibraryIndex,
   filterDiscoveryGroups,
-  filterDiscoveryGroupsByLibrary,
   getDiscoveryFolderLabel,
   groupDiscoveryResults,
   isAudioDiscoveryResult,
@@ -58,6 +61,9 @@ import {
   operationBatchResponseSchema,
   operationBatchesResponseSchema,
   playbackStateSchema,
+  visualizerCapabilitiesSchema,
+  visualizerFrameSchema,
+  waveformResponseSchema,
   playlistsResponseSchema,
   qualityUpgradeSuggestionsResponseSchema,
   tasteProfileResponseSchema,
@@ -85,6 +91,7 @@ import {
   type ImportBatch,
   type ImportItem,
   type IncompleteAlbumsResponse,
+  type JobEvent,
   type JobResponse,
   type JobSummary,
   type DuplicateGroupsResponse,
@@ -101,7 +108,12 @@ import {
   type Playlist,
   type QualityUpgradeSuggestionsResponse,
   type TasteProfile,
-  type TasteProfileResponse
+  type TasteProfileResponse,
+  type VisualizerCapabilitiesResponse,
+  type VisualizerFrameResponse,
+  type VisualizerStreamMode,
+  type WaveformResponse,
+  type WaveformSummaryResponse
 } from "@music-os/core";
 
 type HealthState =
@@ -114,6 +126,13 @@ type LibraryState =
   | { status: "ready"; roots: LibraryRoot[]; files: LibraryFilesResponse["files"]; total: number }
   | { status: "error"; message: string; roots: LibraryRoot[]; files: LibraryFilesResponse["files"]; total: number };
 
+type QueueInsertPosition = "up_next" | "end";
+type PlaybackRepeatMode = PlaybackStateResponse["repeatMode"];
+type VisualizerMode = VisualizerStreamMode;
+type WaveformState =
+  | { status: "idle"; waveform: null; message: null }
+  | { status: WaveformResponse["status"]; waveform: WaveformSummaryResponse | null; message: string | null };
+
 type ImportsState =
   | { status: "loading" }
   | { status: "ready"; imports: ImportBatch[] }
@@ -125,26 +144,31 @@ type DuplicatesState =
   | { status: "error"; message: string; duplicates: DuplicateGroupsResponse };
 
 type MetadataGapsState =
+  | { status: "idle" }
   | { status: "loading" }
   | { status: "ready"; gaps: MetadataGapsResponse }
   | { status: "error"; message: string; gaps: MetadataGapsResponse };
 
 type QualityUpgradesState =
+  | { status: "idle" }
   | { status: "loading" }
   | { status: "ready"; upgrades: QualityUpgradeSuggestionsResponse }
   | { status: "error"; message: string; upgrades: QualityUpgradeSuggestionsResponse };
 
 type IncompleteAlbumsState =
+  | { status: "idle" }
   | { status: "loading" }
   | { status: "ready"; albums: IncompleteAlbumsResponse }
   | { status: "error"; message: string; albums: IncompleteAlbumsResponse };
 
 type AlbumMergeState =
+  | { status: "idle" }
   | { status: "loading" }
   | { status: "ready"; suggestions: AlbumMergeSuggestionsResponse }
   | { status: "error"; message: string; suggestions: AlbumMergeSuggestionsResponse };
 
 type AlternateEditionsState =
+  | { status: "idle" }
   | { status: "loading" }
   | { status: "ready"; editions: AlternateEditionGroupsResponse }
   | { status: "error"; message: string; editions: AlternateEditionGroupsResponse };
@@ -185,6 +209,7 @@ type TasteProfileState =
 
 type LibraryFile = LibraryFilesResponse["files"][number];
 type LibraryDuplicateGroup = DuplicateGroupsResponse["groups"][number];
+type LibraryAlbumMergeSuggestion = AlbumMergeSuggestionsResponse["suggestions"][number];
 type LibraryAlbumGroup = {
   key: string;
   artist: string;
@@ -214,6 +239,9 @@ type ParsedDiscoveryListState =
 type LibraryFormatFilter = "all" | "lossless" | "compressed";
 type LibraryMissingFilter = "all" | "present" | "missing";
 type LibraryFavoriteFilter = "all" | "liked" | "disliked" | "unrated";
+type LibrarySortMode = "artistAlbum" | "recent" | "listens" | "likes" | "rating";
+type AlbumSortMode = "artistAlbum" | "recent" | "listens" | "likes" | "rating";
+type ArtistSortMode = "artist" | "recent" | "listens" | "likes" | "rating";
 type AlbumGroupMode = "all" | "artist" | "genre" | "decade";
 type AlbumFacetFilter = { genre: string; decade: string };
 type ArtistViewTarget = { key: number; artist: string };
@@ -242,6 +270,9 @@ const emptyIncompleteAlbums: IncompleteAlbumsResponse = { albums: [], total: 0 }
 const emptyAlbumMergeSuggestions: AlbumMergeSuggestionsResponse = { suggestions: [], total: 0 };
 const emptyAlternateEditions: AlternateEditionGroupsResponse = { groups: [], total: 0 };
 const emptyAlbums: AlbumGroupsResponse = { albums: [], total: 0 };
+const libraryPageSize = 700;
+const albumPageSize = 180;
+const backendOrigin = "http://127.0.0.1:47831";
 const emptyTasteProfile: TasteProfileResponse = {
   profile: {
     favoriteArtists: [],
@@ -269,8 +300,13 @@ const emptyTasteProfile: TasteProfileResponse = {
   updatedAt: null
 };
 
-const navItems = ["Library", "Artists", "Albums", "Duplicates", "Imports", "Operations", "Discovery", "Playlists", "Agent", "Jobs", "Settings"];
+const navSections = [
+  { label: "Browse", items: ["Home", "Library", "Artists", "Albums", "Playlists"] },
+  { label: "Manage", items: ["Discovery", "Imports", "Duplicates", "Operations", "Jobs"] },
+  { label: "System", items: ["Agent", "Settings"] }
+];
 const appearanceStorageKey = "music-os:appearance:v1";
+const visualizerModeStorageKey = "music-os:visualizer-mode:v1";
 const defaultAppearanceSettings: AppearanceSettings = {
   accent: "lime",
   backgroundImagePath: null,
@@ -322,18 +358,18 @@ export function App(): ReactElement {
   const pageTargetRequestId = useRef(0);
   const selectedJobIdRef = useRef<string | null>(null);
   const playbackRef = useRef<PlaybackStateResponse | null>(null);
-  const [activeView, setActiveView] = useState("Library");
+  const [activeView, setActiveView] = useState("Home");
   const [health, setHealth] = useState<HealthState>({ status: "loading" });
   const [library, setLibrary] = useState<LibraryState>({
     status: "loading"
   });
   const [importsState, setImportsState] = useState<ImportsState>({ status: "loading" });
   const [duplicatesState, setDuplicatesState] = useState<DuplicatesState>({ status: "loading" });
-  const [metadataGapsState, setMetadataGapsState] = useState<MetadataGapsState>({ status: "loading" });
-  const [qualityUpgradesState, setQualityUpgradesState] = useState<QualityUpgradesState>({ status: "loading" });
-  const [incompleteAlbumsState, setIncompleteAlbumsState] = useState<IncompleteAlbumsState>({ status: "loading" });
-  const [albumMergeState, setAlbumMergeState] = useState<AlbumMergeState>({ status: "loading" });
-  const [alternateEditionsState, setAlternateEditionsState] = useState<AlternateEditionsState>({ status: "loading" });
+  const [metadataGapsState, setMetadataGapsState] = useState<MetadataGapsState>({ status: "idle" });
+  const [qualityUpgradesState, setQualityUpgradesState] = useState<QualityUpgradesState>({ status: "idle" });
+  const [incompleteAlbumsState, setIncompleteAlbumsState] = useState<IncompleteAlbumsState>({ status: "idle" });
+  const [albumMergeState, setAlbumMergeState] = useState<AlbumMergeState>({ status: "idle" });
+  const [alternateEditionsState, setAlternateEditionsState] = useState<AlternateEditionsState>({ status: "idle" });
   const [operationsState, setOperationsState] = useState<OperationsState>({ status: "loading" });
   const [albumsState, setAlbumsState] = useState<AlbumsState>({ status: "loading" });
   const [playlistsState, setPlaylistsState] = useState<PlaylistsState>({ status: "loading" });
@@ -388,20 +424,27 @@ export function App(): ReactElement {
   const [agentThreads, setAgentThreads] = useState<AgentThreadsResponse["threads"]>([]);
   const [agentBusy, setAgentBusy] = useState(false);
   const [search, setSearch] = useState("");
+  const [loadedLibraryQuery, setLoadedLibraryQuery] = useState("");
   const [bulkRenamePattern, setBulkRenamePattern] = useState("{artist} - {title}.{ext}");
   const [bulkTagInput, setBulkTagInput] = useState("");
   const [playlistNameInput, setPlaylistNameInput] = useState("");
   const [playlistDescriptionInput, setPlaylistDescriptionInput] = useState("");
   const [playlistAddTargetId, setPlaylistAddTargetId] = useState("");
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [selectedLibraryFileIds, setSelectedLibraryFileIds] = useState<Set<string>>(new Set());
   const [scanResult, setScanResult] = useState<LibraryScanResult | null>(null);
   const [watchedScanResult, setWatchedScanResult] = useState<WatchedLibraryScanResult | null>(null);
   const [busyRootId, setBusyRootId] = useState<string | null>(null);
   const [playbackBusy, setPlaybackBusy] = useState(false);
+  const [libraryLoadingMore, setLibraryLoadingMore] = useState(false);
+  const [albumsLoadingMore, setAlbumsLoadingMore] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
+  const [visualizerMode, setVisualizerMode] = useState<VisualizerMode>(() => loadVisualizerMode());
+  const [visualizerCapabilities, setVisualizerCapabilities] = useState<VisualizerCapabilitiesResponse | null>(null);
   const [appearance, setAppearance] = useState<AppearanceSettings>(() => loadAppearanceSettings());
   const [artistsViewResetKey, setArtistsViewResetKey] = useState(0);
+  const [albumsViewResetKey, setAlbumsViewResetKey] = useState(0);
   const [artistViewTarget, setArtistViewTarget] = useState<ArtistViewTarget | null>(null);
   const [albumViewTarget, setAlbumViewTarget] = useState<AlbumViewTarget | null>(null);
   const [editingFile, setEditingFile] = useState<LibraryFile | null>(null);
@@ -415,23 +458,54 @@ export function App(): ReactElement {
     durationMs: null,
     queue: [],
     queueIndex: null,
+    repeatMode: "none",
     volumePercent: 100,
     error: null
   });
+  const playbackTickFileIdRef = useRef<string | null>(null);
+  const documentVisible = useDocumentVisible();
+  const reducedMotion = useReducedMotion();
+  const effectiveVisualizerMode = getEffectiveVisualizerMode(visualizerMode, visualizerCapabilities, reducedMotion);
+  const liveVisualizersEnabled = documentVisible && !reducedMotion;
+  const barVisualizer = useVisualizerStream(liveVisualizersEnabled && playback.status !== "stopped", "spectrum", playback.currentFileId);
+  const modalVisualizer = useVisualizerStream(
+    liveVisualizersEnabled && nowPlayingOpen && playback.status !== "stopped",
+    effectiveVisualizerMode,
+    playback.currentFileId
+  );
+  const currentWaveform = useWaveform(playback.currentFileId, documentVisible && playback.status !== "stopped");
 
   useEffect(() => {
     window.localStorage.setItem(appearanceStorageKey, JSON.stringify(appearance));
   }, [appearance]);
 
+  useEffect(() => {
+    window.localStorage.setItem(visualizerModeStorageKey, visualizerMode);
+  }, [visualizerMode]);
+
+  useEffect(() => {
+    void getVisualizerCapabilities()
+      .then(setVisualizerCapabilities)
+      .catch(() => setVisualizerCapabilities(null));
+  }, []);
+
+  useEffect(() => {
+    const nextMode = getEffectiveVisualizerMode(visualizerMode, visualizerCapabilities, reducedMotion);
+    if (nextMode !== visualizerMode) {
+      setVisualizerMode(nextMode);
+    }
+  }, [reducedMotion, visualizerCapabilities, visualizerMode]);
+
   async function refreshLibrary(query = search): Promise<void> {
     try {
-      const [rootsResult, filesResult] = await Promise.all([listRoots(), listFiles(query)]);
+      const [rootsResult, filesResult] = await Promise.all([listRoots(), listFiles(query, 0, libraryPageSize)]);
       setLibrary({
         status: "ready",
         roots: rootsResult.roots,
         files: filesResult.files,
         total: filesResult.total
       });
+      setLoadedLibraryQuery(query);
     } catch (error) {
       setLibrary((current) => ({
         status: "error",
@@ -440,6 +514,37 @@ export function App(): ReactElement {
         files: "files" in current ? current.files : [],
         total: "total" in current ? current.total : 0
       }));
+    }
+  }
+
+  async function loadMoreLibrary(): Promise<void> {
+    if (libraryLoadingMore || library.status !== "ready" || library.files.length >= library.total) {
+      return;
+    }
+
+    setLibraryLoadingMore(true);
+    try {
+      const result = await listFiles(loadedLibraryQuery, library.files.length, libraryPageSize);
+      setLibrary((current) => {
+        if (current.status !== "ready") {
+          return current;
+        }
+        return {
+          ...current,
+          files: mergeFilesById(current.files, result.files),
+          total: result.total
+        };
+      });
+    } catch (error) {
+      setLibrary((current) => ({
+        status: "error",
+        message: getErrorMessage(error),
+        roots: "roots" in current ? current.roots : [],
+        files: "files" in current ? current.files : [],
+        total: "total" in current ? current.total : 0
+      }));
+    } finally {
+      setLibraryLoadingMore(false);
     }
   }
 
@@ -470,6 +575,7 @@ export function App(): ReactElement {
   }
 
   async function refreshMetadataGaps(): Promise<void> {
+    setMetadataGapsState((current) => ({ status: "loading", gaps: "gaps" in current ? current.gaps : emptyMetadataGaps }));
     try {
       const result = await listMetadataGaps();
       setMetadataGapsState({ status: "ready", gaps: result });
@@ -483,6 +589,7 @@ export function App(): ReactElement {
   }
 
   async function refreshQualityUpgrades(): Promise<void> {
+    setQualityUpgradesState((current) => ({ status: "loading", upgrades: "upgrades" in current ? current.upgrades : emptyQualityUpgrades }));
     try {
       const result = await listQualityUpgrades();
       setQualityUpgradesState({ status: "ready", upgrades: result });
@@ -496,6 +603,7 @@ export function App(): ReactElement {
   }
 
   async function refreshIncompleteAlbums(): Promise<void> {
+    setIncompleteAlbumsState((current) => ({ status: "loading", albums: "albums" in current ? current.albums : emptyIncompleteAlbums }));
     try {
       const result = await listIncompleteAlbums();
       setIncompleteAlbumsState({ status: "ready", albums: result });
@@ -509,6 +617,7 @@ export function App(): ReactElement {
   }
 
   async function refreshAlbumMergeSuggestions(): Promise<void> {
+    setAlbumMergeState((current) => ({ status: "loading", suggestions: "suggestions" in current ? current.suggestions : emptyAlbumMergeSuggestions }));
     try {
       const result = await listAlbumMergeSuggestions();
       setAlbumMergeState({ status: "ready", suggestions: result });
@@ -522,6 +631,7 @@ export function App(): ReactElement {
   }
 
   async function refreshAlternateEditions(): Promise<void> {
+    setAlternateEditionsState((current) => ({ status: "loading", editions: "editions" in current ? current.editions : emptyAlternateEditions }));
     try {
       const result = await listAlternateEditions();
       setAlternateEditionsState({ status: "ready", editions: result });
@@ -532,6 +642,14 @@ export function App(): ReactElement {
         editions: "editions" in current ? current.editions : emptyAlternateEditions
       }));
     }
+  }
+
+  function resetOptionalDuplicateDiagnostics(): void {
+    setMetadataGapsState({ status: "idle" });
+    setQualityUpgradesState({ status: "idle" });
+    setIncompleteAlbumsState({ status: "idle" });
+    setAlbumMergeState({ status: "idle" });
+    setAlternateEditionsState({ status: "idle" });
   }
 
   async function refreshOperations(): Promise<void> {
@@ -549,7 +667,7 @@ export function App(): ReactElement {
 
   async function refreshAlbums(): Promise<void> {
     try {
-      const result = await listAlbums();
+      const result = await listAlbums(0, albumPageSize);
       setAlbumsState({ status: "ready", albums: result });
     } catch (error) {
       setAlbumsState((current) => ({
@@ -557,6 +675,37 @@ export function App(): ReactElement {
         message: getErrorMessage(error),
         albums: "albums" in current ? current.albums : emptyAlbums
       }));
+    }
+  }
+
+  async function loadMoreAlbums(): Promise<void> {
+    if (albumsLoadingMore || albumsState.status !== "ready" || albumsState.albums.albums.length >= albumsState.albums.total) {
+      return;
+    }
+
+    setAlbumsLoadingMore(true);
+    try {
+      const result = await listAlbums(albumsState.albums.albums.length, albumPageSize);
+      setAlbumsState((current) => {
+        if (current.status !== "ready") {
+          return current;
+        }
+        return {
+          status: "ready",
+          albums: {
+            albums: mergeAlbumsById(current.albums.albums, result.albums),
+            total: result.total
+          }
+        };
+      });
+    } catch (error) {
+      setAlbumsState((current) => ({
+        status: "error",
+        message: getErrorMessage(error),
+        albums: "albums" in current ? current.albums : emptyAlbums
+      }));
+    } finally {
+      setAlbumsLoadingMore(false);
     }
   }
 
@@ -814,29 +963,52 @@ export function App(): ReactElement {
     }
 
     void loadHealth();
-    void refreshLibrary("");
-    void refreshImports();
-    void refreshDuplicates();
-    void refreshMetadataGaps();
-    void refreshQualityUpgrades();
-    void refreshIncompleteAlbums();
-    void refreshAlbumMergeSuggestions();
-    void refreshAlternateEditions();
-    void refreshOperations();
-    void refreshAlbums();
-    void refreshPlaylists();
-    void refreshJobs();
-    void refreshTasteProfile();
-    void refreshDiscoveryHealth();
-    void refreshDiscoveryDownloads();
-    void refreshSavedDiscoveryCandidates();
-    void refreshSavedDiscoveryLists();
-    void refreshAgentThread();
     void refreshPlayback();
+    void refreshLibrary("");
+    void refreshPlaylists();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (activeView === "Duplicates") {
+      if (duplicatesState.status === "loading") {
+        void refreshDuplicates();
+      }
+      return;
+    }
+    if ((activeView === "Home" || activeView === "Albums" || activeView === "Artists") && albumsState.status === "loading") {
+      void refreshAlbums();
+      return;
+    }
+    if (activeView === "Imports" && importsState.status === "loading") {
+      void refreshImports();
+      return;
+    }
+    if (activeView === "Operations" && operationsState.status === "loading") {
+      void refreshOperations();
+      return;
+    }
+    if (activeView === "Jobs" && jobsState.status === "loading") {
+      void refreshJobs();
+      return;
+    }
+    if (activeView === "Settings" && tasteProfileState.status === "loading") {
+      void refreshTasteProfile();
+      return;
+    }
+    if (activeView === "Discovery") {
+      void refreshDiscoveryHealth();
+      void refreshDiscoveryDownloads();
+      void refreshSavedDiscoveryCandidates();
+      void refreshSavedDiscoveryLists();
+      return;
+    }
+    if (activeView === "Agent" && agentThreadId == null) {
+      void refreshAgentThread();
+    }
+  }, [activeView]);
 
   useEffect(() => {
     playbackRef.current = playback;
@@ -856,9 +1028,11 @@ export function App(): ReactElement {
 
   useEffect(() => {
     if (playback.status !== "playing" || !playback.currentFileId) {
+      playbackTickFileIdRef.current = null;
       return;
     }
 
+    playbackTickFileIdRef.current = playback.currentFileId;
     let lastTick = Date.now();
     const interval = window.setInterval(() => {
       const now = Date.now();
@@ -866,7 +1040,11 @@ export function App(): ReactElement {
       lastTick = now;
 
       setPlayback((current) => {
-        if (current.status !== "playing" || !current.currentFileId) {
+        if (
+          current.status !== "playing" ||
+          !current.currentFileId ||
+          current.currentFileId !== playbackTickFileIdRef.current
+        ) {
           return current;
         }
 
@@ -878,7 +1056,12 @@ export function App(): ReactElement {
       });
     }, 250);
 
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearInterval(interval);
+      if (playbackTickFileIdRef.current === playback.currentFileId) {
+        playbackTickFileIdRef.current = null;
+      }
+    };
   }, [playback.status, playback.currentFileId]);
 
   useEffect(() => {
@@ -983,16 +1166,8 @@ export function App(): ReactElement {
     try {
       const result = await scanRoot(rootId);
       setScanResult(result);
-      await Promise.all([
-        refreshLibrary(),
-        refreshDuplicates(),
-        refreshMetadataGaps(),
-        refreshQualityUpgrades(),
-        refreshIncompleteAlbums(),
-        refreshAlbumMergeSuggestions(),
-        refreshAlbums(),
-        refreshAlternateEditions()
-      ]);
+      await Promise.all([refreshLibrary(), refreshAlbums()]);
+      resetOptionalDuplicateDiagnostics();
     } finally {
       setBusyRootId(null);
     }
@@ -1005,16 +1180,8 @@ export function App(): ReactElement {
     try {
       const result = await scanWatchedRoots();
       setWatchedScanResult(result);
-      await Promise.all([
-        refreshLibrary(),
-        refreshDuplicates(),
-        refreshMetadataGaps(),
-        refreshQualityUpgrades(),
-        refreshIncompleteAlbums(),
-        refreshAlbumMergeSuggestions(),
-        refreshAlbums(),
-        refreshAlternateEditions()
-      ]);
+      await Promise.all([refreshLibrary(), refreshAlbums()]);
+      resetOptionalDuplicateDiagnostics();
     } finally {
       setBusyRootId(null);
     }
@@ -1032,16 +1199,8 @@ export function App(): ReactElement {
     try {
       await removeRoot(root.id);
       setScanResult(null);
-      await Promise.all([
-        refreshLibrary(),
-        refreshDuplicates(),
-        refreshMetadataGaps(),
-        refreshQualityUpgrades(),
-        refreshIncompleteAlbums(),
-        refreshAlbumMergeSuggestions(),
-        refreshAlbums(),
-        refreshAlternateEditions()
-      ]);
+      await Promise.all([refreshLibrary(), refreshAlbums()]);
+      resetOptionalDuplicateDiagnostics();
     } finally {
       setBusyRootId(null);
     }
@@ -1190,17 +1349,12 @@ export function App(): ReactElement {
       await Promise.all([
         refreshImports(),
         refreshLibrary(),
-        refreshDuplicates(),
-        refreshMetadataGaps(),
-        refreshQualityUpgrades(),
-        refreshIncompleteAlbums(),
-        refreshAlbumMergeSuggestions(),
         refreshAlbums(),
-        refreshAlternateEditions(),
         refreshPlaylists(),
         refreshJobs(),
         refreshDiscoveryDownloads()
       ]);
+      resetOptionalDuplicateDiagnostics();
     } catch (error) {
       setImportsState((current) => ({
         status: "error",
@@ -1245,20 +1399,15 @@ export function App(): ReactElement {
     try {
       const result = await applyOperationBatch(batchId);
       replaceOperationBatch(result.batch);
-      void Promise.all([
+      await Promise.all([
         refreshImports(),
         refreshLibrary(),
-        refreshDuplicates(),
-        refreshMetadataGaps(),
-        refreshQualityUpgrades(),
-        refreshIncompleteAlbums(),
-        refreshAlbumMergeSuggestions(),
         refreshAlbums(),
-        refreshAlternateEditions(),
         refreshPlaylists(),
         refreshJobs(),
         refreshDiscoveryDownloads()
       ]);
+      resetOptionalDuplicateDiagnostics();
     } catch (error) {
       setOperationsError(error);
       void refreshOperations();
@@ -1269,18 +1418,8 @@ export function App(): ReactElement {
     try {
       const result = await revertOperationBatch(batchId);
       replaceOperationBatch(result.batch);
-      void Promise.all([
-        refreshLibrary(),
-        refreshDuplicates(),
-        refreshMetadataGaps(),
-        refreshQualityUpgrades(),
-        refreshIncompleteAlbums(),
-        refreshAlbumMergeSuggestions(),
-        refreshAlbums(),
-        refreshAlternateEditions(),
-        refreshPlaylists(),
-        refreshJobs()
-      ]);
+      void Promise.all([refreshLibrary(), refreshAlbums(), refreshPlaylists(), refreshJobs()]);
+      resetOptionalDuplicateDiagnostics();
     } catch (error) {
       setOperationsError(error);
       void refreshOperations();
@@ -1294,32 +1433,37 @@ export function App(): ReactElement {
     setActiveView("Operations");
   }
 
-  async function handleProposeRating(fileId: string, rating: number | null): Promise<void> {
-    const result = await proposeRating(fileId, rating);
+  async function handleProposeBulkMetadataEdit(fileIds: string[], metadata: EditableFileMetadata): Promise<void> {
+    const uniqueFileIds = [...new Set(fileIds)];
+    if (uniqueFileIds.length === 0 || Object.keys(metadata).length === 0) {
+      return;
+    }
+    const result = await proposeBulkFileMetadata(uniqueFileIds, metadata);
     replaceOperationBatch(result.batch);
+    setSelectedLibraryFileIds(new Set());
     setActiveView("Operations");
+  }
+
+  async function handleProposeRating(fileId: string, rating: number | null): Promise<void> {
+    replaceLoadedFile(await updateFileRating(fileId, rating));
   }
 
   async function handleProposeFavoriteStatus(fileId: string, status: "liked" | "disliked" | "neutral"): Promise<void> {
-    const result = await proposeFavoriteStatus(fileId, {
+    replaceLoadedFile(await updateFileFavoriteStatus(fileId, {
       liked: status === "neutral" ? null : status === "liked",
       disliked: status === "neutral" ? null : status === "disliked"
-    });
-    replaceOperationBatch(result.batch);
-    setActiveView("Operations");
+    }));
   }
 
   async function handleProposePlaybackRating(fileId: string, rating: number | null): Promise<void> {
-    const result = await proposeRating(fileId, rating);
-    replaceOperationBatch(result.batch);
+    replaceLoadedFile(await updateFileRating(fileId, rating));
   }
 
   async function handleProposePlaybackFavoriteStatus(fileId: string, status: "liked" | "disliked" | "neutral"): Promise<void> {
-    const result = await proposeFavoriteStatus(fileId, {
+    replaceLoadedFile(await updateFileFavoriteStatus(fileId, {
       liked: status === "neutral" ? null : status === "liked",
       disliked: status === "neutral" ? null : status === "disliked"
-    });
-    replaceOperationBatch(result.batch);
+    }));
   }
 
   async function handleProposeRemoveFile(file: LibraryFile): Promise<void> {
@@ -1333,6 +1477,26 @@ export function App(): ReactElement {
 
     const result = await proposeRemoveFile(file.id);
     replaceOperationBatch(result.batch);
+    setActiveView("Operations");
+  }
+
+  async function handleProposeRemoveSelectedFiles(fileIds: string[], label: string): Promise<void> {
+    const uniqueFileIds = [...new Set(fileIds)];
+    if (uniqueFileIds.length === 0) {
+      return;
+    }
+    const confirmed = window.confirm(
+      `Remove ${uniqueFileIds.length.toLocaleString()} indexed file${
+        uniqueFileIds.length === 1 ? "" : "s"
+      } from "${label}"?\n\nThis will not delete audio files from disk.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const result = await proposeRemoveFiles(uniqueFileIds, label);
+    replaceOperationBatch(result.batch);
+    setSelectedLibraryFileIds(new Set());
     setActiveView("Operations");
   }
 
@@ -1353,8 +1517,76 @@ export function App(): ReactElement {
     setActiveView("Operations");
   }
 
+  async function handleProposeBulkDuplicateCleanup(groups: LibraryDuplicateGroup[]): Promise<void> {
+    const cleanupGroups = groups
+      .map((group) => {
+        const keepFile = chooseDuplicateKeepFile(group.files);
+        return {
+          keepFileId: keepFile.id,
+          removeFileIds: group.files.filter((file) => file.id !== keepFile.id).map((file) => file.id)
+        };
+      })
+      .filter((group) => group.removeFileIds.length > 0);
+    const removeCount = cleanupGroups.reduce((total, group) => total + group.removeFileIds.length, 0);
+    if (removeCount === 0) {
+      return;
+    }
+    const confirmed = window.confirm(
+      `Remove ${removeCount.toLocaleString()} exact duplicate index entr${
+        removeCount === 1 ? "y" : "ies"
+      } across ${cleanupGroups.length.toLocaleString()} group${
+        cleanupGroups.length === 1 ? "" : "s"
+      }?\n\nThis will not delete audio files from disk.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const result = await proposeBulkDuplicateCleanup(cleanupGroups);
+    replaceOperationBatch(result.batch);
+    setActiveView("Operations");
+  }
+
+  async function handleProposeBulkAlbumMerge(merges: Array<{ canonicalAlbum: string; fileIds: string[] }>): Promise<void> {
+    const actionableMerges = merges.filter((merge) => merge.fileIds.length > 0);
+    const fileCount = actionableMerges.reduce((total, merge) => total + merge.fileIds.length, 0);
+    if (fileCount === 0) {
+      return;
+    }
+    const confirmed = window.confirm(
+      `Propose album metadata merges for ${fileCount.toLocaleString()} file${fileCount === 1 ? "" : "s"} across ${
+        actionableMerges.length
+      } suggestion${actionableMerges.length === 1 ? "" : "s"}?`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const result = await proposeBulkAlbumMerge(actionableMerges);
+    replaceOperationBatch(result.batch);
+    setActiveView("Operations");
+  }
+
   function toggleLibraryFileSelection(fileId: string): void {
     setSelectedLibraryFileIds((current) => toggleSetValue(current, fileId));
+  }
+
+  function toggleLibraryAlbumSelection(fileIds: string[]): void {
+    if (fileIds.length === 0) {
+      return;
+    }
+    setSelectedLibraryFileIds((current) => {
+      const next = new Set(current);
+      const allSelected = fileIds.every((fileId) => current.has(fileId));
+      for (const fileId of fileIds) {
+        if (allSelected) {
+          next.delete(fileId);
+        } else {
+          next.add(fileId);
+        }
+      }
+      return next;
+    });
   }
 
   function clearLibrarySelection(): void {
@@ -1363,28 +1595,36 @@ export function App(): ReactElement {
 
   async function handleProposeBulkTags(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    const tags = parseTagInput(bulkTagInput);
-    const fileIds = [...selectedLibraryFileIds];
-    if (fileIds.length === 0 || tags.length === 0) {
+    await handleProposeBulkTagsForFiles([...selectedLibraryFileIds], bulkTagInput);
+    setBulkTagInput("");
+  }
+
+  async function handleProposeBulkTagsForFiles(fileIds: string[], tagText: string): Promise<void> {
+    const tags = parseTagInput(tagText);
+    const uniqueFileIds = [...new Set(fileIds)];
+    if (uniqueFileIds.length === 0 || tags.length === 0) {
       return;
     }
 
-    const result = await proposeBulkInternalTags(fileIds, tags);
+    const result = await proposeBulkInternalTags(uniqueFileIds, tags);
     replaceOperationBatch(result.batch);
-    setBulkTagInput("");
     setSelectedLibraryFileIds(new Set());
     setActiveView("Operations");
   }
 
   async function handleProposeBulkRename(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    const fileIds = [...selectedLibraryFileIds];
-    const pattern = bulkRenamePattern.trim();
-    if (fileIds.length === 0 || !pattern) {
+    await handleProposeBulkRenameForFiles([...selectedLibraryFileIds], bulkRenamePattern);
+  }
+
+  async function handleProposeBulkRenameForFiles(fileIds: string[], patternInput: string): Promise<void> {
+    const uniqueFileIds = [...new Set(fileIds)];
+    const pattern = patternInput.trim();
+    if (uniqueFileIds.length === 0 || !pattern) {
       return;
     }
 
-    const result = await proposeBulkRenameFiles(fileIds, pattern);
+    const result = await proposeBulkRenameFiles(uniqueFileIds, pattern);
     replaceOperationBatch(result.batch);
     setSelectedLibraryFileIds(new Set());
     setActiveView("Operations");
@@ -1426,6 +1666,20 @@ export function App(): ReactElement {
   ): Promise<void> {
     const result = await proposeUpdatePlaylist(playlistId, updates);
     replaceOperationBatch(result.batch);
+    setActiveView("Operations");
+  }
+
+  async function handleProposeDeletePlaylist(playlist: Playlist): Promise<void> {
+    const confirmed = window.confirm(
+      `Delete playlist "${playlist.name}"?\n\nThis will create a reviewable operation batch and will not delete any audio files.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const result = await proposeDeletePlaylist(playlist.id);
+    replaceOperationBatch(result.batch);
+    setSelectedPlaylistId(null);
     setActiveView("Operations");
   }
 
@@ -1510,6 +1764,52 @@ export function App(): ReactElement {
     }
   }
 
+  async function handleEnqueuePlayback(fileIds: string[], position: QueueInsertPosition): Promise<void> {
+    if (playbackBusy || fileIds.length === 0) {
+      return;
+    }
+
+    setPlaybackBusy(true);
+    try {
+      const next = await enqueuePlayback(fileIds, position);
+      setPlayback(next);
+    } catch (error) {
+      setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
+    } finally {
+      setPlaybackBusy(false);
+    }
+  }
+
+  async function handlePlayFileIdsShuffled(fileIds: string[]): Promise<void> {
+    if (playbackBusy || fileIds.length === 0) {
+      return;
+    }
+
+    setPlaybackBusy(true);
+    try {
+      setPlayback(await playQueue(shuffleFileIds(fileIds), 0));
+    } catch (error) {
+      setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
+    } finally {
+      setPlaybackBusy(false);
+    }
+  }
+
+  async function handleSetRepeatMode(repeatMode: PlaybackRepeatMode): Promise<void> {
+    if (playbackBusy) {
+      return;
+    }
+
+    setPlaybackBusy(true);
+    try {
+      setPlayback(await setPlaybackRepeatMode(repeatMode));
+    } catch (error) {
+      setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
+    } finally {
+      setPlaybackBusy(false);
+    }
+  }
+
   async function handlePauseResume(): Promise<void> {
     if (playbackBusy) {
       return;
@@ -1578,13 +1878,19 @@ export function App(): ReactElement {
     }
   }
 
-  async function handleSeekPlayback(event: MouseEvent<HTMLButtonElement>): Promise<void> {
+  async function handleSeekPlayback(event: MouseEvent<HTMLElement>): Promise<void> {
     if (playbackBusy || playback.status === "stopped" || !playback.durationMs || playback.durationMs <= 0) {
       return;
     }
 
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const ratio = bounds.width <= 0 ? 0 : (event.clientX - bounds.left) / bounds.width;
+    await seekPlaybackFromRatio(getPointerRatio(event.currentTarget, event.clientX));
+  }
+
+  async function seekPlaybackFromRatio(ratio: number): Promise<void> {
+    if (playbackBusy || playback.status === "stopped" || !playback.durationMs || playback.durationMs <= 0) {
+      return;
+    }
+
     const positionMs = Math.round(Math.max(0, Math.min(1, ratio)) * playback.durationMs);
     setPlaybackBusy(true);
     try {
@@ -1644,9 +1950,28 @@ export function App(): ReactElement {
     setActiveView("Artists");
   }
 
-  function openAlbumPage(group: Pick<LibraryAlbumGroup, "artist" | "album" | "year">): void {
-    const albumGroups = "albums" in albumsState ? albumsState.albums.albums : [];
-    const matchingAlbum =
+  function openAlbumDetailPage(album: AlbumGroupItem): void {
+    setAlbumViewTarget({ key: pageTargetRequestId.current++, albumId: album.id });
+    setActiveView("Albums");
+  }
+
+  async function openAlbumPage(group: Pick<LibraryAlbumGroup, "artist" | "album" | "year">): Promise<void> {
+    let albumGroups = "albums" in albumsState ? albumsState.albums.albums : [];
+    if (albumGroups.length === 0) {
+      try {
+        const result = await listAlbums();
+        setAlbumsState({ status: "ready", albums: result });
+        albumGroups = result.albums;
+      } catch (error) {
+        setAlbumsState({
+          status: "error",
+          message: getErrorMessage(error),
+          albums: emptyAlbums
+        });
+        return;
+      }
+    }
+    let matchingAlbum =
       albumGroups.find(
         (album) =>
           album.artist === group.artist &&
@@ -1654,6 +1979,29 @@ export function App(): ReactElement {
           (album.year ?? null) === (group.year ?? null)
       ) ??
       albumGroups.find((album) => album.artist === group.artist && album.album === group.album);
+
+    if (!matchingAlbum) {
+      try {
+        const result = await listAlbums(0, Number.MAX_SAFE_INTEGER);
+        setAlbumsState({ status: "ready", albums: result });
+        albumGroups = result.albums;
+        matchingAlbum =
+          albumGroups.find(
+            (album) =>
+              album.artist === group.artist &&
+              album.album === group.album &&
+              (album.year ?? null) === (group.year ?? null)
+          ) ??
+          albumGroups.find((album) => album.artist === group.artist && album.album === group.album);
+      } catch (error) {
+        setAlbumsState((current) => ({
+          status: "error",
+          message: getErrorMessage(error),
+          albums: "albums" in current ? current.albums : emptyAlbums
+        }));
+        return;
+      }
+    }
 
     if (!matchingAlbum) {
       return;
@@ -2063,6 +2411,53 @@ export function App(): ReactElement {
     );
   }
 
+  function replaceLoadedFile(file: LibraryFile): void {
+    setLibrary((current) => {
+      if (!("files" in current)) {
+        return current;
+      }
+      return {
+        ...current,
+        files: current.files.map((item) => (item.id === file.id ? file : item))
+      };
+    });
+    setAlbumsState((current) => {
+      if (!("albums" in current)) {
+        return current;
+      }
+      return {
+        ...current,
+        albums: {
+          ...current.albums,
+          albums: current.albums.albums.map((album) =>
+            album.files.some((item) => item.id === file.id)
+              ? {
+                  ...album,
+                  files: album.files.map((item) => (item.id === file.id ? file : item))
+                }
+              : album
+          )
+        }
+      };
+    });
+    setPlaylistsState((current) => {
+      if (!("playlists" in current)) {
+        return current;
+      }
+      return {
+        ...current,
+        playlists: current.playlists.map((playlist) =>
+          playlist.items.some((item) => item.file.id === file.id)
+            ? {
+                ...playlist,
+                items: playlist.items.map((item) => (item.file.id === file.id ? { ...item, file } : item))
+              }
+            : playlist
+        )
+      };
+    });
+  }
+
   const roots = "roots" in library ? library.roots : [];
   const files = "files" in library ? library.files : [];
   const total = "total" in library ? library.total : 0;
@@ -2075,10 +2470,28 @@ export function App(): ReactElement {
   const albums = "albums" in albumsState ? albumsState.albums : emptyAlbums;
   const operationBatches = "batches" in operationsState ? operationsState.batches : [];
   const playlists = "playlists" in playlistsState ? playlistsState.playlists : [];
+  const selectedPlaylist = selectedPlaylistId ? playlists.find((playlist) => playlist.id === selectedPlaylistId) ?? null : null;
   const selectedRoot = roots[0] ?? null;
+  const playbackFiles = useMemo(() => {
+    const fileMap = new Map<string, LibraryFile>();
+    for (const file of files) {
+      fileMap.set(file.id, file);
+    }
+    for (const album of albums.albums) {
+      for (const file of album.files) {
+        fileMap.set(file.id, file);
+      }
+    }
+    for (const playlist of playlists) {
+      for (const item of playlist.items) {
+        fileMap.set(item.file.id, item.file);
+      }
+    }
+    return [...fileMap.values()];
+  }, [albums.albums, files, playlists]);
   const currentPlaybackFile = useMemo(
-    () => (playback.currentFileId ? files.find((file) => file.id === playback.currentFileId) ?? null : null),
-    [files, playback.currentFileId]
+    () => (playback.currentFileId ? playbackFiles.find((file) => file.id === playback.currentFileId) ?? null : null),
+    [playback.currentFileId, playbackFiles]
   );
   const appearanceStyle = useMemo(() => getAppearanceStyle(appearance), [appearance]);
   const appShellClassName = `appShell ${inspectorCollapsed ? "inspectorCollapsed " : ""}theme-${appearance.mode}`.trim();
@@ -2097,21 +2510,37 @@ export function App(): ReactElement {
           <span>negi</span>
         </div>
         <nav className="navList" aria-label="Primary">
-          {navItems.map((item) => (
-            <button
-              className={item === activeView ? "navItem active" : "navItem"}
-              key={item}
-              type="button"
-              onClick={() => {
-                if (item === "Artists" && activeView === "Artists") {
-                  setArtistsViewResetKey((current) => current + 1);
-                }
-                setActiveView(item);
-              }}
-            >
-              <NavIcon view={item} />
-              {item}
-            </button>
+          {navSections.map((section) => (
+            <div className="navSection" key={section.label}>
+              <span className="navSectionLabel">{section.label}</span>
+              {section.items.map((item) => (
+                <button
+                  className={item === activeView ? "navItem active" : "navItem"}
+                  key={item}
+                  type="button"
+                  onClick={() => {
+                    if (item === "Artists" && activeView === "Artists") {
+                      setArtistViewTarget(null);
+                      setArtistsViewResetKey((current) => current + 1);
+                    }
+                    if (item === "Artists") {
+                      setArtistViewTarget(null);
+                    }
+                    if (item === "Albums") {
+                      setAlbumViewTarget(null);
+                      setAlbumsViewResetKey((current) => current + 1);
+                    }
+                    if (item === "Playlists") {
+                      setSelectedPlaylistId(null);
+                    }
+                    setActiveView(item);
+                  }}
+                >
+                  <NavIcon view={item} />
+                  {item}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
       </aside>
@@ -2127,12 +2556,29 @@ export function App(): ReactElement {
           <BackendHealth state={health} />
         </header>
 
-        {activeView === "Library" ? (
+        {activeView === "Home" ? (
+          <HomeView
+            albumsState={albumsState}
+            currentPlaybackFile={currentPlaybackFile}
+            currentWaveform={currentWaveform.waveform}
+            libraryTotal={library.status === "ready" ? library.total : total}
+            playback={playback}
+            playbackBusy={playbackBusy}
+            playlists={playlists}
+            onOpenAlbum={openAlbumDetailPage}
+            onOpenArtistPage={openArtistPage}
+            onPlayAlbum={handlePlayAlbum}
+            onPlayFile={handlePlayFile}
+          />
+        ) : activeView === "Library" ? (
           <LibraryView
             bulkRenamePattern={bulkRenamePattern}
             bulkTagInput={bulkTagInput}
             busyRootId={busyRootId}
+            currentWaveform={currentWaveform.waveform}
             files={files}
+            libraryLoadingMore={libraryLoadingMore}
+            libraryTotal={library.status === "ready" ? library.total : files.length}
             playback={playback}
             playbackBusy={playbackBusy}
             playlistAddTargetId={playlistAddTargetId}
@@ -2159,38 +2605,56 @@ export function App(): ReactElement {
             onClearSelection={clearLibrarySelection}
             onSelectRootFolder={handleSelectRootFolder}
             onEditFile={setEditingFile}
+            onEnqueuePlayback={handleEnqueuePlayback}
             onInspectFile={handleInspectLibraryFile}
+            onLoadMore={loadMoreLibrary}
             onOpenAlbumPage={openAlbumPage}
             onOpenArtistPage={openArtistPage}
             onPlayFile={handlePlayFile}
             onProposeAddToPlaylist={handleProposeAddSelectedToPlaylist}
+            onProposeBulkMetadata={handleProposeBulkMetadataEdit}
             onProposeBulkRename={handleProposeBulkRename}
+            onProposeBulkRenameForFiles={handleProposeBulkRenameForFiles}
             onProposeBulkTags={handleProposeBulkTags}
+            onProposeBulkTagsForFiles={handleProposeBulkTagsForFiles}
             onProposePlaylist={handleProposeSelectedPlaylist}
             onProposeFavoriteStatus={handleProposeFavoriteStatus}
             onProposeRating={handleProposeRating}
+            onRemoveFiles={handleProposeRemoveSelectedFiles}
             onRemoveFile={handleProposeRemoveFile}
             onRemoveRoot={handleRemoveRoot}
             onScanRoot={handleScanRoot}
             onScanWatchedRoots={handleScanWatchedRoots}
             onSearch={handleSearch}
+            onToggleAlbumSelection={toggleLibraryAlbumSelection}
             onToggleFileSelection={toggleLibraryFileSelection}
             onToggleRootWatch={handleToggleRootWatch}
           />
         ) : activeView === "Artists" ? (
-          <ArtistsView
-            albumsState={albumsState}
-            initialTarget={artistViewTarget}
-            playbackBusy={playbackBusy}
+        <ArtistsView
+          albumsState={albumsState}
+          currentWaveform={currentWaveform.waveform}
+          initialTarget={artistViewTarget}
+          playback={playback}
+          playbackBusy={playbackBusy}
+          loadingMore={albumsLoadingMore}
             resetKey={artistsViewResetKey}
+            onEnqueuePlayback={handleEnqueuePlayback}
+            onLoadMore={loadMoreAlbums}
             onPlayAlbum={handlePlayAlbum}
             onPlayFile={handlePlayFile}
           />
         ) : activeView === "Albums" ? (
-          <AlbumsView
-            albumsState={albumsState}
-            initialTarget={albumViewTarget}
-            playbackBusy={playbackBusy}
+        <AlbumsView
+          albumsState={albumsState}
+          currentWaveform={currentWaveform.waveform}
+          initialTarget={albumViewTarget}
+          playback={playback}
+          playbackBusy={playbackBusy}
+          loadingMore={albumsLoadingMore}
+            resetKey={albumsViewResetKey}
+            onEnqueuePlayback={handleEnqueuePlayback}
+            onLoadMore={loadMoreAlbums}
             onPlayAlbum={handlePlayAlbum}
             onPlayFile={handlePlayFile}
           />
@@ -2220,7 +2684,14 @@ export function App(): ReactElement {
             qualityUpgradesState={qualityUpgradesState}
             onEditMetadata={setEditingFile}
             onProposeAlbumMerge={handleProposeAlbumMerge}
+            onProposeBulkAlbumMerge={handleProposeBulkAlbumMerge}
+            onProposeBulkCleanup={handleProposeBulkDuplicateCleanup}
             onProposeCleanup={handleProposeDuplicateCleanup}
+            onRefreshAlbumMerges={refreshAlbumMergeSuggestions}
+            onRefreshAlternateEditions={refreshAlternateEditions}
+            onRefreshIncompleteAlbums={refreshIncompleteAlbums}
+            onRefreshMetadataGaps={refreshMetadataGaps}
+            onRefreshQualityUpgrades={refreshQualityUpgrades}
           />
         ) : activeView === "Operations" ? (
           <OperationsView
@@ -2281,8 +2752,19 @@ export function App(): ReactElement {
         ) : activeView === "Playlists" ? (
           <PlaylistsView
             playbackBusy={playbackBusy}
+            selectedPlaylist={selectedPlaylist}
             playlistsState={playlistsState}
+            onBack={() => setSelectedPlaylistId(null)}
+            onEnqueuePlayback={handleEnqueuePlayback}
+            onOpenAlbumPage={openAlbumPage}
+            onOpenArtistPage={openArtistPage}
+            onOpenPlaylist={setSelectedPlaylistId}
+            currentWaveform={currentWaveform.waveform}
+            playback={playback}
+            onPlayFile={handlePlayFile}
+            onPlayFileIdsShuffled={handlePlayFileIdsShuffled}
             onPlayPlaylist={handlePlayPlaylist}
+            onProposeDeletePlaylist={handleProposeDeletePlaylist}
             onProposeUpdatePlaylist={handleProposeUpdatePlaylist}
             onProposeRemoveItem={handleProposeRemovePlaylistItem}
           />
@@ -2392,32 +2874,62 @@ export function App(): ReactElement {
           onClick={(event) => void handleSeekPlayback(event)}
         >
           <div className="progressTrack">
-            <div className="progressFill" style={{ width: `${getProgressPercent(playback)}%` }} />
+            <WaveformCanvas
+              className="playerWaveformCanvas"
+              playback={playback}
+              variant="rail"
+              waveform={currentWaveform.waveform}
+            />
+            <div className="progressFill" key={playback.currentFileId ?? "stopped"} style={{ width: `${getProgressPercent(playback)}%` }} />
           </div>
         </button>
         <div className="playerBody">
-          <button
-            aria-label="Open now playing view"
-            className="nowPlaying"
-            disabled={!playback.currentFileId}
-            type="button"
-            onClick={() => setNowPlayingOpen(true)}
-          >
-            <div className={playback.status === "playing" ? "playerGlyph live" : "playerGlyph"}>
+          <div className="nowPlaying">
+            <button
+              aria-label="Open now playing view"
+              className="nowPlayingOpen"
+              disabled={!playback.currentFileId}
+              type="button"
+              onClick={() => setNowPlayingOpen(true)}
+            >
+              <span className={playback.status === "playing" ? "playerGlyph live" : "playerGlyph"}>
               {playback.currentFileId ? (
                 <Artwork className="playerArt" src={artworkFileUrl(playback.currentFileId)} />
               ) : null}
-              <div className="eqBars" aria-hidden="true">
-                <span className="eqBar" />
-                <span className="eqBar" />
-                <span className="eqBar" />
-              </div>
-            </div>
+                <SpectrumCanvas
+                  className="playerMeterCanvas"
+                  frameRef={barVisualizer.frameRef}
+                  mode="spectrum"
+                  playing={playback.status === "playing"}
+                />
+              </span>
+            </button>
             <div className="nowPlayingText">
-              <strong>{playback.currentDisplayName ?? "Nothing queued"}</strong>
+              <button
+                className="nowPlayingTitleButton"
+                disabled={!playback.currentFileId}
+                title={playback.currentDisplayName ?? "Nothing queued"}
+                type="button"
+                onClick={() => setNowPlayingOpen(true)}
+              >
+                {currentPlaybackFile?.displayTags.title ?? playback.currentDisplayName ?? "Nothing queued"}
+              </button>
               <span className="npMeta">
                 <span className={`npStatusDot ${playback.status}`} aria-hidden="true" />
                 <span>{playback.status}</span>
+                {currentPlaybackFile?.displayTags.artist ? (
+                  <button className="npLink" type="button" onClick={() => openArtistPage(currentPlaybackFile.displayTags.artist!)}>
+                    {currentPlaybackFile.displayTags.artist}
+                  </button>
+                ) : null}
+                {currentPlaybackFile?.displayTags.artist && currentPlaybackFile && getFileAlbumTarget(currentPlaybackFile) ? (
+                  <span className="npMetaSeparator" aria-hidden="true">/</span>
+                ) : null}
+                {currentPlaybackFile && getFileAlbumTarget(currentPlaybackFile) ? (
+                  <button className="npLink" type="button" onClick={() => void openAlbumPage(getFileAlbumTarget(currentPlaybackFile)!)}>
+                    {currentPlaybackFile.displayTags.album}
+                  </button>
+                ) : null}
                 {playback.queueIndex != null && playback.queue.length > 0 ? (
                   <span className="queueBadge">
                     {playback.queueIndex + 1} / {playback.queue.length}
@@ -2426,7 +2938,7 @@ export function App(): ReactElement {
                 {playback.error ? <span className="playerError" title={playback.error}>{playback.error}</span> : null}
               </span>
             </div>
-          </button>
+          </div>
           <div className="transport">
             <button
               aria-label="Previous track"
@@ -2456,6 +2968,12 @@ export function App(): ReactElement {
             >
               <TransportIcon shape="next" />
             </button>
+            <RepeatControls
+              disabled={playbackBusy || playback.status === "stopped"}
+              repeatMode={playback.repeatMode}
+              variant="bar"
+              onRepeatMode={handleSetRepeatMode}
+            />
             <button
               aria-label="Stop playback"
               disabled={playbackBusy || playback.status === "stopped"}
@@ -2516,7 +3034,7 @@ export function App(): ReactElement {
 
       {nowPlayingOpen ? (
         <NowPlayingModal
-          files={files}
+          files={playbackFiles}
           playback={playback}
           playbackBusy={playbackBusy}
           onClose={() => setNowPlayingOpen(false)}
@@ -2526,6 +3044,16 @@ export function App(): ReactElement {
           onPlayFile={handlePlayFile}
           onPrevious={handlePrevious}
           onRating={handleProposePlaybackRating}
+          onRepeatMode={handleSetRepeatMode}
+          onSeek={seekPlaybackFromRatio}
+          onOpenAlbumPage={openAlbumPage}
+          onOpenArtistPage={openArtistPage}
+          visualizerCapabilities={visualizerCapabilities}
+          visualizerFrameRef={modalVisualizer.frameRef}
+          visualizerMode={effectiveVisualizerMode}
+          reducedMotion={reducedMotion}
+          waveformState={currentWaveform}
+          onVisualizerMode={setVisualizerMode}
         />
       ) : null}
     </main>
@@ -2537,29 +3065,189 @@ async function fetchBackendHealth(): Promise<HealthResponse> {
 }
 
 function artworkFileUrl(fileId: string): string {
-  return `http://127.0.0.1:47831/artwork/file/${encodeURIComponent(fileId)}`;
+  return `${backendOrigin}/artwork/file/${encodeURIComponent(fileId)}`;
 }
 
 function artworkAlbumUrl(albumId: string): string {
-  return `http://127.0.0.1:47831/artwork/album/${encodeURIComponent(albumId)}`;
+  return `${backendOrigin}/artwork/album/${encodeURIComponent(albumId)}`;
 }
 
 function artistImageUrl(artist: string): string {
-  return `http://127.0.0.1:47831/artist-image/${encodeURIComponent(artist)}`;
+  return `${backendOrigin}/artist-image/${encodeURIComponent(artist)}`;
 }
 
-function Artwork({ src, className }: { src: string | null; className: string }): ReactElement {
-  const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  if (!src || failedSrc === src) {
+const loadedArtworkSrcs = new Set<string>();
+const failedArtworkSrcs = new Map<string, number>();
+const artworkObjectUrls = new Map<string, string>();
+const pendingArtworkObjectUrls = new Map<string, Promise<string>>();
+const FAILED_ARTWORK_RETRY_MS = 30_000;
+
+function Artwork({ src, className, eager }: { src: string | null; className: string; eager?: boolean }): ReactElement {
+  const frameRef = useRef<HTMLSpanElement | HTMLImageElement | null>(null);
+  const setFrameRef = (node: HTMLSpanElement | HTMLImageElement | null) => {
+    frameRef.current = node;
+  };
+  const [displaySrc, setDisplaySrc] = useState<string | null>(() => (src ? (artworkObjectUrls.get(src) ?? null) : null));
+  const [shouldLoad, setShouldLoad] = useState(() => Boolean(eager || (src && artworkObjectUrls.has(src))));
+  const [status, setStatus] = useState<"pending" | "ready" | "failed">(() =>
+    src && artworkObjectUrls.has(src) ? "ready" : !src || artworkFailedRecently(src) ? "failed" : "pending"
+  );
+
+  useEffect(() => {
+    if (!src || artworkFailedRecently(src)) {
+      setDisplaySrc(null);
+      setStatus("failed");
+      return;
+    }
+    const cachedObjectUrl = artworkObjectUrls.get(src);
+    if (cachedObjectUrl) {
+      setDisplaySrc(cachedObjectUrl);
+      setShouldLoad(true);
+      setStatus("ready");
+      return;
+    }
+    setDisplaySrc(null);
+    setShouldLoad(Boolean(eager));
+    setStatus("pending");
+  }, [eager, src]);
+
+  useEffect(() => {
+    if (!src || shouldLoad || eager || artworkObjectUrls.has(src) || artworkFailedRecently(src)) {
+      return;
+    }
+    const node = frameRef.current;
+    if (!node || typeof IntersectionObserver === "undefined") {
+      setShouldLoad(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShouldLoad(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "640px" }
+    );
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+    };
+  }, [eager, shouldLoad, src]);
+
+  useEffect(() => {
+    if (!src || artworkFailedRecently(src)) {
+      setDisplaySrc(null);
+      setStatus("failed");
+      return;
+    }
+    const cachedObjectUrl = artworkObjectUrls.get(src);
+    if (cachedObjectUrl) {
+      setDisplaySrc(cachedObjectUrl);
+      setStatus("ready");
+      return;
+    }
+    if (!shouldLoad) {
+      setDisplaySrc(null);
+      setStatus("pending");
+      return;
+    }
+
+    let cancelled = false;
+    setDisplaySrc(null);
+    setStatus("pending");
+    void getArtworkObjectUrl(src)
+      .then((objectUrl) => {
+        if (cancelled) {
+          return;
+        }
+        setDisplaySrc(objectUrl);
+        setStatus("ready");
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        failedArtworkSrcs.set(src, Date.now());
+        setDisplaySrc(null);
+        setStatus("failed");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [shouldLoad, src]);
+
+  if (!src || status === "failed" || !displaySrc) {
     return (
-      <span aria-hidden="true" className={`${className} artFallback`}>
+      <span aria-hidden="true" className={`${className} artFallback`} ref={setFrameRef}>
         <svg viewBox="0 0 16 16">
           <path d="M13 2 6 3.5v7.2a2.6 2.6 0 1 0 1.2 2.2V6.5L11.8 5v4.2A2.6 2.6 0 1 0 13 11.3z" />
         </svg>
       </span>
     );
   }
-  return <img alt="" className={className} loading="lazy" src={src} onError={() => setFailedSrc(src)} />;
+  return (
+    <img
+      alt=""
+      className={`${className}${status === "ready" ? " artLoaded" : " artLoading"}`}
+      decoding="async"
+      loading={eager || loadedArtworkSrcs.has(src) ? "eager" : "lazy"}
+      ref={setFrameRef}
+      src={displaySrc}
+      onLoad={() => {
+        loadedArtworkSrcs.add(src);
+        setStatus("ready");
+      }}
+      onError={() => {
+        failedArtworkSrcs.set(src, Date.now());
+        setStatus("failed");
+      }}
+    />
+  );
+}
+
+function getArtworkObjectUrl(src: string): Promise<string> {
+  const cachedObjectUrl = artworkObjectUrls.get(src);
+  if (cachedObjectUrl) {
+    return Promise.resolve(cachedObjectUrl);
+  }
+  const pendingObjectUrl = pendingArtworkObjectUrls.get(src);
+  if (pendingObjectUrl) {
+    return pendingObjectUrl;
+  }
+
+  const request = fetch(src)
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Artwork request failed with ${response.status}`);
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      artworkObjectUrls.set(src, objectUrl);
+      loadedArtworkSrcs.add(src);
+      failedArtworkSrcs.delete(src);
+      return objectUrl;
+    })
+    .finally(() => {
+      pendingArtworkObjectUrls.delete(src);
+    });
+
+  pendingArtworkObjectUrls.set(src, request);
+  return request;
+}
+
+function artworkFailedRecently(src: string): boolean {
+  const failedAt = failedArtworkSrcs.get(src);
+  if (failedAt == null) {
+    return false;
+  }
+  if (Date.now() - failedAt < FAILED_ARTWORK_RETRY_MS) {
+    return true;
+  }
+  failedArtworkSrcs.delete(src);
+  return false;
 }
 
 function ArtistHeroAlbumArtwork({
@@ -2636,7 +3324,7 @@ function ActionIcon({ shape }: { shape: "like" | "dislike" | "tags" | "edit" | "
   );
 }
 
-function TransportIcon({ shape }: { shape: "play" | "pause" | "stop" | "next" | "previous" }): ReactElement {
+function TransportIcon({ shape }: { shape: "play" | "pause" | "stop" | "next" | "previous" | "shuffle" }): ReactElement {
   return (
     <svg aria-hidden="true" viewBox="0 0 16 16">
       {shape === "play" ? (
@@ -2647,10 +3335,176 @@ function TransportIcon({ shape }: { shape: "play" | "pause" | "stop" | "next" | 
         <path d="M3.5 3.5h9v9h-9z" />
       ) : shape === "next" ? (
         <path d="M3 2.5v11l7-5.5zm8 0h2v11h-2z" />
-      ) : (
+      ) : shape === "previous" ? (
         <path d="M13 2.5v11l-7-5.5zm-8 0H3v11h2z" />
+      ) : (
+        <path d="M3 4.5h2.2c1.4 0 2.2 1.1 3 2.5l.6 1c.8 1.4 1.6 2.5 3 2.5H13M11 2.8 13.2 5 11 7.2M3 11.5h2.2c.9 0 1.5-.5 2-1.2M9.3 5.7c.7-.8 1.4-1.2 2.5-1.2H13M11 8.8l2.2 2.2-2.2 2.2" />
       )}
     </svg>
+  );
+}
+
+function RepeatIcon({ mode }: { mode: Exclude<PlaybackRepeatMode, "none"> }): ReactElement {
+  return (
+    <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" viewBox="0 0 16 16">
+      <path d="M4.5 4h6.2L12.5 5.8" />
+      <path d="M11.5 2.2 13.5 4l-2 1.8" />
+      <path d="M11.5 12H5.3L3.5 10.2" />
+      <path d="M4.5 13.8 2.5 12l2-1.8" />
+      {mode === "song" ? <path d="M8 6.2v3.6" /> : null}
+    </svg>
+  );
+}
+
+function QueueIcon(): ReactElement {
+  return (
+    <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" viewBox="0 0 16 16">
+      <path d="M3 4h6" />
+      <path d="M3 8h6" />
+      <path d="M3 12h4" />
+      <path d="M12 6v6" />
+      <path d="M9.5 9h5" />
+    </svg>
+  );
+}
+
+function QueueMenuButton({
+  disabled,
+  fileIds,
+  label,
+  onEnqueue
+}: {
+  disabled?: boolean;
+  fileIds: string[];
+  label: string;
+  onEnqueue(fileIds: string[], position: QueueInsertPosition): Promise<void>;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuId = useId();
+  const canQueue = !disabled && fileIds.length > 0;
+
+  function updateMenuPosition(): void {
+    const trigger = triggerRef.current;
+    if (!trigger) {
+      return;
+    }
+    const bounds = trigger.getBoundingClientRect();
+    const menuWidth = 144;
+    const menuHeight = 68;
+    const gap = 6;
+    const rightAlignedLeft = bounds.right + gap;
+    const left =
+      rightAlignedLeft + menuWidth > window.innerWidth - gap
+        ? Math.max(gap, bounds.left - menuWidth - gap)
+        : rightAlignedLeft;
+    const top = Math.max(gap, Math.min(window.innerHeight - menuHeight - gap, bounds.top + bounds.height / 2 - menuHeight / 2));
+    setMenuPosition({ left, top });
+  }
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    updateMenuPosition();
+    const handleWindowChange = () => updateMenuPosition();
+    const handlePointerDown = (event: globalThis.MouseEvent) => {
+      const target = event.target as Node | null;
+      if (triggerRef.current?.contains(target)) {
+        return;
+      }
+      const menu = document.getElementById(menuId);
+      if (menu?.contains(target)) {
+        return;
+      }
+      setOpen(false);
+    };
+    window.addEventListener("resize", handleWindowChange);
+    window.addEventListener("scroll", handleWindowChange, true);
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      window.removeEventListener("resize", handleWindowChange);
+      window.removeEventListener("scroll", handleWindowChange, true);
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [menuId, open]);
+
+  async function handleSelect(position: QueueInsertPosition): Promise<void> {
+    setOpen(false);
+    await onEnqueue(fileIds, position);
+  }
+
+  return (
+    <span className="queueMenuShell" onClick={(event) => event.stopPropagation()}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`Queue options for ${label}`}
+        aria-controls={open ? menuId : undefined}
+        className="queueMenuTrigger"
+        disabled={!canQueue}
+        ref={triggerRef}
+        title="Queue options"
+        type="button"
+        onClick={() => {
+          setOpen((current) => !current);
+          window.requestAnimationFrame(updateMenuPosition);
+        }}
+      >
+        <QueueIcon />
+      </button>
+      {open && menuPosition
+        ? createPortal(
+            <div className="queueMenu" id={menuId} role="menu" style={{ left: menuPosition.left, top: menuPosition.top }}>
+              <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => void handleSelect("up_next")}>
+                Add Up Next
+              </button>
+              <button type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => void handleSelect("end")}>
+                Add to End
+              </button>
+            </div>,
+            document.body
+          )
+        : null}
+    </span>
+  );
+}
+
+function RepeatControls({
+  disabled,
+  repeatMode,
+  onRepeatMode,
+  variant
+}: {
+  disabled: boolean;
+  repeatMode: PlaybackRepeatMode;
+  onRepeatMode(repeatMode: PlaybackRepeatMode): Promise<void>;
+  variant: "bar" | "modal";
+}): ReactElement {
+  return (
+    <div className={`repeatControls ${variant}`} aria-label="Loop controls">
+      <button
+        aria-pressed={repeatMode === "song"}
+        className={repeatMode === "song" ? "active" : ""}
+        disabled={disabled}
+        title={repeatMode === "song" ? "Disable song loop" : "Loop current song"}
+        type="button"
+        onClick={() => void onRepeatMode(repeatMode === "song" ? "none" : "song")}
+      >
+        <RepeatIcon mode="song" />
+      </button>
+      <button
+        aria-pressed={repeatMode === "queue"}
+        className={repeatMode === "queue" ? "active" : ""}
+        disabled={disabled}
+        title={repeatMode === "queue" ? "Disable queue loop" : "Loop queue"}
+        type="button"
+        onClick={() => void onRepeatMode(repeatMode === "queue" ? "none" : "queue")}
+      >
+        <RepeatIcon mode="queue" />
+      </button>
+    </div>
   );
 }
 
@@ -2749,6 +3603,72 @@ function NowPlayingActions({
   );
 }
 
+function PagedScrollSection({
+  children,
+  className,
+  hasMore,
+  loading,
+  onLoadMore
+}: {
+  children: ReactNode;
+  className: string;
+  hasMore: boolean;
+  loading: boolean;
+  onLoadMore(): Promise<void>;
+}): ReactElement {
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const section = sectionRef.current;
+    if (!sentinel || !hasMore || loading) {
+      return;
+    }
+    const scroller = section && section.scrollHeight > section.clientHeight + 1 ? section : null;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void onLoadMore();
+        }
+      },
+      { root: scroller, rootMargin: "720px 0px", threshold: 0.01 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [className, hasMore, loading, onLoadMore]);
+
+  return (
+    <section className={className} ref={sectionRef}>
+      {children}
+      <div className="loadMoreSentinel" ref={sentinelRef} aria-hidden="true" />
+    </section>
+  );
+}
+
+function LoadMoreRow({
+  loaded,
+  loading,
+  total,
+  onLoadMore
+}: {
+  loaded: number;
+  loading: boolean;
+  total: number;
+  onLoadMore(): Promise<void>;
+}): ReactElement {
+  return (
+    <div className="loadMoreRow">
+      <span>
+        {Math.min(loaded, total).toLocaleString()} of {total.toLocaleString()} loaded
+      </span>
+      <button disabled={loading || loaded >= total} type="button" onClick={() => void onLoadMore()}>
+        {loading ? "Loading" : "Load More"}
+      </button>
+    </div>
+  );
+}
+
 function StateIcon(): ReactElement {
   return (
     <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" viewBox="0 0 16 16">
@@ -2762,7 +3682,9 @@ function StateIcon(): ReactElement {
 
 function NavIcon({ view }: { view: string }): ReactElement {
   const name =
-    view === "Library"
+    view === "Home"
+      ? "home"
+      : view === "Library"
       ? "library"
       : view === "Artists"
         ? "artist"
@@ -2789,7 +3711,9 @@ function NavIcon({ view }: { view: string }): ReactElement {
 function UiIcon({ name }: { name: string }): ReactElement {
   return (
     <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.55" viewBox="0 0 16 16">
-      {name === "library" ? (
+      {name === "home" ? (
+        <path d="M2.8 7.3 8 3l5.2 4.3M4.2 6.4v6h7.6v-6M6.5 12.4V9h3v3.4" />
+      ) : name === "library" ? (
         <path d="M2.5 3.5h3v9h-3zm4 0h3v9h-3zm4 0h3v9h-3z" />
       ) : name === "artist" ? (
         <path d="M8 8.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM3.5 13c.8-2 2.3-3 4.5-3s3.7 1 4.5 3" />
@@ -2823,6 +3747,8 @@ function UiIcon({ name }: { name: string }): ReactElement {
         <path d="m8 2.7 1.5 3 3.3.5-2.4 2.3.6 3.3L8 10.2l-3 1.6.6-3.3-2.4-2.3 3.3-.5z" />
       ) : name === "plays" ? (
         <path d="M4.5 3.5v9l7-4.5z" />
+      ) : name === "sort" ? (
+        <path d="M3 4h7M3 8h5M3 12h3M12 3v9m0 0-2-2m2 2 2-2" />
       ) : (
         <path d="M3.5 4.5h9M3.5 8h9M3.5 11.5h9" />
       )}
@@ -2830,11 +3756,162 @@ function UiIcon({ name }: { name: string }): ReactElement {
   );
 }
 
+type StyledSelectOption<T extends string> = { value: T; label: string };
+
+function SelectChevronIcon(): ReactElement {
+  return (
+    <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" viewBox="0 0 16 16">
+      <path d="m4.5 6.5 3.5 3 3.5-3" />
+    </svg>
+  );
+}
+
+function StyledSelect<T extends string>({
+  ariaLabel,
+  className,
+  disabled = false,
+  options,
+  title,
+  value,
+  onChange
+}: {
+  ariaLabel: string;
+  className?: string;
+  disabled?: boolean;
+  options: Array<StyledSelectOption<T>>;
+  title?: string;
+  value: T;
+  onChange(value: T): void;
+}): ReactElement {
+  const id = useId();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
+  const selectedOption = options.find((option) => option.value === value) ?? options[0] ?? null;
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const syncMenuPosition = () => {
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+      setMenuStyle({
+        left: rect.left,
+        minWidth: rect.width,
+        top: rect.bottom + 4,
+        maxHeight: Math.max(120, window.innerHeight - rect.bottom - 16)
+      });
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !rootRef.current?.contains(target) && !menuRef.current?.contains(target)) {
+        setOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    syncMenuPosition();
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", syncMenuPosition);
+    window.addEventListener("scroll", syncMenuPosition, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", syncMenuPosition);
+      window.removeEventListener("scroll", syncMenuPosition, true);
+    };
+  }, [open]);
+
+  return (
+    <div className={className ? `styledSelect ${className}` : "styledSelect"} ref={rootRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={ariaLabel}
+        className="styledSelectButton"
+        disabled={disabled}
+        title={title}
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{selectedOption?.label ?? ""}</span>
+        <SelectChevronIcon />
+      </button>
+      {open
+        ? createPortal(
+        <div className="styledSelectMenu" id={id} ref={menuRef} role="listbox" aria-label={ariaLabel} style={menuStyle}>
+          {options.map((option) => (
+            <button
+              aria-selected={option.value === value}
+              className={option.value === value ? "styledSelectOption active" : "styledSelectOption"}
+              key={option.value}
+              role="option"
+              type="button"
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>,
+        document.body
+          )
+        : null}
+    </div>
+  );
+}
+
+function IndeterminateCheckbox({
+  ariaLabel,
+  checked,
+  indeterminate,
+  title,
+  onChange
+}: {
+  ariaLabel: string;
+  checked: boolean;
+  indeterminate: boolean;
+  title?: string;
+  onChange(): void;
+}): ReactElement {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.indeterminate = indeterminate;
+    }
+  }, [indeterminate]);
+
+  return (
+    <input
+      aria-label={ariaLabel}
+      checked={checked}
+      ref={inputRef}
+      title={title}
+      type="checkbox"
+      onChange={onChange}
+    />
+  );
+}
+
 function LibraryView({
   bulkRenamePattern,
   bulkTagInput,
   busyRootId,
+  currentWaveform,
   files,
+  libraryLoadingMore,
+  libraryTotal,
   playback,
   playbackBusy,
   playlistAddTargetId,
@@ -2861,28 +3938,38 @@ function LibraryView({
   onClearSelection,
   onSelectRootFolder,
   onEditFile,
+  onEnqueuePlayback,
   onInspectFile,
+  onLoadMore,
   onOpenAlbumPage,
   onOpenArtistPage,
   onPlayFile,
   onProposeAddToPlaylist,
+  onProposeBulkMetadata,
   onProposeBulkRename,
+  onProposeBulkRenameForFiles,
   onProposeBulkTags,
+  onProposeBulkTagsForFiles,
   onProposePlaylist,
   onProposeFavoriteStatus,
   onProposeRating,
+  onRemoveFiles,
   onRemoveFile,
   onRemoveRoot,
   onScanRoot,
   onScanWatchedRoots,
   onSearch,
+  onToggleAlbumSelection,
   onToggleFileSelection,
   onToggleRootWatch
 }: {
   bulkRenamePattern: string;
   bulkTagInput: string;
   busyRootId: string | null;
+  currentWaveform: WaveformSummaryResponse | null;
   files: LibraryFile[];
+  libraryLoadingMore: boolean;
+  libraryTotal: number;
   playback: PlaybackStateResponse;
   playbackBusy: boolean;
   playlistAddTargetId: string;
@@ -2909,21 +3996,28 @@ function LibraryView({
   onClearSelection(): void;
   onSelectRootFolder(): Promise<void>;
   onEditFile(file: LibraryFile): void;
+  onEnqueuePlayback(fileIds: string[], position: QueueInsertPosition): Promise<void>;
   onInspectFile(fileId: string): Promise<void>;
-  onOpenAlbumPage(group: LibraryAlbumGroup): void;
+  onLoadMore(): Promise<void>;
+  onOpenAlbumPage(group: Pick<LibraryAlbumGroup, "artist" | "album" | "year">): void | Promise<void>;
   onOpenArtistPage(artist: string): void;
   onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
   onProposeAddToPlaylist(event: FormEvent<HTMLFormElement>): Promise<void>;
+  onProposeBulkMetadata(fileIds: string[], metadata: EditableFileMetadata): Promise<void>;
   onProposeBulkRename(event: FormEvent<HTMLFormElement>): Promise<void>;
+  onProposeBulkRenameForFiles(fileIds: string[], pattern: string): Promise<void>;
   onProposeBulkTags(event: FormEvent<HTMLFormElement>): Promise<void>;
+  onProposeBulkTagsForFiles(fileIds: string[], tagText: string): Promise<void>;
   onProposePlaylist(event: FormEvent<HTMLFormElement>): Promise<void>;
   onProposeFavoriteStatus(fileId: string, status: "liked" | "disliked" | "neutral"): Promise<void>;
   onProposeRating(fileId: string, rating: number | null): Promise<void>;
+  onRemoveFiles(fileIds: string[], label: string): Promise<void>;
   onRemoveFile(file: LibraryFile): Promise<void>;
   onRemoveRoot(root: LibraryRoot): Promise<void>;
   onScanRoot(rootId: string): Promise<void>;
   onScanWatchedRoots(): Promise<void>;
   onSearch(event: FormEvent<HTMLFormElement>): Promise<void>;
+  onToggleAlbumSelection(fileIds: string[]): void;
   onToggleFileSelection(fileId: string): void;
   onToggleRootWatch(root: LibraryRoot): Promise<void>;
 }): ReactElement {
@@ -2932,12 +4026,16 @@ function LibraryView({
   const [formatFilter, setFormatFilter] = useState<LibraryFormatFilter>("all");
   const [missingFilter, setMissingFilter] = useState<LibraryMissingFilter>("present");
   const [favoriteFilter, setFavoriteFilter] = useState<LibraryFavoriteFilter>("all");
+  const [sortMode, setSortMode] = useState<LibrarySortMode>("artistAlbum");
   const [minimumRating, setMinimumRating] = useState("");
   const [minimumPlays, setMinimumPlays] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [showRoots, setShowRoots] = useState(false);
+  const [selectionActionsOpen, setSelectionActionsOpen] = useState(false);
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const albumLibraryRef = useRef<HTMLElement | null>(null);
+  const visibleAlbumFrameRef = useRef<number | null>(null);
   const [visibleAlbumRange, setVisibleAlbumRange] = useState({ start: 0, end: 16 });
   const activeFilterCount =
     (formatFilter !== "all" ? 1 : 0) +
@@ -2959,7 +4057,7 @@ function LibraryView({
       }),
     [favoriteFilter, files, formatFilter, minimumPlays, minimumRating, missingFilter, tagFilter]
   );
-  const albumGroups = useMemo(() => groupLibraryFilesByAlbum(filteredFiles), [filteredFiles]);
+  const albumGroups = useMemo(() => groupLibraryFilesByAlbum(filteredFiles, sortMode), [filteredFiles, sortMode]);
   const visibleQueueFileIds = useMemo(() => albumGroups.flatMap((group) => group.files.map((file) => file.id)), [albumGroups]);
   const albumGroupHeights = useMemo(
     () => albumGroups.map((group) => getEstimatedLibraryAlbumGroupHeight(group)),
@@ -2980,6 +4078,15 @@ function LibraryView({
   );
   const virtualTopPadding = albumGroupOffsets[boundedVisibleAlbumRange.start] ?? 0;
   const virtualBottomPadding = Math.max(0, albumGroupTotalHeight - (albumGroupOffsets[boundedVisibleAlbumRange.end] ?? albumGroupTotalHeight));
+  const selectedFileIdList = useMemo(() => [...selectedFileIds], [selectedFileIds]);
+  const libraryHasMore = files.length < libraryTotal;
+
+  useEffect(() => {
+    if (selectedCount === 0) {
+      setSelectionActionsOpen(false);
+      setBulkEditOpen(false);
+    }
+  }, [selectedCount]);
 
   useEffect(() => {
     const list = albumLibraryRef.current;
@@ -2991,22 +4098,38 @@ function LibraryView({
 
     const updateVisibleRange = () => {
       const listTop = list.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
-      const overscan = 900;
+      const overscan = 520;
       const viewportTop = Math.max(0, scroller.scrollTop - listTop - overscan);
       const viewportBottom = Math.min(albumGroupTotalHeight, scroller.scrollTop - listTop + scroller.clientHeight + overscan);
       const start = Math.max(0, getVirtualIndexBeforeOffset(albumGroupOffsets, viewportTop) - 1);
       const end = Math.min(albumGroups.length, getVirtualIndexAfterOffset(albumGroupOffsets, viewportBottom) + 2);
       setVisibleAlbumRange((current) => (current.start === start && current.end === end ? current : { start, end }));
+      if (libraryHasMore && !libraryLoadingMore && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 900) {
+        void onLoadMore();
+      }
+    };
+    const scheduleVisibleRangeUpdate = () => {
+      if (visibleAlbumFrameRef.current != null) {
+        return;
+      }
+      visibleAlbumFrameRef.current = window.requestAnimationFrame(() => {
+        visibleAlbumFrameRef.current = null;
+        updateVisibleRange();
+      });
     };
 
     updateVisibleRange();
-    scroller.addEventListener("scroll", updateVisibleRange, { passive: true });
-    window.addEventListener("resize", updateVisibleRange);
+    scroller.addEventListener("scroll", scheduleVisibleRangeUpdate, { passive: true });
+    window.addEventListener("resize", scheduleVisibleRangeUpdate);
     return () => {
-      scroller.removeEventListener("scroll", updateVisibleRange);
-      window.removeEventListener("resize", updateVisibleRange);
+      scroller.removeEventListener("scroll", scheduleVisibleRangeUpdate);
+      window.removeEventListener("resize", scheduleVisibleRangeUpdate);
+      if (visibleAlbumFrameRef.current != null) {
+        window.cancelAnimationFrame(visibleAlbumFrameRef.current);
+        visibleAlbumFrameRef.current = null;
+      }
     };
-  }, [albumGroupOffsets, albumGroupTotalHeight, albumGroups.length]);
+  }, [albumGroupOffsets, albumGroupTotalHeight, albumGroups.length, libraryHasMore, libraryLoadingMore, onLoadMore]);
 
   return (
     <>
@@ -3143,7 +4266,7 @@ function LibraryView({
           <div className="libraryRefinerStats">
             <div className="libraryRefinerSummary">
               <strong>
-                {filteredFiles.length.toLocaleString()} of {files.length.toLocaleString()} shown
+                {filteredFiles.length.toLocaleString()} of {libraryTotal.toLocaleString()} shown
               </strong>
               <span>Current result set</span>
             </div>
@@ -3154,29 +4277,59 @@ function LibraryView({
           </div>
           <div className="libraryFilterGrid">
             <label>
+              <span><UiIcon name="sort" />Sort</span>
+              <StyledSelect<LibrarySortMode>
+                ariaLabel="Library sort"
+                options={[
+                  { value: "artistAlbum", label: "Artist / album" },
+                  { value: "recent", label: "Recently added" },
+                  { value: "listens", label: "Most listens" },
+                  { value: "likes", label: "Most likes" },
+                  { value: "rating", label: "Highest rating" }
+                ]}
+                value={sortMode}
+                onChange={setSortMode}
+              />
+            </label>
+            <label>
               <span><UiIcon name="format" />Format</span>
-              <select value={formatFilter} onChange={(event) => setFormatFilter(event.target.value as LibraryFormatFilter)}>
-                <option value="all">All</option>
-                <option value="lossless">Lossless</option>
-                <option value="compressed">Compressed</option>
-              </select>
+              <StyledSelect<LibraryFormatFilter>
+                ariaLabel="Format"
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "lossless", label: "Lossless" },
+                  { value: "compressed", label: "Compressed" }
+                ]}
+                value={formatFilter}
+                onChange={setFormatFilter}
+              />
             </label>
             <label>
               <span><UiIcon name="status" />Status</span>
-              <select value={missingFilter} onChange={(event) => setMissingFilter(event.target.value as LibraryMissingFilter)}>
-                <option value="present">Present</option>
-                <option value="missing">Missing</option>
-                <option value="all">All</option>
-              </select>
+              <StyledSelect<LibraryMissingFilter>
+                ariaLabel="Status"
+                options={[
+                  { value: "present", label: "Present" },
+                  { value: "missing", label: "Missing" },
+                  { value: "all", label: "All" }
+                ]}
+                value={missingFilter}
+                onChange={setMissingFilter}
+              />
             </label>
             <label>
               <span><UiIcon name="preference" />Preference</span>
-              <select value={favoriteFilter} onChange={(event) => setFavoriteFilter(event.target.value as LibraryFavoriteFilter)}>
-                <option value="all">All</option>
-                <option value="liked">Liked</option>
-                <option value="disliked">Disliked</option>
-                <option value="unrated">Unrated</option>
-              </select>
+              <StyledSelect<LibraryFavoriteFilter>
+                ariaLabel="Preference"
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "liked", label: "Liked" },
+                  { value: "disliked", label: "Disliked" },
+                  { value: "unrated", label: "Unrated" }
+                ]}
+                value={favoriteFilter}
+                onChange={setFavoriteFilter}
+              />
             </label>
             <label>
               <span><UiIcon name="rating" />Min rating</span>
@@ -3216,6 +4369,19 @@ function LibraryView({
         <div>
           <strong>{selectedCount.toLocaleString()} selected</strong>
           <span>Create playlists, tags, and renames through reviewable operation batches.</span>
+          <div className="bulkSummaryActions">
+            <button
+              className="dangerButton"
+              disabled={selectedCount === 0}
+              type="button"
+              onClick={() => void onRemoveFiles([...selectedFileIds], "selected files")}
+            >
+              Remove Selected
+            </button>
+            <button className="secondary" disabled={selectedCount === 0} type="button" onClick={onClearSelection}>
+              Clear
+            </button>
+          </div>
         </div>
         <form className="bulkPlaylistForm" onSubmit={(event) => void onProposePlaylist(event)}>
           <input
@@ -3237,19 +4403,16 @@ function LibraryView({
           </button>
         </form>
         <form className="bulkPlaylistForm" onSubmit={(event) => void onProposeAddToPlaylist(event)}>
-          <select
-            aria-label="Existing playlist"
+          <StyledSelect
+            ariaLabel="Existing playlist"
             disabled={selectedCount === 0 || playlists.length === 0}
+            options={[
+              { value: "", label: "Choose playlist" },
+              ...playlists.map((playlist) => ({ value: playlist.id, label: playlist.name }))
+            ]}
             value={playlistAddTargetId}
-            onChange={(event) => setPlaylistAddTargetId(event.target.value)}
-          >
-            <option value="">Choose playlist</option>
-            {playlists.map((playlist) => (
-              <option key={playlist.id} value={playlist.id}>
-                {playlist.name}
-              </option>
-            ))}
-          </select>
+            onChange={setPlaylistAddTargetId}
+          />
           <button disabled={selectedCount === 0 || !playlistAddTargetId} type="submit">
             Add to Playlist
           </button>
@@ -3264,9 +4427,6 @@ function LibraryView({
           />
           <button disabled={selectedCount === 0 || parseTagInput(bulkTagInput).length === 0} type="submit">
             Propose Tags
-          </button>
-          <button className="secondary" disabled={selectedCount === 0} type="button" onClick={onClearSelection}>
-            Clear
           </button>
         </form>
         <form className="bulkTagForm" onSubmit={(event) => void onProposeBulkRename(event)}>
@@ -3295,15 +4455,20 @@ function LibraryView({
         ) : (
           <>
             {virtualTopPadding > 0 ? <div className="virtualAlbumSpacer" style={{ height: `${virtualTopPadding}px` }} /> : null}
-            {virtualAlbumGroups.map((group) => (
+            {virtualAlbumGroups.map((group) => {
+              const albumFileIds = group.files.map((file) => file.id);
+              const selectedAlbumFileCount = albumFileIds.filter((fileId) => selectedFileIds.has(fileId)).length;
+              const albumSelected = selectedAlbumFileCount === albumFileIds.length;
+              const albumPartiallySelected = selectedAlbumFileCount > 0 && !albumSelected;
+              return (
               <section className="libraryAlbumGroup" key={group.key} aria-label={`${group.artist} - ${group.album}`}>
                 <div className="libraryAlbumArt">
-                  <Artwork className="albumGroupArt" src={artworkFileUrl(group.files[0].id)} />
+                  <Artwork className="albumGroupArt" src={artworkAlbumUrl(group.key)} />
                 </div>
                 <div className="libraryAlbumContent">
                   <div className="libraryAlbumHeader">
                     <div>
-                      <button className="libraryAlbumTitleButton" type="button" onClick={() => onOpenAlbumPage(group)}>
+                      <button className="libraryAlbumTitleButton" type="button" onClick={() => void onOpenAlbumPage(group)}>
                         <strong>{group.album}</strong>
                       </button>
                       <span>
@@ -3313,10 +4478,26 @@ function LibraryView({
                         {group.year ? ` · ${group.year}` : ""} · {group.files.length} track{group.files.length === 1 ? "" : "s"}
                       </span>
                     </div>
-                    <span>{group.formats.join("/")}</span>
+                    <div className="libraryAlbumHeaderActions">
+                      <span>{group.formats.join("/")}</span>
+                      <button
+                        className="dangerButton compactButton"
+                        type="button"
+                        onClick={() => void onRemoveFiles(group.files.map((file) => file.id), `${group.artist} - ${group.album}`)}
+                      >
+                        Remove Album
+                      </button>
+                    </div>
                   </div>
                   <div className="albumTrackHeader">
-                    <span>Select</span>
+                    <label className="rowSelect albumSelectHeader" title="Select album">
+                      <IndeterminateCheckbox
+                        ariaLabel={`Select ${group.album}`}
+                        checked={albumSelected}
+                        indeterminate={albumPartiallySelected}
+                        onChange={() => onToggleAlbumSelection(albumFileIds)}
+                      />
+                    </label>
                     <span>Play</span>
                     <span>#</span>
                     <span>Title</span>
@@ -3331,6 +4512,9 @@ function LibraryView({
                     {group.files.map((file) => {
                       const tags = file.displayTags;
                       const isCurrent = playback.currentFileId === file.id;
+                      const trackArtist = tags.artist ?? tags.albumartist ?? group.artist;
+                      const trackAlbum = tags.album ?? group.album;
+                      const trackYear = tags.year ?? tags.date ?? group.year;
                       return (
                         <div className={isCurrent ? "albumTrackRow active" : "albumTrackRow"} key={file.id}>
                           <label className="rowSelect" title="Select for bulk actions">
@@ -3340,43 +4524,74 @@ function LibraryView({
                               onChange={() => onToggleFileSelection(file.id)}
                             />
                           </label>
-                          <button
-                            aria-label={
-                              isCurrent && playback.status === "playing"
-                                ? `Pause ${tags.title ?? file.filename}`
-                                : `Play ${tags.title ?? file.filename}`
-                            }
-                            className={isCurrent ? "rowPlay active" : "rowPlay"}
-                            disabled={playbackBusy}
-                            type="button"
-                            onClick={() => void onPlayFile(file.id, visibleQueueFileIds)}
-                          >
-                            <TransportIcon shape={isCurrent && playback.status === "playing" ? "pause" : "play"} />
-                          </button>
+                          <span className="rowPlayActions">
+                            <button
+                              aria-label={
+                                isCurrent && playback.status === "playing"
+                                  ? `Pause ${tags.title ?? file.filename}`
+                                  : `Play ${tags.title ?? file.filename}`
+                              }
+                              className={isCurrent ? "rowPlay active" : "rowPlay"}
+                              disabled={playbackBusy}
+                              type="button"
+                              onClick={() => void onPlayFile(file.id, visibleQueueFileIds)}
+                            >
+                              <TransportIcon shape={isCurrent && playback.status === "playing" ? "pause" : "play"} />
+                            </button>
+                            <QueueMenuButton
+                              disabled={playbackBusy}
+                              fileIds={[file.id]}
+                              label={tags.title ?? file.filename}
+                              onEnqueue={onEnqueuePlayback}
+                            />
+                          </span>
                           <span>{formatTrackNumber(file)}</span>
-                          <span className="trackTitle" title={file.path}>{tags.title ?? file.filename}</span>
+                          <span className="trackTitleCell" title={file.path}>
+                            <strong>{tags.title ?? file.filename}</strong>
+                            {isCurrent ? <MiniTrackWaveform playback={playback} waveform={currentWaveform} /> : null}
+                            <small>
+                              {trackArtist ? (
+                                <button type="button" onClick={() => onOpenArtistPage(trackArtist)}>
+                                  {trackArtist}
+                                </button>
+                              ) : (
+                                <span>Unknown Artist</span>
+                              )}
+                              <span aria-hidden="true">·</span>
+                              {trackAlbum ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void onOpenAlbumPage({ artist: trackArtist || group.artist, album: trackAlbum, year: trackYear ?? null })}
+                                >
+                                  {trackAlbum}
+                                </button>
+                              ) : (
+                                <span>Unknown Album</span>
+                              )}
+                            </small>
+                          </span>
                           <span>{file.durationMs == null ? "-" : formatTime(file.durationMs)}</span>
                           <span>{formatBytes(file.sizeBytes)}</span>
                           <span>{formatFileFormat(file)}</span>
                           <span title={formatListenTooltip(file)}>{formatListenStats(file)}</span>
                           <span className={file.missing ? "statusPill warning" : "statusPill"}>{file.scanStatus}</span>
                           <span className="rowActions">
-                            <select
-                              aria-label={`Rating for ${tags.title ?? file.filename}`}
+                            <StyledSelect
+                              ariaLabel={`Rating for ${tags.title ?? file.filename}`}
+                              className="ratingSelect"
+                              options={[
+                                { value: "", label: "No rating" },
+                                { value: "5", label: "5 stars" },
+                                { value: "4", label: "4 stars" },
+                                { value: "3", label: "3 stars" },
+                                { value: "2", label: "2 stars" },
+                                { value: "1", label: "1 star" },
+                                { value: "0", label: "0 stars" }
+                              ]}
                               title="Rating"
-                              value={file.rating ?? ""}
-                              onChange={(event) =>
-                                void onProposeRating(file.id, event.target.value === "" ? null : Number(event.target.value))
-                              }
-                            >
-                              <option value="">–</option>
-                              <option value="5">5</option>
-                              <option value="4">4</option>
-                              <option value="3">3</option>
-                              <option value="2">2</option>
-                              <option value="1">1</option>
-                              <option value="0">0</option>
-                            </select>
+                              value={file.rating == null ? "" : String(file.rating)}
+                              onChange={(value) => void onProposeRating(file.id, value === "" ? null : Number(value))}
+                            />
                             <button
                               aria-label="Like"
                               className={file.liked ? "iconBtn active" : "iconBtn"}
@@ -3411,12 +4626,306 @@ function LibraryView({
                   </div>
                 </div>
               </section>
-            ))}
+              );
+            })}
             {virtualBottomPadding > 0 ? <div className="virtualAlbumSpacer" style={{ height: `${virtualBottomPadding}px` }} /> : null}
           </>
         )}
       </section>
+      {libraryHasMore ? (
+        <LoadMoreRow
+          loading={libraryLoadingMore}
+          loaded={files.length}
+          total={libraryTotal}
+          onLoadMore={onLoadMore}
+        />
+      ) : null}
+      {selectedCount > 0 ? (
+        <BulkSelectionActionBar
+          actionMenuOpen={selectionActionsOpen}
+          fileIds={selectedFileIdList}
+          playlistAddTargetId={playlistAddTargetId}
+          playlistDescriptionInput={playlistDescriptionInput}
+          playlistNameInput={playlistNameInput}
+          playlists={playlists}
+          selectedCount={selectedCount}
+          setActionMenuOpen={setSelectionActionsOpen}
+          setPlaylistAddTargetId={setPlaylistAddTargetId}
+          setPlaylistDescriptionInput={setPlaylistDescriptionInput}
+          setPlaylistNameInput={setPlaylistNameInput}
+          onClearSelection={onClearSelection}
+          onOpenBulkEdit={() => {
+            setBulkEditOpen(true);
+            setSelectionActionsOpen(false);
+          }}
+          onProposeAddToPlaylist={onProposeAddToPlaylist}
+          onProposePlaylist={onProposePlaylist}
+          onRemoveFiles={onRemoveFiles}
+        />
+      ) : null}
+      {bulkEditOpen ? (
+        <BulkEditModal
+          fileIds={selectedFileIdList}
+          selectedCount={selectedCount}
+          onCancel={() => setBulkEditOpen(false)}
+          onProposeBulkMetadata={onProposeBulkMetadata}
+          onProposeBulkRename={onProposeBulkRenameForFiles}
+          onProposeBulkTags={onProposeBulkTagsForFiles}
+        />
+      ) : null}
     </>
+  );
+}
+
+function BulkSelectionActionBar({
+  actionMenuOpen,
+  fileIds,
+  playlistAddTargetId,
+  playlistDescriptionInput,
+  playlistNameInput,
+  playlists,
+  selectedCount,
+  setActionMenuOpen,
+  setPlaylistAddTargetId,
+  setPlaylistDescriptionInput,
+  setPlaylistNameInput,
+  onClearSelection,
+  onOpenBulkEdit,
+  onProposeAddToPlaylist,
+  onProposePlaylist,
+  onRemoveFiles
+}: {
+  actionMenuOpen: boolean;
+  fileIds: string[];
+  playlistAddTargetId: string;
+  playlistDescriptionInput: string;
+  playlistNameInput: string;
+  playlists: Playlist[];
+  selectedCount: number;
+  setActionMenuOpen(open: boolean | ((current: boolean) => boolean)): void;
+  setPlaylistAddTargetId(value: string): void;
+  setPlaylistDescriptionInput(value: string): void;
+  setPlaylistNameInput(value: string): void;
+  onClearSelection(): void;
+  onOpenBulkEdit(): void;
+  onProposeAddToPlaylist(event: FormEvent<HTMLFormElement>): Promise<void>;
+  onProposePlaylist(event: FormEvent<HTMLFormElement>): Promise<void>;
+  onRemoveFiles(fileIds: string[], label: string): Promise<void>;
+}): ReactElement {
+  return (
+    <div className="selectionActionDock" aria-label="Selected track actions">
+      <div>
+        <strong>{selectedCount.toLocaleString()} selected</strong>
+        <span>Batch actions create reviewable operation proposals.</span>
+      </div>
+      <div className="selectionActionButtons">
+        <button type="button" onClick={() => setActionMenuOpen((current) => !current)}>
+          Actions
+        </button>
+        <button className="secondary" type="button" onClick={onClearSelection}>
+          Clear
+        </button>
+      </div>
+      {actionMenuOpen ? (
+        <div className="selectionActionMenu">
+          <section>
+            <h2>Playlist</h2>
+            <form className="selectionActionForm" onSubmit={(event) => void onProposePlaylist(event)}>
+              <input
+                aria-label="New playlist name"
+                placeholder="New playlist"
+                value={playlistNameInput}
+                onChange={(event) => setPlaylistNameInput(event.target.value)}
+              />
+              <input
+                aria-label="New playlist description"
+                placeholder="Description"
+                value={playlistDescriptionInput}
+                onChange={(event) => setPlaylistDescriptionInput(event.target.value)}
+              />
+              <button disabled={!playlistNameInput.trim()} type="submit">
+                Create
+              </button>
+            </form>
+            <form className="selectionActionForm compact" onSubmit={(event) => void onProposeAddToPlaylist(event)}>
+              <StyledSelect
+                ariaLabel="Existing playlist"
+                disabled={playlists.length === 0}
+                options={[
+                  { value: "", label: "Choose playlist" },
+                  ...playlists.map((playlist) => ({ value: playlist.id, label: playlist.name }))
+                ]}
+                value={playlistAddTargetId}
+                onChange={setPlaylistAddTargetId}
+              />
+              <button disabled={!playlistAddTargetId} type="submit">
+                Add
+              </button>
+            </form>
+          </section>
+          <section>
+            <h2>Edit</h2>
+            <div className="selectionActionRow">
+              <button type="button" onClick={onOpenBulkEdit}>
+                Bulk Edit
+              </button>
+              <button className="dangerButton" type="button" onClick={() => void onRemoveFiles(fileIds, "selected files")}>
+                Remove
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type BulkEditMode = "metadata" | "tags" | "rename";
+
+function BulkEditModal({
+  fileIds,
+  selectedCount,
+  onCancel,
+  onProposeBulkMetadata,
+  onProposeBulkRename,
+  onProposeBulkTags
+}: {
+  fileIds: string[];
+  selectedCount: number;
+  onCancel(): void;
+  onProposeBulkMetadata(fileIds: string[], metadata: EditableFileMetadata): Promise<void>;
+  onProposeBulkRename(fileIds: string[], pattern: string): Promise<void>;
+  onProposeBulkTags(fileIds: string[], tagText: string): Promise<void>;
+}): ReactElement {
+  const [mode, setMode] = useState<BulkEditMode>("metadata");
+  const [saving, setSaving] = useState(false);
+  const [metadata, setMetadata] = useState({
+    artist: "",
+    albumartist: "",
+    album: "",
+    year: "",
+    date: "",
+    genre: ""
+  });
+  const [tagText, setTagText] = useState("");
+  const [renamePattern, setRenamePattern] = useState("{artist} - {title}.{ext}");
+  const metadataPayload = useMemo(() => {
+    const payload: EditableFileMetadata = {};
+    for (const key of ["artist", "albumartist", "album", "year", "date", "genre"] as const) {
+      const value = metadata[key].trim();
+      if (value) {
+        payload[key] = value;
+      }
+    }
+    return payload;
+  }, [metadata]);
+  const canSubmit =
+    mode === "metadata"
+      ? Object.keys(metadataPayload).length > 0
+      : mode === "tags"
+        ? parseTagInput(tagText).length > 0
+        : renamePattern.trim().length > 0;
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!canSubmit || saving) {
+      return;
+    }
+    setSaving(true);
+    try {
+      if (mode === "metadata") {
+        await onProposeBulkMetadata(fileIds, metadataPayload);
+      } else if (mode === "tags") {
+        await onProposeBulkTags(fileIds, tagText);
+      } else {
+        await onProposeBulkRename(fileIds, renamePattern);
+      }
+      onCancel();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modalBackdrop" role="presentation">
+      <form className="bulkEditModal" onSubmit={(event) => void handleSubmit(event)}>
+        <div className="metadataEditorHeader">
+          <div>
+            <h2>Bulk Edit</h2>
+            <span>{selectedCount.toLocaleString()} selected track{selectedCount === 1 ? "" : "s"}</span>
+          </div>
+          <button className="secondary" disabled={saving} type="button" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+        <div className="segmentedControl" role="group" aria-label="Bulk edit mode">
+          <button className={mode === "metadata" ? "active" : ""} type="button" onClick={() => setMode("metadata")}>
+            Metadata
+          </button>
+          <button className={mode === "tags" ? "active" : ""} type="button" onClick={() => setMode("tags")}>
+            Tags
+          </button>
+          <button className={mode === "rename" ? "active" : ""} type="button" onClick={() => setMode("rename")}>
+            Rename
+          </button>
+        </div>
+        {mode === "metadata" ? (
+          <div className="metadataFields">
+            <label>
+              Artist
+              <input value={metadata.artist} onChange={(event) => setMetadata((current) => ({ ...current, artist: event.target.value }))} />
+            </label>
+            <label>
+              Album Artist
+              <input
+                value={metadata.albumartist}
+                onChange={(event) => setMetadata((current) => ({ ...current, albumartist: event.target.value }))}
+              />
+            </label>
+            <label>
+              Album
+              <input value={metadata.album} onChange={(event) => setMetadata((current) => ({ ...current, album: event.target.value }))} />
+            </label>
+            <label>
+              Year
+              <input value={metadata.year} onChange={(event) => setMetadata((current) => ({ ...current, year: event.target.value }))} />
+            </label>
+            <label>
+              Date
+              <input value={metadata.date} onChange={(event) => setMetadata((current) => ({ ...current, date: event.target.value }))} />
+            </label>
+            <label>
+              Genre
+              <input value={metadata.genre} onChange={(event) => setMetadata((current) => ({ ...current, genre: event.target.value }))} />
+            </label>
+          </div>
+        ) : mode === "tags" ? (
+          <label className="bulkEditSingleField">
+            Internal tags
+            <input
+              autoFocus
+              placeholder="favorite, reviewed, vinyl-rip"
+              value={tagText}
+              onChange={(event) => setTagText(event.target.value)}
+            />
+          </label>
+        ) : (
+          <label className="bulkEditSingleField">
+            Rename pattern
+            <input value={renamePattern} onChange={(event) => setRenamePattern(event.target.value)} />
+            <span>{`Tokens: {artist}, {album}, {year}, {title}, {filename}, {ext}`}</span>
+          </label>
+        )}
+        <div className="modalActions">
+          <button className="secondary" disabled={saving} type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button disabled={!canSubmit || saving} type="submit">
+            {saving ? "Creating Proposal" : "Create Proposal"}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -3959,7 +5468,14 @@ function DuplicatesView({
   qualityUpgradesState,
   onEditMetadata,
   onProposeAlbumMerge,
-  onProposeCleanup
+  onProposeBulkAlbumMerge,
+  onProposeBulkCleanup,
+  onProposeCleanup,
+  onRefreshAlbumMerges,
+  onRefreshAlternateEditions,
+  onRefreshIncompleteAlbums,
+  onRefreshMetadataGaps,
+  onRefreshQualityUpgrades
 }: {
   albumMergeState: AlbumMergeState;
   alternateEditionsState: AlternateEditionsState;
@@ -3969,7 +5485,14 @@ function DuplicatesView({
   qualityUpgradesState: QualityUpgradesState;
   onEditMetadata(file: LibraryFile): void;
   onProposeAlbumMerge(canonicalAlbum: string, fileIds: string[]): Promise<void>;
+  onProposeBulkAlbumMerge(merges: Array<{ canonicalAlbum: string; fileIds: string[] }>): Promise<void>;
+  onProposeBulkCleanup(groups: LibraryDuplicateGroup[]): Promise<void>;
   onProposeCleanup(group: LibraryDuplicateGroup): Promise<void>;
+  onRefreshAlbumMerges(): Promise<void>;
+  onRefreshAlternateEditions(): Promise<void>;
+  onRefreshIncompleteAlbums(): Promise<void>;
+  onRefreshMetadataGaps(): Promise<void>;
+  onRefreshQualityUpgrades(): Promise<void>;
 }): ReactElement {
   const albumMergeSuggestions = "suggestions" in albumMergeState ? albumMergeState.suggestions : emptyAlbumMergeSuggestions;
   const alternateEditions = "editions" in alternateEditionsState ? alternateEditionsState.editions : emptyAlternateEditions;
@@ -3977,15 +5500,55 @@ function DuplicatesView({
   const incompleteAlbums = "albums" in incompleteAlbumsState ? incompleteAlbumsState.albums : emptyIncompleteAlbums;
   const metadataGaps = "gaps" in metadataGapsState ? metadataGapsState.gaps : emptyMetadataGaps;
   const qualityUpgrades = "upgrades" in qualityUpgradesState ? qualityUpgradesState.upgrades : emptyQualityUpgrades;
+  const [selectedDuplicateKeys, setSelectedDuplicateKeys] = useState<Set<string>>(new Set());
+  const [selectedAlbumMergeKeys, setSelectedAlbumMergeKeys] = useState<Set<string>>(new Set());
+  const actionableAlbumMergeSuggestions = useMemo(
+    () =>
+      albumMergeSuggestions.suggestions
+        .map((suggestion) => ({ suggestion, fileIds: albumMergeFileIds(suggestion) }))
+        .filter((item) => item.fileIds.length > 0),
+    [albumMergeSuggestions.suggestions]
+  );
+  const selectedDuplicateGroups = useMemo(
+    () => duplicates.groups.filter((group) => selectedDuplicateKeys.has(group.key)),
+    [duplicates.groups, selectedDuplicateKeys]
+  );
+  const selectedAlbumMergePayloads = useMemo(
+    () =>
+      actionableAlbumMergeSuggestions
+        .filter((item) => selectedAlbumMergeKeys.has(item.suggestion.key))
+        .map((item) => ({ canonicalAlbum: item.suggestion.canonicalAlbum, fileIds: item.fileIds })),
+    [actionableAlbumMergeSuggestions, selectedAlbumMergeKeys]
+  );
+  const selectedDuplicateRemoveCount = useMemo(
+    () => selectedDuplicateGroups.reduce((total, group) => total + Math.max(0, group.files.length - 1), 0),
+    [selectedDuplicateGroups]
+  );
+  const selectedAlbumMergeFileCount = useMemo(
+    () => selectedAlbumMergePayloads.reduce((total, merge) => total + merge.fileIds.length, 0),
+    [selectedAlbumMergePayloads]
+  );
+
+  useEffect(() => {
+    setSelectedDuplicateKeys((current) => filterSet(current, new Set(duplicates.groups.map((group) => group.key))));
+  }, [duplicates.groups]);
+
+  useEffect(() => {
+    setSelectedAlbumMergeKeys((current) =>
+      filterSet(current, new Set(actionableAlbumMergeSuggestions.map((item) => item.suggestion.key)))
+    );
+  }, [actionableAlbumMergeSuggestions]);
 
   return (
-    <>
-      {duplicatesState.status === "error" ? <div className="inlineError">{duplicatesState.message}</div> : null}
-      {albumMergeState.status === "error" ? <div className="inlineError">{albumMergeState.message}</div> : null}
-      {alternateEditionsState.status === "error" ? <div className="inlineError">{alternateEditionsState.message}</div> : null}
-      {incompleteAlbumsState.status === "error" ? <div className="inlineError">{incompleteAlbumsState.message}</div> : null}
-      {metadataGapsState.status === "error" ? <div className="inlineError">{metadataGapsState.message}</div> : null}
-      {qualityUpgradesState.status === "error" ? <div className="inlineError">{qualityUpgradesState.message}</div> : null}
+    <div className="duplicatesPage">
+      <div className="duplicatesErrors">
+        {duplicatesState.status === "error" ? <div className="inlineError">{duplicatesState.message}</div> : null}
+        {albumMergeState.status === "error" ? <div className="inlineError">{albumMergeState.message}</div> : null}
+        {alternateEditionsState.status === "error" ? <div className="inlineError">{alternateEditionsState.message}</div> : null}
+        {incompleteAlbumsState.status === "error" ? <div className="inlineError">{incompleteAlbumsState.message}</div> : null}
+        {metadataGapsState.status === "error" ? <div className="inlineError">{metadataGapsState.message}</div> : null}
+        {qualityUpgradesState.status === "error" ? <div className="inlineError">{qualityUpgradesState.message}</div> : null}
+      </div>
       <section className="duplicatesSummary" aria-label="Duplicate summary">
         <div>
           <strong>{duplicates.totalGroups}</strong>
@@ -4016,16 +5579,24 @@ function DuplicatesView({
           <span>alternate edition groups</span>
         </div>
       </section>
-      <section className="duplicatesList" aria-label="Alternate edition groups">
+      <div className="duplicatesSections">
+      <section className="duplicatesList diagnosticList alternateEditions" aria-label="Alternate edition groups">
         <div className="cleanupSectionHeader">
           <div>
             <h2>Alternate Editions</h2>
             <p>Likely standard, deluxe, remastered, mono, stereo, or expanded editions to review before merging anything.</p>
           </div>
+          <button className="secondary" disabled={alternateEditionsState.status === "loading"} type="button" onClick={() => void onRefreshAlternateEditions()}>
+            {alternateEditionsState.status === "loading" ? "Checking" : "Run Check"}
+          </button>
         </div>
         {alternateEditions.total === 0 ? (
           <div className="emptyState">
-            {alternateEditionsState.status === "loading" ? "Checking alternate editions." : "No likely alternate editions found."}
+            {alternateEditionsState.status === "idle"
+              ? "Run this check when you want to review possible edition variants."
+              : alternateEditionsState.status === "loading"
+                ? "Checking alternate editions."
+                : "No likely alternate editions found."}
           </div>
         ) : (
           alternateEditions.groups.map((group) => (
@@ -4057,16 +5628,23 @@ function DuplicatesView({
           ))
         )}
       </section>
-      <section className="duplicatesList" aria-label="Incomplete albums">
+      <section className="duplicatesList diagnosticList incompleteAlbums" aria-label="Incomplete albums">
         <div className="cleanupSectionHeader">
           <div>
             <h2>Incomplete Albums</h2>
             <p>Albums whose indexed track numbers prove missing tracks.</p>
           </div>
+          <button className="secondary" disabled={incompleteAlbumsState.status === "loading"} type="button" onClick={() => void onRefreshIncompleteAlbums()}>
+            {incompleteAlbumsState.status === "loading" ? "Checking" : "Run Check"}
+          </button>
         </div>
         {incompleteAlbums.total === 0 ? (
           <div className="emptyState">
-            {incompleteAlbumsState.status === "loading" ? "Checking album track totals." : "No incomplete albums detected."}
+            {incompleteAlbumsState.status === "idle"
+              ? "Run this check when you want to look for missing track numbers."
+              : incompleteAlbumsState.status === "loading"
+                ? "Checking album track totals."
+                : "No incomplete albums detected."}
           </div>
         ) : (
           incompleteAlbums.albums.map((album) => (
@@ -4103,25 +5681,78 @@ function DuplicatesView({
           ))
         )}
       </section>
-      <section className="duplicatesList" aria-label="Album merge suggestions">
+      <section className="duplicatesList diagnosticList albumMerge" aria-label="Album merge suggestions">
         <div className="cleanupSectionHeader">
           <div>
             <h2>Album Merge</h2>
             <p>Likely variant album names for the same artist and base title.</p>
           </div>
+          <button className="secondary" disabled={albumMergeState.status === "loading"} type="button" onClick={() => void onRefreshAlbumMerges()}>
+            {albumMergeState.status === "loading" ? "Checking" : "Run Check"}
+          </button>
         </div>
         {albumMergeSuggestions.total === 0 ? (
           <div className="emptyState">
-            {albumMergeState.status === "loading" ? "Checking album variants." : "No likely album merge suggestions found."}
+            {albumMergeState.status === "idle"
+              ? "Run this check when you want to find album name variants to merge."
+              : albumMergeState.status === "loading"
+                ? "Checking album variants."
+                : "No likely album merge suggestions found."}
           </div>
         ) : (
-          albumMergeSuggestions.suggestions.map((suggestion) => {
-            const mergeFileIds = suggestion.variants
-              .filter((variant) => variant.album !== suggestion.canonicalAlbum)
-              .flatMap((variant) => variant.files.map((file) => file.id));
+          <>
+            <div className="duplicatesBulkBar">
+              <label>
+                <input
+                  checked={
+                    actionableAlbumMergeSuggestions.length > 0 &&
+                    actionableAlbumMergeSuggestions.every((item) => selectedAlbumMergeKeys.has(item.suggestion.key))
+                  }
+                  disabled={actionableAlbumMergeSuggestions.length === 0}
+                  type="checkbox"
+                  onChange={() =>
+                    setSelectedAlbumMergeKeys((current) =>
+                      actionableAlbumMergeSuggestions.every((item) => current.has(item.suggestion.key))
+                        ? new Set()
+                        : new Set(actionableAlbumMergeSuggestions.map((item) => item.suggestion.key))
+                    )
+                  }
+                />
+                Select merge suggestions
+              </label>
+              <span>
+                {selectedAlbumMergePayloads.length.toLocaleString()} selected · {selectedAlbumMergeFileCount.toLocaleString()} file
+                {selectedAlbumMergeFileCount === 1 ? "" : "s"}
+              </span>
+              <button disabled={selectedAlbumMergePayloads.length === 0} type="button" onClick={() => void onProposeBulkAlbumMerge(selectedAlbumMergePayloads)}>
+                Propose Selected
+              </button>
+              <button
+                className="secondary"
+                disabled={actionableAlbumMergeSuggestions.length === 0}
+                type="button"
+                onClick={() =>
+                  void onProposeBulkAlbumMerge(
+                    actionableAlbumMergeSuggestions.map((item) => ({
+                      canonicalAlbum: item.suggestion.canonicalAlbum,
+                      fileIds: item.fileIds
+                    }))
+                  )
+                }
+              >
+                Propose All
+              </button>
+            </div>
+            {actionableAlbumMergeSuggestions.map(({ suggestion, fileIds: mergeFileIds }) => {
             return (
               <div className="qualityUpgradeItem" key={suggestion.key}>
                 <div className="qualityUpgradeHeader">
+                  <input
+                    aria-label={`Select album merge ${suggestion.artist} ${suggestion.canonicalAlbum}`}
+                    checked={selectedAlbumMergeKeys.has(suggestion.key)}
+                    type="checkbox"
+                    onChange={() => setSelectedAlbumMergeKeys((current) => toggleSetValue(current, suggestion.key))}
+                  />
                   <div>
                     <strong>
                       {suggestion.artist} - {suggestion.canonicalAlbum}
@@ -4152,19 +5783,27 @@ function DuplicatesView({
                 </div>
               </div>
             );
-          })
+          })}
+          </>
         )}
       </section>
-      <section className="duplicatesList" aria-label="Quality upgrades">
+      <section className="duplicatesList diagnosticList qualityUpgrades" aria-label="Quality upgrades">
         <div className="cleanupSectionHeader">
           <div>
             <h2>Quality Upgrades</h2>
             <p>Likely lower-quality copies when a better matching track is already indexed.</p>
           </div>
+          <button className="secondary" disabled={qualityUpgradesState.status === "loading"} type="button" onClick={() => void onRefreshQualityUpgrades()}>
+            {qualityUpgradesState.status === "loading" ? "Checking" : "Run Check"}
+          </button>
         </div>
         {qualityUpgrades.total === 0 ? (
           <div className="emptyState">
-            {qualityUpgradesState.status === "loading" ? "Checking track quality groups." : "No likely quality upgrades found."}
+            {qualityUpgradesState.status === "idle"
+              ? "Run this check when you want to compare duplicate-quality candidates."
+              : qualityUpgradesState.status === "loading"
+                ? "Checking track quality groups."
+                : "No likely quality upgrades found."}
           </div>
         ) : (
           qualityUpgrades.suggestions.map((suggestion) => (
@@ -4198,7 +5837,7 @@ function DuplicatesView({
           ))
         )}
       </section>
-      <section className="duplicatesList" aria-label="Duplicate groups">
+      <section className="duplicatesList cleanupFocus exactDuplicates" aria-label="Duplicate groups">
         <div className="cleanupSectionHeader">
           <div>
             <h2>Exact Duplicates</h2>
@@ -4212,12 +5851,43 @@ function DuplicatesView({
               : "No exact file duplicates found in hashed library files."}
           </div>
         ) : (
-          duplicates.groups.map((group) => {
+          <>
+            <div className="duplicatesBulkBar">
+              <label>
+                <input
+                  checked={duplicates.groups.length > 0 && duplicates.groups.every((group) => selectedDuplicateKeys.has(group.key))}
+                  type="checkbox"
+                  onChange={() =>
+                    setSelectedDuplicateKeys((current) =>
+                      duplicates.groups.every((group) => current.has(group.key)) ? new Set() : new Set(duplicates.groups.map((group) => group.key))
+                    )
+                  }
+                />
+                Select duplicate groups
+              </label>
+              <span>
+                {selectedDuplicateGroups.length.toLocaleString()} selected · {selectedDuplicateRemoveCount.toLocaleString()} duplicate entr
+                {selectedDuplicateRemoveCount === 1 ? "y" : "ies"}
+              </span>
+              <button disabled={selectedDuplicateGroups.length === 0} type="button" onClick={() => void onProposeBulkCleanup(selectedDuplicateGroups)}>
+                Remove Selected
+              </button>
+              <button className="secondary" type="button" onClick={() => void onProposeBulkCleanup(duplicates.groups)}>
+                Remove All Found
+              </button>
+            </div>
+            {duplicates.groups.map((group) => {
             const keepFile = chooseDuplicateKeepFile(group.files);
             const removeCount = group.files.length - 1;
             return (
               <div className="duplicateGroup" key={group.key}>
                 <div className="duplicateGroupHeader">
+                  <input
+                    aria-label={`Select duplicate group ${group.key.slice(0, 16)}`}
+                    checked={selectedDuplicateKeys.has(group.key)}
+                    type="checkbox"
+                    onChange={() => setSelectedDuplicateKeys((current) => toggleSetValue(current, group.key))}
+                  />
                   <div>
                     <strong>{group.count} exact matches</strong>
                     <span title={group.key}>SHA-256 {group.key.slice(0, 16)}</span>
@@ -4252,19 +5922,27 @@ function DuplicatesView({
                 </div>
               </div>
             );
-          })
+          })}
+          </>
         )}
       </section>
-      <section className="duplicatesList" aria-label="Missing metadata">
+      <section className="duplicatesList cleanupFocus metadataReview" aria-label="Missing metadata">
         <div className="cleanupSectionHeader">
           <div>
             <h2>Missing Metadata</h2>
             <p>Files missing title, artist, album, or year tags.</p>
           </div>
+          <button className="secondary" disabled={metadataGapsState.status === "loading"} type="button" onClick={() => void onRefreshMetadataGaps()}>
+            {metadataGapsState.status === "loading" ? "Checking" : "Run Check"}
+          </button>
         </div>
         {metadataGaps.total === 0 ? (
           <div className="emptyState">
-            {metadataGapsState.status === "loading" ? "Checking metadata completeness." : "No core metadata gaps found."}
+            {metadataGapsState.status === "idle"
+              ? "Run this check when you want to find files missing core tags."
+              : metadataGapsState.status === "loading"
+                ? "Checking metadata completeness."
+                : "No core metadata gaps found."}
           </div>
         ) : (
           metadataGaps.items.map((item) => (
@@ -4291,7 +5969,8 @@ function DuplicatesView({
           ))
         )}
       </section>
-    </>
+      </div>
+    </div>
   );
 }
 
@@ -4427,14 +6106,14 @@ function JobsView({
                 <div className="jobItemMain">
                   <strong>{formatJobTitle(job)}</strong>
                   <span>
-                    {job.type} · {formatDateTime(job.createdAt)}
+                    {formatJobType(job.type)} · {formatDateTime(job.createdAt)}
                   </span>
                   <div className="progressRail">
                     <div className="progressFill" style={{ width: `${Math.round(job.progress * 100)}%` }} />
                   </div>
                 </div>
                 <span className={job.status === "failed" || job.status === "cancelled" ? "statusPill warning" : "statusPill"}>
-                  {job.status}
+                  {formatJobStatus(job.status)}
                 </span>
               </button>
             ))
@@ -4450,12 +6129,12 @@ function JobsView({
                   <span>{selectedJob.job.id}</span>
                 </div>
                 <span className={selectedJob.job.status === "failed" || selectedJob.job.status === "cancelled" ? "statusPill warning" : "statusPill"}>
-                  {selectedJob.job.status}
+                  {formatJobStatus(selectedJob.job.status)}
                 </span>
               </div>
               <div className="jobFacts">
                 <span>Type</span>
-                <strong>{selectedJob.job.type}</strong>
+                <strong>{formatJobType(selectedJob.job.type)}</strong>
                 <span>Progress</span>
                 <strong>{Math.round(selectedJob.job.progress * 100)}%</strong>
                 <span>Created</span>
@@ -4463,20 +6142,14 @@ function JobsView({
                 <span>Completed</span>
                 <strong>{selectedJob.job.completedAt ? formatDateTime(selectedJob.job.completedAt) : "not complete"}</strong>
               </div>
-              {selectedJob.job.error ? <div className="inlineError">{formatUnknown(selectedJob.job.error)}</div> : null}
+              {selectedJob.job.error ? (
+                <JobMessagePanel level="error" title="Job failed" message={formatJobMessage(selectedJob.job.error)} />
+              ) : null}
               <div className="jobEvents" aria-label="Job events">
                 {selectedJob.events.length === 0 ? (
                   <div className="emptyState">No events recorded for this job.</div>
                 ) : (
-                  selectedJob.events.map((event) => (
-                    <div className="jobEvent" key={event.id}>
-                      <span>
-                        {formatDateTime(event.timestamp)} · {event.level}
-                      </span>
-                      <strong>{event.message}</strong>
-                      {event.data ? <code>{formatUnknown(event.data)}</code> : null}
-                    </div>
-                  ))
+                  selectedJob.events.map((event) => <JobEventRow event={event} key={event.id} />)
                 )}
               </div>
             </>
@@ -4486,6 +6159,82 @@ function JobsView({
         </div>
       </section>
     </>
+  );
+}
+
+function JobMessagePanel({ level, message, title }: { level: string; message: string; title: string }): ReactElement {
+  return (
+    <div className={`jobMessagePanel ${jobSeverityClass(level)}`}>
+      <SeverityIcon level={level} />
+      <div>
+        <strong>{title}</strong>
+        <span>{message}</span>
+      </div>
+    </div>
+  );
+}
+
+function JobEventRow({ event }: { event: JobEvent }): ReactElement {
+  const parsed = parseJobEvent(event);
+  return (
+    <div className={`jobEvent ${jobSeverityClass(event.level)}`}>
+      <div className="jobEventRail" aria-hidden="true">
+        <SeverityIcon level={event.level} />
+      </div>
+      <div className="jobEventBody">
+        <div className="jobEventMeta">
+          <span>{formatDateTime(event.timestamp)}</span>
+          <span>{formatJobLevel(event.level)}</span>
+        </div>
+        <strong>{parsed.summary}</strong>
+        {parsed.details.length > 0 ? (
+          <div className="jobEventDetails">
+            {parsed.details.map((detail) => (
+              <span key={detail}>{detail}</span>
+            ))}
+          </div>
+        ) : null}
+        {parsed.sample ? <span className="jobEventSample">{parsed.sample}</span> : null}
+        {parsed.path ? <span className="jobEventPath" title={parsed.path}>{parsed.path}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function SeverityIcon({ level }: { level: string }): ReactElement {
+  const normalized = level.toLowerCase();
+  if (normalized === "error" || normalized === "failed" || normalized === "danger") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 16 16">
+        <path d="M8 1.8 14.6 14H1.4L8 1.8Z" />
+        <path d="M8 5.7v3.7" />
+        <path d="M8 12h.01" />
+      </svg>
+    );
+  }
+  if (normalized === "warning" || normalized === "warn") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 16 16">
+        <circle cx="8" cy="8" r="6.2" />
+        <path d="M8 4.7v4" />
+        <path d="M8 11.4h.01" />
+      </svg>
+    );
+  }
+  if (normalized === "success" || normalized === "completed" || normalized === "info") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 16 16">
+        <circle cx="8" cy="8" r="6.2" />
+        <path d="m5.1 8.2 1.9 1.9 3.9-4.2" />
+      </svg>
+    );
+  }
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16">
+      <circle cx="8" cy="8" r="6.2" />
+      <path d="M8 7.4v4" />
+      <path d="M8 4.6h.01" />
+    </svg>
   );
 }
 
@@ -4548,37 +6297,35 @@ function SettingsView({
         <div className="appearanceGrid">
           <label className="settingsField compact">
             <span>Mode</span>
-            <select
+            <StyledSelect<AppearanceMode>
+              ariaLabel="Appearance mode"
+              options={[
+                { value: "dark", label: "Dark" },
+                { value: "light", label: "Light" }
+              ]}
               value={appearance.mode}
-              onChange={(event) =>
+              onChange={(value) =>
                 setAppearance((current) => ({
                   ...current,
-                  mode: event.target.value as AppearanceMode,
+                  mode: value,
                   accent: isAccentColorId(current.accent) ? current.accent : defaultAppearanceSettings.accent
                 }))
               }
-            >
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-            </select>
+            />
           </label>
           <label className="settingsField compact">
             <span>Display font</span>
-            <select
+            <StyledSelect<DisplayFontId>
+              ariaLabel="Display font"
+              options={fontOptions.map(([id, font]) => ({ value: id, label: font.label }))}
               value={appearance.displayFont}
-              onChange={(event) =>
+              onChange={(value) =>
                 setAppearance((current) => ({
                   ...current,
-                  displayFont: event.target.value as DisplayFontId
+                  displayFont: value
                 }))
               }
-            >
-              {fontOptions.map(([id, font]) => (
-                <option key={id} value={id}>
-                  {font.label}
-                </option>
-              ))}
-            </select>
+            />
           </label>
         </div>
         <div className="appearanceSwatches" aria-label="Highlight color">
@@ -4872,41 +6619,47 @@ function DiscoveryView({
   onToggleGroup(groupId: string): void;
 }): ReactElement {
   const groupingQuery = discoveryState.query || discoveryQuery.trim();
+  const libraryIndex = useMemo(() => createDiscoveryLibraryIndex(libraryFiles), [libraryFiles]);
+  const baseGroups = useMemo(() => groupDiscoveryResults(discoveryState.results, groupingQuery), [discoveryState.results, groupingQuery]);
+  const libraryMatches = useMemo(() => {
+    const matches = new Map<string, DiscoveryLibraryMatch>();
+    for (const group of baseGroups) {
+      matches.set(group.id, summarizeDiscoveryLibraryMatch(group, libraryIndex));
+    }
+    return matches;
+  }, [baseGroups, libraryIndex]);
   const groups = useMemo(
     () =>
       sortDiscoveryGroups(
-        filterDiscoveryGroupsByLibrary(
-          filterDiscoveryGroups(groupDiscoveryResults(discoveryState.results, groupingQuery), formatFilter, availabilityFilter),
-          libraryFiles,
-          libraryFilter
+        filterDiscoveryGroups(baseGroups, formatFilter, availabilityFilter).filter((group) =>
+          matchesDiscoveryLibraryFilter(getDiscoveryLibraryMatch(group, libraryMatches), libraryFilter)
         ),
         sortMode
       ),
-    [availabilityFilter, discoveryState.results, formatFilter, groupingQuery, libraryFiles, libraryFilter, sortMode]
+    [availabilityFilter, baseGroups, formatFilter, libraryFilter, libraryMatches, sortMode]
   );
   const clusters = useMemo(() => clusterDiscoveryGroups(groups), [groups]);
-  const unfilteredGroupCount = useMemo(
-    () => groupDiscoveryResults(discoveryState.results, groupingQuery).length,
-    [discoveryState.results, groupingQuery]
-  );
+  const unfilteredGroupCount = baseGroups.length;
   const actionableGroupCount = useMemo(
-    () =>
-      filterDiscoveryGroupsByLibrary(groupDiscoveryResults(discoveryState.results, groupingQuery), libraryFiles, "actionable").length,
-    [discoveryState.results, groupingQuery, libraryFiles]
+    () => baseGroups.filter((group) => matchesDiscoveryLibraryFilter(getDiscoveryLibraryMatch(group, libraryMatches), "actionable")).length,
+    [baseGroups, libraryMatches]
   );
   const [releaseFilter, setReleaseFilter] = useState<DiscoveryReleaseFilter>("recommended");
   const [visibleClusterLimit, setVisibleClusterLimit] = useState(10);
   const [discoverySearchMode, setDiscoverySearchMode] = useState<"search" | "list">("search");
   const [discoveryMainView, setDiscoveryMainView] = useState<"results" | "saved">("results");
   const releaseFilteredClusters = useMemo(
-    () => filterDiscoveryClustersByRelease(clusters, libraryFiles, releaseFilter),
-    [clusters, libraryFiles, releaseFilter]
+    () => filterDiscoveryClustersByRelease(clusters, releaseFilter, (group) => getDiscoveryLibraryMatch(group, libraryMatches)),
+    [clusters, libraryMatches, releaseFilter]
   );
   const visibleClusters = releaseFilteredClusters.slice(0, visibleClusterLimit);
   const hiddenClusterCount = Math.max(0, releaseFilteredClusters.length - visibleClusters.length);
   const inspectedGroup = groups.find((group) => group.id === inspectedGroupId) ?? null;
   const selectedGroupCount = selectedGroupIds.size;
-  const selectedFileCount = discoveryState.results.filter((result) => selectedFileIds.has(result.id) && !result.isLocked && isAudioDiscoveryResult(result)).length;
+  const selectedFileCount = useMemo(
+    () => discoveryState.results.filter((result) => selectedFileIds.has(result.id) && !result.isLocked && isAudioDiscoveryResult(result)).length,
+    [discoveryState.results, selectedFileIds]
+  );
   const downloadsConfigured = discoveryState.health?.downloadsConfigured === true;
   const canDownload = selectedFileCount > 0 && downloadState.status !== "working" && downloadsConfigured;
   const downloadButtonLabel =
@@ -4934,7 +6687,7 @@ function DiscoveryView({
     <section className="discoveryControls discoveryPage" aria-label="Discovery">
       <section className="discoveryHero">
         <div className="discoveryHeroCopy">
-          <h2>Discovery</h2>
+          <h2>{discoverySearchMode === "search" ? "Search songs, artists, and albums" : "Find a list of albums"}</h2>
           <div className="segmentedControl" aria-label="Discovery mode">
             <button
               className={discoverySearchMode === "search" ? "active" : ""}
@@ -4956,13 +6709,12 @@ function DiscoveryView({
           <form className="discoverySearchForm" onSubmit={(event) => void onSearch(event)}>
             <label>
               <span>Source</span>
-              <select
-                aria-label="Discovery source"
+              <StyledSelect<DiscoverySource>
+                ariaLabel="Discovery source"
+                options={[{ value: "slskd", label: "slskd" }]}
                 value={discoverySource}
-                onChange={(event) => setDiscoverySource(event.target.value as DiscoverySource)}
-              >
-                <option value="slskd">slskd</option>
-              </select>
+                onChange={setDiscoverySource}
+              />
             </label>
             <label className="discoverySearchInput">
               <span>Search</span>
@@ -5036,51 +6788,73 @@ function DiscoveryView({
               <div className="discoveryRefiners">
                 <label>
                   <span>Sort</span>
-                  <select value={sortMode} onChange={(event) => setSortMode(event.target.value as DiscoverySort)}>
-                    <option value="best">Best candidates</option>
-                    <option value="match">Closest query match</option>
-                    <option value="tracks">Most tracks</option>
-                    <option value="size">Largest folders</option>
-                    <option value="user">User / folder</option>
-                  </select>
+                  <StyledSelect<DiscoverySort>
+                    ariaLabel="Discovery sort"
+                    options={[
+                      { value: "best", label: "Best candidates" },
+                      { value: "match", label: "Closest query match" },
+                      { value: "tracks", label: "Most tracks" },
+                      { value: "size", label: "Largest folders" },
+                      { value: "user", label: "User / folder" }
+                    ]}
+                    value={sortMode}
+                    onChange={setSortMode}
+                  />
                 </label>
                 <label>
                   <span>Format</span>
-                  <select value={formatFilter} onChange={(event) => setFormatFilter(event.target.value as DiscoveryFormatFilter)}>
-                    <option value="all">All formats</option>
-                    <option value="lossless">Lossless folders</option>
-                    <option value="compressed">Compressed folders</option>
-                  </select>
+                  <StyledSelect<DiscoveryFormatFilter>
+                    ariaLabel="Discovery format"
+                    options={[
+                      { value: "all", label: "All formats" },
+                      { value: "lossless", label: "Lossless folders" },
+                      { value: "compressed", label: "Compressed folders" }
+                    ]}
+                    value={formatFilter}
+                    onChange={setFormatFilter}
+                  />
                 </label>
                 <label>
                   <span>Availability</span>
-                  <select
+                  <StyledSelect<DiscoveryAvailabilityFilter>
+                    ariaLabel="Discovery availability"
+                    options={[
+                      { value: "available", label: "Unlocked folders" },
+                      { value: "all", label: "All folders" }
+                    ]}
                     value={availabilityFilter}
-                    onChange={(event) => setAvailabilityFilter(event.target.value as DiscoveryAvailabilityFilter)}
-                  >
-                    <option value="available">Unlocked folders</option>
-                    <option value="all">All folders</option>
-                  </select>
+                    onChange={setAvailabilityFilter}
+                  />
                 </label>
                 <label>
                   <span>Library</span>
-                  <select value={libraryFilter} onChange={(event) => setLibraryFilter(event.target.value as DiscoveryLibraryFilter)}>
-                    <option value="actionable">Missing or upgrades</option>
-                    <option value="missing">Missing only</option>
-                    <option value="owned">Owned or upgrades</option>
-                    <option value="all">All candidates</option>
-                  </select>
+                  <StyledSelect<DiscoveryLibraryFilter>
+                    ariaLabel="Discovery library filter"
+                    options={[
+                      { value: "actionable", label: "Missing or upgrades" },
+                      { value: "missing", label: "Missing only" },
+                      { value: "owned", label: "Owned or upgrades" },
+                      { value: "all", label: "All candidates" }
+                    ]}
+                    value={libraryFilter}
+                    onChange={setLibraryFilter}
+                  />
                 </label>
                 <label>
                   <span>Release Type</span>
-                  <select value={releaseFilter} onChange={(event) => setReleaseFilter(event.target.value as DiscoveryReleaseFilter)}>
-                    <option value="recommended">Recommended</option>
-                    <option value="all">All release sections</option>
-                    <option value="albums">Album-like sections</option>
-                    <option value="singles">Singles / loose files</option>
-                    <option value="collections">Large collections</option>
-                    <option value="upgrades">Possible upgrades</option>
-                  </select>
+                  <StyledSelect<DiscoveryReleaseFilter>
+                    ariaLabel="Discovery release type"
+                    options={[
+                      { value: "recommended", label: "Recommended" },
+                      { value: "all", label: "All release sections" },
+                      { value: "albums", label: "Album-like sections" },
+                      { value: "singles", label: "Singles / loose files" },
+                      { value: "collections", label: "Large collections" },
+                      { value: "upgrades", label: "Possible upgrades" }
+                    ]}
+                    value={releaseFilter}
+                    onChange={setReleaseFilter}
+                  />
                 </label>
               </div>
             </section>
@@ -5176,7 +6950,7 @@ function DiscoveryView({
                     expanded={expandedClusterIds.has(cluster.id)}
                     expandedGroupIds={expandedGroupIds}
                     key={cluster.id}
-                    libraryFiles={libraryFiles}
+                    libraryMatches={libraryMatches}
                     selectedFileIds={selectedFileIds}
                     selectedGroupIds={selectedGroupIds}
                     onGroupSelect={onGroupSelect}
@@ -5216,7 +6990,7 @@ function DiscoveryView({
           {inspectedGroup ? (
             <DiscoveryCandidateDetail
               group={inspectedGroup}
-              libraryMatch={summarizeDiscoveryLibraryMatch(inspectedGroup, libraryFiles)}
+              libraryMatch={getDiscoveryLibraryMatch(inspectedGroup, libraryMatches)}
               selectedFileCount={inspectedGroup.files.filter((file) => !file.isLocked && isAudioDiscoveryResult(file) && selectedFileIds.has(file.id)).length}
               saved={savedCandidates.some((candidate) => candidate.candidateKey === inspectedGroup.id)}
               onSave={() => onSaveCandidate(inspectedGroup)}
@@ -5342,8 +7116,8 @@ function DiscoveryView({
 
 function filterDiscoveryClustersByRelease(
   clusters: DiscoveryCluster[],
-  libraryFiles: DiscoveryLibraryFile[],
-  releaseFilter: DiscoveryReleaseFilter
+  releaseFilter: DiscoveryReleaseFilter,
+  getLibraryMatch: (group: DiscoveryGroup) => DiscoveryLibraryMatch
 ): DiscoveryCluster[] {
   if (releaseFilter === "all") {
     return clusters;
@@ -5351,7 +7125,7 @@ function filterDiscoveryClustersByRelease(
 
   return clusters.filter((cluster) => {
     const best = cluster.bestGroup;
-    const libraryMatch = summarizeDiscoveryLibraryMatch(best, libraryFiles);
+    const libraryMatch = getLibraryMatch(best);
     if (releaseFilter === "recommended") {
       if (libraryMatch.status === "possible_upgrade") {
         return true;
@@ -5365,7 +7139,7 @@ function filterDiscoveryClustersByRelease(
       return false;
     }
     if (releaseFilter === "upgrades") {
-      return cluster.groups.some((group) => summarizeDiscoveryLibraryMatch(group, libraryFiles).status === "possible_upgrade");
+      return cluster.groups.some((group) => getLibraryMatch(group).status === "possible_upgrade");
     }
     if (releaseFilter === "albums") {
       return best.releaseCompleteness === "album" || best.releaseCompleteness === "ep";
@@ -5376,6 +7150,32 @@ function filterDiscoveryClustersByRelease(
     return best.releaseCompleteness === "single" || best.releaseCompleteness === "folder";
   });
 }
+
+function getDiscoveryLibraryMatch(group: DiscoveryGroup, libraryMatches: Map<string, DiscoveryLibraryMatch>): DiscoveryLibraryMatch {
+  return libraryMatches.get(group.id) ?? EMPTY_DISCOVERY_LIBRARY_MATCH;
+}
+
+function matchesDiscoveryLibraryFilter(match: DiscoveryLibraryMatch, libraryFilter: DiscoveryLibraryFilter): boolean {
+  if (libraryFilter === "all") {
+    return true;
+  }
+  if (libraryFilter === "actionable") {
+    return match.status !== "already_owned";
+  }
+  if (libraryFilter === "missing") {
+    return match.status === "not_in_library";
+  }
+  return match.status === "already_owned" || match.status === "possible_upgrade";
+}
+
+const EMPTY_DISCOVERY_LIBRARY_MATCH: DiscoveryLibraryMatch = {
+  status: "not_in_library",
+  label: "not in library",
+  detail: "No matching indexed album or track",
+  matchedFileCount: 0,
+  localQualityLabel: null,
+  remoteQualityLabel: null
+};
 
 function DiscoveryHighlightCard({
   cluster,
@@ -5568,7 +7368,7 @@ function DiscoveryClusterResult({
   cluster,
   expanded,
   expandedGroupIds,
-  libraryFiles,
+  libraryMatches,
   selectedFileIds,
   selectedGroupIds,
   onGroupSelect,
@@ -5581,7 +7381,7 @@ function DiscoveryClusterResult({
   cluster: DiscoveryCluster;
   expanded: boolean;
   expandedGroupIds: Set<string>;
-  libraryFiles: DiscoveryLibraryFile[];
+  libraryMatches: Map<string, DiscoveryLibraryMatch>;
   selectedFileIds: Set<string>;
   selectedGroupIds: Set<string>;
   onGroupSelect(group: DiscoveryGroup): void;
@@ -5625,7 +7425,7 @@ function DiscoveryClusterResult({
             expanded={expandedGroupIds.has(group.id)}
             group={group}
             key={group.id}
-            libraryMatch={summarizeDiscoveryLibraryMatch(group, libraryFiles)}
+            libraryMatch={getDiscoveryLibraryMatch(group, libraryMatches)}
             selected={selectedGroupIds.has(group.id)}
             selectedFileIds={selectedFileIds}
             onGroupSelect={onGroupSelect}
@@ -5769,25 +7569,286 @@ function DiscoveryGroupResult({
   );
 }
 
-function AlbumsView({
+function HomeView({
   albumsState,
-  initialTarget,
+  currentPlaybackFile,
+  currentWaveform,
+  libraryTotal,
+  playback,
   playbackBusy,
+  playlists,
+  onOpenAlbum,
+  onOpenArtistPage,
   onPlayAlbum,
   onPlayFile
 }: {
   albumsState: AlbumsState;
-  initialTarget: AlbumViewTarget | null;
+  currentPlaybackFile: LibraryFile | null;
+  currentWaveform: WaveformSummaryResponse | null;
+  libraryTotal: number;
+  playback: PlaybackStateResponse;
   playbackBusy: boolean;
+  playlists: Playlist[];
+  onOpenAlbum(album: AlbumGroupItem): void;
+  onOpenArtistPage(artist: string): void;
   onPlayAlbum(albumId: string): Promise<void>;
   onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
 }): ReactElement {
   const albums = "albums" in albumsState ? albumsState.albums.albums : [];
-  const sortedAlbums = useMemo(() => sortAlbumsByArtistAlbum(albums), [albums]);
+  const artists = useMemo(() => groupAlbumsByArtist(albums), [albums]);
+  const files = useMemo(() => {
+    const fileMap = new Map<string, LibraryFile>();
+    for (const album of albums) {
+      for (const file of album.files) {
+        fileMap.set(file.id, file);
+      }
+    }
+    return [...fileMap.values()];
+  }, [albums]);
+  const favoriteAlbums = useMemo(
+    () =>
+      [...albums]
+        .sort(
+          (left, right) =>
+            albumLikeCount(right.files) - albumLikeCount(left.files) ||
+            albumAverageRating(right.files) - albumAverageRating(left.files) ||
+            albumPlayCount(right.files) - albumPlayCount(left.files) ||
+            compareAlbumsByMode(left, right, "artistAlbum")
+        )
+        .slice(0, 5),
+    [albums]
+  );
+  const recentAlbums = useMemo(() => sortAlbumsByMode(albums, "recent").slice(0, 6), [albums]);
+  const favoriteArtists = useMemo(() => sortArtistSections(artists, "likes").slice(0, 5), [artists]);
+  const topSongs = useMemo(
+    () =>
+      [...files]
+        .sort(
+          (left, right) =>
+            Number(Boolean(right.liked)) - Number(Boolean(left.liked)) ||
+            (right.rating ?? -1) - (left.rating ?? -1) ||
+            right.playCount - left.playCount ||
+            compareText(left.displayTags.title ?? left.filename, right.displayTags.title ?? right.filename)
+        )
+        .slice(0, 6),
+    [files]
+  );
+  const allListenTimeMs = useMemo(() => getAlbumsListenTimeMs(albums), [albums]);
+  const losslessCount = useMemo(() => files.filter((file) => isLosslessFile(file)).length, [files]);
+  const ratedCount = useMemo(() => files.filter((file) => file.rating != null || file.liked != null).length, [files]);
+  const topSongQueue = useMemo(() => topSongs.map((file) => file.id), [topSongs]);
+  const topAlbum = favoriteAlbums[0] ?? recentAlbums[0] ?? null;
+  const loadedTotal = "albums" in albumsState ? albumsState.albums.total : albums.length;
+  const nowPlayingTitle = currentPlaybackFile?.displayTags.title ?? playback.currentDisplayName ?? "Idle";
+  const nowPlayingArtist = currentPlaybackFile?.displayTags.artist ?? "No track loaded";
+
+  return (
+    <div className="homeView">
+      {albumsState.status === "error" ? <div className="inlineError">{albumsState.message}</div> : null}
+      {albumsState.status === "loading" && albums.length === 0 ? <div className="emptyState">Loading home.</div> : null}
+      <section className="homePulsePanel">
+        <div className="homePulseCopy">
+          <span className="homeKicker">Library pulse</span>
+          <strong>{libraryTotal.toLocaleString()} tracks</strong>
+          <div className="homePulseStats">
+            <span>{loadedTotal.toLocaleString()} albums</span>
+            <span>{artists.length.toLocaleString()} artists</span>
+            <span>{formatListenTime(allListenTimeMs)}</span>
+          </div>
+        </div>
+        <div className="homeAlbumStack" aria-hidden="true">
+          {(favoriteAlbums.length > 0 ? favoriteAlbums : recentAlbums).slice(0, 4).map((album, index) => (
+            <button
+              className={`homeStackCover stack${index + 1}`}
+              key={album.id}
+              style={{ "--stack-index": index } as CSSProperties}
+              type="button"
+              onClick={() => onOpenAlbum(album)}
+            >
+              <Artwork className="homeStackArt" eager={index === 0} src={artworkAlbumUrl(album.id)} />
+            </button>
+          ))}
+        </div>
+        <div className="homePulseFooter">
+          <span>{losslessCount.toLocaleString()} lossless</span>
+          <span>{ratedCount.toLocaleString()} rated or marked</span>
+          <span>{playlists.length.toLocaleString()} playlists</span>
+        </div>
+      </section>
+
+      <aside className="homeNowPanel">
+        <span className="homeKicker">Now</span>
+        <div className="homeNowBody">
+          <Artwork className="homeNowArt" eager src={currentPlaybackFile ? artworkFileUrl(currentPlaybackFile.id) : null} />
+          <div>
+            <strong title={nowPlayingTitle}>{nowPlayingTitle}</strong>
+            <button className="linkButton" type="button" onClick={() => currentPlaybackFile?.displayTags.artist ? onOpenArtistPage(currentPlaybackFile.displayTags.artist) : undefined}>
+              {nowPlayingArtist}
+            </button>
+            {playback.currentFileId ? <MiniTrackWaveform playback={playback} waveform={currentWaveform} /> : null}
+          </div>
+        </div>
+        <div className="homeNowMeta">
+          <span>{playback.status === "playing" ? "Playing" : playback.currentFileId ? "Paused" : "Stopped"}</span>
+          <span>{playback.queue.length.toLocaleString()} queued</span>
+        </div>
+      </aside>
+
+      <section className="homePanel homeFavorites">
+        <div className="homeSectionHeader">
+          <strong>Favorite albums</strong>
+          <span>likes, ratings, plays</span>
+        </div>
+        <div className="homeAlbumShelf">
+          {favoriteAlbums.map((album) => (
+            <article className={album.id === favoriteAlbums[0]?.id ? "homeAlbumCard featured" : "homeAlbumCard"} key={album.id}>
+              <button className="homeAlbumArtButton" type="button" onClick={() => onOpenAlbum(album)}>
+                <Artwork className="homeAlbumArt" src={artworkAlbumUrl(album.id)} />
+              </button>
+              <div>
+                <button className="linkButton strongLink" title={album.album} type="button" onClick={() => onOpenAlbum(album)}>
+                  {album.album}
+                </button>
+                <button className="linkButton" title={album.artist} type="button" onClick={() => onOpenArtistPage(album.artist)}>
+                  {album.artist}
+                </button>
+                <span>
+                  {albumLikeCount(album.files).toLocaleString()} liked · {albumPlayCount(album.files).toLocaleString()} plays
+                </span>
+              </div>
+              <button className="roundIconButton" disabled={playbackBusy} title={`Play ${album.album}`} type="button" onClick={() => void onPlayAlbum(album.id)}>
+                <TransportIcon shape={playback.status === "playing" && playback.queue.includes(album.files[0]?.id ?? "") ? "pause" : "play"} />
+              </button>
+            </article>
+          ))}
+          {favoriteAlbums.length === 0 ? <span className="homeEmptyLine">Rate, like, or play albums to shape this shelf.</span> : null}
+        </div>
+      </section>
+
+      <section className="homePanel homeArtists">
+        <div className="homeSectionHeader">
+          <strong>Artists in rotation</strong>
+          <span>your heaviest signals</span>
+        </div>
+        <div className="homeArtistList">
+          {favoriteArtists.map((section) => {
+            const artistFiles = section.albums.flatMap((album) => album.files);
+            return (
+              <button className="homeArtistRow" key={section.artist} type="button" onClick={() => onOpenArtistPage(section.artist)}>
+                <div className="homeArtistCovers" aria-hidden="true">
+                  {section.albums.slice(0, 3).map((album, index) => (
+                    <Artwork className={`homeArtistCover cover${index + 1}`} key={album.id} src={artworkAlbumUrl(album.id)} />
+                  ))}
+                </div>
+                <div>
+                  <strong>{section.artist}</strong>
+                  <span>
+                    {section.albums.length.toLocaleString()} albums · {artistPlayCount(section.albums).toLocaleString()} plays · {formatListenTime(getFilesListenTimeMs(artistFiles))}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="homePanel homeRecent">
+        <div className="homeSectionHeader">
+          <strong>Recent additions</strong>
+          <span>freshly indexed</span>
+        </div>
+        <div className="homeRecentRail">
+          {recentAlbums.map((album) => (
+            <button className="homeRecentAlbum" key={album.id} type="button" onClick={() => onOpenAlbum(album)}>
+              <Artwork className="homeRecentArt" src={artworkAlbumUrl(album.id)} />
+              <strong title={album.album}>{album.album}</strong>
+              <span title={album.artist}>{album.artist}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="homePanel homeSongs">
+        <div className="homeSectionHeader">
+          <strong>Top tracks</strong>
+          <span>ready to start a queue</span>
+        </div>
+        <div className="homeSongList">
+          {topSongs.map((file, index) => (
+            <button
+              className={file.id === playback.currentFileId ? "homeSongRow active" : "homeSongRow"}
+              key={file.id}
+              type="button"
+              onClick={() => void onPlayFile(file.id, topSongQueue)}
+            >
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <Artwork className="homeSongArt" src={artworkFileUrl(file.id)} />
+              <div>
+                <strong title={file.displayTags.title ?? file.filename}>{file.displayTags.title ?? file.filename}</strong>
+                <small title={file.displayTags.album ?? "Unknown album"}>{file.displayTags.album ?? "Unknown album"}</small>
+              </div>
+              <span>{file.playCount.toLocaleString()} plays</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {topAlbum ? (
+        <section className="homeSpotlight">
+          <Artwork className="homeSpotlightArt" src={artworkAlbumUrl(topAlbum.id)} />
+          <div>
+            <span className="homeKicker">Start here</span>
+            <button className="linkButton strongLink" type="button" onClick={() => onOpenAlbum(topAlbum)}>
+              {topAlbum.album}
+            </button>
+            <button className="linkButton" type="button" onClick={() => onOpenArtistPage(topAlbum.artist)}>
+              {topAlbum.artist}
+            </button>
+          </div>
+          <button disabled={playbackBusy} type="button" onClick={() => void onPlayAlbum(topAlbum.id)}>
+            Play
+          </button>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function AlbumsView({
+  albumsState,
+  currentWaveform,
+  initialTarget,
+  loadingMore,
+  playback,
+  playbackBusy,
+  resetKey,
+  onEnqueuePlayback,
+  onLoadMore,
+  onPlayAlbum,
+  onPlayFile
+}: {
+  albumsState: AlbumsState;
+  currentWaveform: WaveformSummaryResponse | null;
+  initialTarget: AlbumViewTarget | null;
+  loadingMore: boolean;
+  playback: PlaybackStateResponse;
+  playbackBusy: boolean;
+  resetKey: number;
+  onEnqueuePlayback(fileIds: string[], position: QueueInsertPosition): Promise<void>;
+  onLoadMore(): Promise<void>;
+  onPlayAlbum(albumId: string): Promise<void>;
+  onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
+}): ReactElement {
+  const albums = "albums" in albumsState ? albumsState.albums.albums : [];
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [albumViewMode, setAlbumViewMode] = useState<AlbumGroupMode>("all");
+  const [albumLayout, setAlbumLayout] = useState<"grid" | "flow">("grid");
+  const [albumSortMode, setAlbumSortMode] = useState<AlbumSortMode>("artistAlbum");
+  const consumedTargetKeyRef = useRef<number | null>(null);
+  const resetKeyRef = useRef(resetKey);
+  const sortedAlbums = useMemo(() => sortAlbumsByMode(albums, albumSortMode), [albumSortMode, albums]);
   const [facetFilter, setFacetFilter] = useState<AlbumFacetFilter>({ genre: "all", decade: "all" });
   const albumFacets = useMemo(() => getAlbumFacets(sortedAlbums), [sortedAlbums]);
   const filteredAlbums = useMemo(() => filterAlbumsByFacet(sortedAlbums, facetFilter), [facetFilter, sortedAlbums]);
@@ -5798,6 +7859,7 @@ function AlbumsView({
     () => (selectedArtist ? sortedAlbums.filter((album) => album.artist === selectedArtist) : []),
     [selectedArtist, sortedAlbums]
   );
+  const hasMoreAlbums = "albums" in albumsState && albumsState.albums.albums.length < albumsState.albums.total;
 
   function openAlbum(album: AlbumGroupItem): void {
     setSelectedArtist(null);
@@ -5812,7 +7874,7 @@ function AlbumsView({
   }
 
   useEffect(() => {
-    if (!initialTarget) {
+    if (!initialTarget || consumedTargetKeyRef.current === initialTarget.key) {
       return;
     }
 
@@ -5824,7 +7886,19 @@ function AlbumsView({
     setSelectedArtist(null);
     setSelectedAlbumId(album.id);
     setSelectedFileId(album.files[0]?.id ?? null);
+    consumedTargetKeyRef.current = initialTarget.key;
   }, [initialTarget, sortedAlbums]);
+
+  useEffect(() => {
+    if (resetKeyRef.current === resetKey) {
+      return;
+    }
+    resetKeyRef.current = resetKey;
+    consumedTargetKeyRef.current = null;
+    setSelectedArtist(null);
+    setSelectedAlbumId(null);
+    setSelectedFileId(null);
+  }, [resetKey]);
 
   return (
     <>
@@ -5838,6 +7912,7 @@ function AlbumsView({
           albums={artistAlbums}
           artist={selectedArtist}
           playbackBusy={playbackBusy}
+          onEnqueuePlayback={onEnqueuePlayback}
           onBack={() => setSelectedArtist(null)}
           onOpenAlbum={openAlbum}
           onPlayFile={onPlayFile}
@@ -5845,6 +7920,8 @@ function AlbumsView({
       ) : selectedAlbum ? (
         <AlbumDetailView
           album={selectedAlbum}
+          currentWaveform={currentWaveform}
+          playback={playback}
           playbackBusy={playbackBusy}
           selectedFileId={selectedFileId}
           onBack={() => {
@@ -5852,6 +7929,7 @@ function AlbumsView({
             setSelectedFileId(null);
           }}
           onOpenArtist={openArtist}
+          onEnqueuePlayback={onEnqueuePlayback}
           onPlayAlbum={onPlayAlbum}
           onPlayFile={onPlayFile}
           onSelectFile={setSelectedFileId}
@@ -5860,33 +7938,73 @@ function AlbumsView({
         <>
           <div className="albumViewToolbar" aria-label="Album view controls">
             <div>
-              <strong>{filteredAlbums.length.toLocaleString()} albums</strong>
-              <span>{artistSections.length.toLocaleString()} artists</span>
+              <strong>{filteredAlbums.length.toLocaleString()} loaded albums</strong>
+              <span>{albumsState.status === "ready" ? `${albumsState.albums.total.toLocaleString()} total · ` : ""}{artistSections.length.toLocaleString()} artists</span>
             </div>
-            <AlbumFacetControls
-              facets={albumFacets}
-              filter={facetFilter}
-              groupMode={albumViewMode}
-              groupModes={["all", "artist", "genre", "decade"]}
-              onFilterChange={setFacetFilter}
-              onGroupModeChange={setAlbumViewMode}
-            />
+            <div className="albumViewToolbarControls">
+              <div className="segmentedControl" role="group" aria-label="Album layout">
+                <button
+                  className={albumLayout === "grid" ? "active" : ""}
+                  type="button"
+                  onClick={() => setAlbumLayout("grid")}
+                >
+                  Grid
+                </button>
+                <button
+                  className={albumLayout === "flow" ? "active" : ""}
+                  type="button"
+                  onClick={() => setAlbumLayout("flow")}
+                >
+                  3D
+                </button>
+              </div>
+              {albumLayout === "grid" ? (
+                <>
+                  <SortSelect<AlbumSortMode>
+                    ariaLabel="Album sort"
+                    value={albumSortMode}
+                    options={[
+                      { value: "artistAlbum", label: "Artist / album" },
+                      { value: "recent", label: "Recently added" },
+                      { value: "listens", label: "Most listens" },
+                      { value: "likes", label: "Most likes" },
+                      { value: "rating", label: "Highest rating" }
+                    ]}
+                    onChange={setAlbumSortMode}
+                  />
+                  <AlbumFacetControls
+                    facets={albumFacets}
+                    filter={facetFilter}
+                    groupMode={albumViewMode}
+                    groupModes={["all", "artist", "genre", "decade"]}
+                    onFilterChange={setFacetFilter}
+                    onGroupModeChange={setAlbumViewMode}
+                  />
+                </>
+              ) : null}
+            </div>
           </div>
-          {albumViewMode === "all" ? (
-            <section className="albumGrid" aria-label="Albums">
+          {albumLayout === "flow" ? (
+            <>
+              <AlbumFlowView albums={filteredAlbums} onOpenAlbum={openAlbum} />
+              {hasMoreAlbums ? <LoadMoreRow loading={loadingMore} loaded={albums.length} total={albumsState.albums.total} onLoadMore={onLoadMore} /> : null}
+            </>
+          ) : albumViewMode === "all" ? (
+            <PagedScrollSection className="albumGrid" hasMore={hasMoreAlbums} loading={loadingMore} onLoadMore={onLoadMore}>
               {filteredAlbums.map((album) => (
-                <AlbumCard
-                  album={album}
-                  key={album.id}
-                  playbackBusy={playbackBusy}
-                  onOpenAlbum={openAlbum}
-                  onOpenArtist={openArtist}
-                  onPlayAlbum={onPlayAlbum}
-                />
-              ))}
-            </section>
+                  <AlbumCard
+                    album={album}
+                    key={album.id}
+                    playbackBusy={playbackBusy}
+                    onOpenAlbum={openAlbum}
+                    onOpenArtist={openArtist}
+                    onPlayAlbum={onPlayAlbum}
+                  />
+                ))}
+                {hasMoreAlbums ? <LoadMoreRow loading={loadingMore} loaded={albums.length} total={albumsState.albums.total} onLoadMore={onLoadMore} /> : null}
+            </PagedScrollSection>
           ) : (
-            <section className="artistAlbumSections" aria-label="Grouped albums">
+            <PagedScrollSection className="artistAlbumSections" hasMore={hasMoreAlbums} loading={loadingMore} onLoadMore={onLoadMore}>
               {albumSections.map((section) => (
                 <section className="artistAlbumSection" key={section.artist}>
                   <header>
@@ -5915,7 +8033,8 @@ function AlbumsView({
                   </div>
                 </section>
               ))}
-            </section>
+              {hasMoreAlbums ? <LoadMoreRow loading={loadingMore} loaded={albums.length} total={albumsState.albums.total} onLoadMore={onLoadMore} /> : null}
+            </PagedScrollSection>
           )}
         </>
       )}
@@ -5986,28 +8105,249 @@ function AlbumCard({
   );
 }
 
+const ALBUM_FLOW_TAIL = 20;
+
+function AlbumFlowView({
+  albums,
+  onOpenAlbum
+}: {
+  albums: AlbumGroupItem[];
+  onOpenAlbum(album: AlbumGroupItem): void;
+}): ReactElement {
+  const [position, setPosition] = useState(0);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [stageWidth, setStageWidth] = useState(960);
+  const [stageHeight, setStageHeight] = useState(540);
+  const pendingPositionRef = useRef<number | null>(null);
+  const positionFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) {
+      return;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (rect?.width) {
+        setStageWidth(rect.width);
+      }
+      if (rect?.height) {
+        setStageHeight(rect.height);
+      }
+    });
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (positionFrameRef.current != null) {
+        cancelAnimationFrame(positionFrameRef.current);
+      }
+    };
+  }, []);
+
+  // Coalesce high-frequency slider input into one state update per frame.
+  function handleSliderChange(value: number): void {
+    pendingPositionRef.current = value;
+    if (positionFrameRef.current == null) {
+      positionFrameRef.current = requestAnimationFrame(() => {
+        positionFrameRef.current = null;
+        if (pendingPositionRef.current != null) {
+          setPosition(pendingPositionRef.current);
+          pendingPositionRef.current = null;
+        }
+      });
+    }
+  }
+
+  const maxIndex = Math.max(0, albums.length - 1);
+  const linePosition = Math.min(Math.max(position, 0), maxIndex);
+  const hoveredAlbum = hoveredId ? (albums.find((album) => album.id === hoveredId) ?? null) : null;
+  // Remember the last hovered album so the track panel can animate out while
+  // still showing its content.
+  const lastAlbumRef = useRef<AlbumGroupItem | null>(null);
+  if (hoveredAlbum) {
+    lastAlbumRef.current = hoveredAlbum;
+  }
+  const panelAlbum = hoveredAlbum ?? lastAlbumRef.current;
+
+  function keepHovered(albumId: string): void {
+    setHoveredId(albumId);
+  }
+
+  function releaseHovered(albumId: string): void {
+    setHoveredId((current) => (current === albumId ? null : current));
+  }
+
+  // World-space offsets of an item's slot in the receding line. Items scrolled
+  // past (depth < 0) fly off-frame to the left, toward the viewer. The first
+  // step is wider than the rest so the front album separates clearly.
+  function lineOffsets(depth: number): { x: number; y: number; z: number } {
+    if (depth < 0) {
+      return { x: depth * stageWidth * 0.45, y: depth * -36, z: depth * -200 };
+    }
+    const x = stageWidth * (0.085 * Math.min(depth, 1) + 0.042 * Math.max(0, depth - 1));
+    return { x, y: depth * -9, z: depth * -150 };
+  }
+
+  // World offsets that project onto the center of the stage at the featured
+  // depth (z=220 scales by 1.25 around the 76%/34% perspective origin), minus
+  // the 28%/58% slot anchor.
+  const featuredTransform = `translate(-50%, -50%) translate3d(${Math.round(
+    stageWidth * 0.272
+  )}px, ${Math.round(stageHeight * -0.112)}px, 220px) rotateY(0deg)`;
+
+  return (
+    <section className="albumFlow" aria-label="Albums in 3D">
+      <div className={hoveredAlbum ? "albumFlowStage hasFocus" : "albumFlowStage"} ref={stageRef}>
+        {hoveredAlbum ? (
+          <div className="albumFlowCaption" key={hoveredAlbum.id}>
+            <h2>{hoveredAlbum.album}</h2>
+            <p>{hoveredAlbum.artist}</p>
+            <span>
+              {hoveredAlbum.year ? `${hoveredAlbum.year} · ` : ""}
+              {hoveredAlbum.fileCount} track{hoveredAlbum.fileCount === 1 ? "" : "s"}
+              {hoveredAlbum.durationMs != null ? ` · ${formatTime(hoveredAlbum.durationMs)}` : ""} ·{" "}
+              {hoveredAlbum.formats.join("/")}
+            </span>
+          </div>
+        ) : null}
+        {albums.map((album, index) => {
+          const depth = index - linePosition;
+          // Keep a generous window mounted on both sides of the position so
+          // artwork is not unloaded and re-decoded while scrubbing back and
+          // forth, while still staying bounded for very large libraries.
+          if (depth < -30 || depth > ALBUM_FLOW_TAIL + 8) {
+            return null;
+          }
+
+          const isFeatured = hoveredId === album.id;
+          const offsets = lineOffsets(depth);
+          const fade =
+            depth < 0 ? Math.max(0, 1 + depth * 0.85) : Math.min(1, Math.max(0, (ALBUM_FLOW_TAIL + 1 - depth) / 9));
+          const lineTransform = `translate(-50%, -50%) translate3d(${Math.round(offsets.x)}px, ${Math.round(
+            offsets.y
+          )}px, ${Math.round(offsets.z)}px) rotateY(-32deg)`;
+          const interactive = depth >= 0 && fade >= 0.15;
+          // Two elements per album: a visual that animates between the line
+          // and the featured spot, and an invisible hit-area button that never
+          // leaves the line, so hover focus stays stable while covers move.
+          return (
+            <Fragment key={album.id}>
+              <div
+                aria-hidden="true"
+                className={isFeatured ? "albumFlowItem featured" : "albumFlowItem"}
+                style={{
+                  transform: isFeatured ? featuredTransform : lineTransform,
+                  opacity: isFeatured ? 1 : fade,
+                  zIndex: isFeatured ? 1000 : 500 - Math.round(depth * 10),
+                  pointerEvents: isFeatured ? "auto" : "none"
+                }}
+                onClick={isFeatured ? () => onOpenAlbum(album) : undefined}
+                onMouseEnter={isFeatured ? () => keepHovered(album.id) : undefined}
+                onMouseLeave={isFeatured ? () => releaseHovered(album.id) : undefined}
+              >
+                {isFeatured ? <span aria-hidden="true" className="albumFlowSpotlight" /> : null}
+                <Artwork className="albumFlowArt" eager src={artworkAlbumUrl(album.id)} />
+              </div>
+              {interactive ? (
+                <button
+                  aria-label={`${album.album} by ${album.artist}`}
+                  className="albumFlowHit"
+                  type="button"
+                  style={{
+                    transform: lineTransform,
+                    zIndex: 900 - Math.round(depth * 10)
+                  }}
+                  onBlur={() => releaseHovered(album.id)}
+                  onClick={() => onOpenAlbum(album)}
+                  onFocus={() => keepHovered(album.id)}
+                  onMouseEnter={() => keepHovered(album.id)}
+                  onMouseLeave={() => releaseHovered(album.id)}
+                />
+              ) : null}
+            </Fragment>
+          );
+        })}
+        {panelAlbum ? (
+          <aside
+            aria-hidden={!hoveredAlbum}
+            aria-label={`Tracks on ${panelAlbum.album}`}
+            className={hoveredAlbum ? "albumFlowTracks visible" : "albumFlowTracks"}
+            onMouseEnter={() => keepHovered(panelAlbum.id)}
+            onMouseLeave={() => releaseHovered(panelAlbum.id)}
+          >
+            <header>
+              Tracks · {panelAlbum.files.length}
+            </header>
+            <ol>
+              {panelAlbum.files.map((file, trackIndex) => (
+                <li key={file.id}>
+                  <span className="albumFlowTrackIndex">{trackIndex + 1}</span>
+                  <span className="albumFlowTrackTitle">{file.displayTags["title"] ?? file.filename}</span>
+                  <span className="albumFlowTrackTime">
+                    {file.durationMs != null ? formatTime(file.durationMs) : ""}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </aside>
+        ) : null}
+      </div>
+      <div className="albumFlowControls">
+        <input
+          aria-label="Scroll through albums"
+          max={maxIndex}
+          min={0}
+          step={0.01}
+          type="range"
+          value={linePosition}
+          onChange={(event) => handleSliderChange(Number(event.target.value))}
+        />
+        <span>
+          {albums.length === 0 ? "0 / 0" : `${Math.min(Math.round(linePosition) + 1, albums.length)} / ${albums.length}`}
+        </span>
+      </div>
+    </section>
+  );
+}
+
 function ArtistsView({
   albumsState,
+  currentWaveform,
   initialTarget,
+  loadingMore,
+  playback,
   playbackBusy,
   resetKey,
+  onEnqueuePlayback,
+  onLoadMore,
   onPlayAlbum,
   onPlayFile
 }: {
   albumsState: AlbumsState;
+  currentWaveform: WaveformSummaryResponse | null;
   initialTarget: ArtistViewTarget | null;
+  loadingMore: boolean;
+  playback: PlaybackStateResponse;
   playbackBusy: boolean;
   resetKey: number;
+  onEnqueuePlayback(fileIds: string[], position: QueueInsertPosition): Promise<void>;
+  onLoadMore(): Promise<void>;
   onPlayAlbum(albumId: string): Promise<void>;
   onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
 }): ReactElement {
   const albums = "albums" in albumsState ? albumsState.albums.albums : [];
-  const sortedAlbums = useMemo(() => sortAlbumsByArtistAlbum(albums), [albums]);
   const [artistGroupMode, setArtistGroupMode] = useState<AlbumGroupMode>("all");
+  const [artistSortMode, setArtistSortMode] = useState<ArtistSortMode>("artist");
+  const sortedAlbums = useMemo(() => sortAlbumsByArtistAlbum(albums), [albums]);
   const [facetFilter, setFacetFilter] = useState<AlbumFacetFilter>({ genre: "all", decade: "all" });
   const albumFacets = useMemo(() => getAlbumFacets(sortedAlbums), [sortedAlbums]);
   const filteredAlbums = useMemo(() => filterAlbumsByFacet(sortedAlbums, facetFilter), [facetFilter, sortedAlbums]);
-  const artistSections = useMemo(() => groupAlbumsByArtist(filteredAlbums), [filteredAlbums]);
+  const artistSections = useMemo(() => sortArtistSections(groupAlbumsByArtist(filteredAlbums), artistSortMode), [artistSortMode, filteredAlbums]);
   const groupedArtistSections = useMemo(() => groupArtistSectionsByMode(artistSections, artistGroupMode), [artistGroupMode, artistSections]);
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
@@ -6017,6 +8357,7 @@ function ArtistsView({
     () => (selectedArtist ? sortedAlbums.filter((album) => album.artist === selectedArtist) : []),
     [selectedArtist, sortedAlbums]
   );
+  const hasMoreAlbums = "albums" in albumsState && albumsState.albums.albums.length < albumsState.albums.total;
 
   useEffect(() => {
     setSelectedArtist(null);
@@ -6052,6 +8393,8 @@ function ArtistsView({
       {selectedAlbum ? (
         <AlbumDetailView
           album={selectedAlbum}
+          currentWaveform={currentWaveform}
+          playback={playback}
           playbackBusy={playbackBusy}
           selectedFileId={selectedFileId}
           onBack={() => {
@@ -6059,6 +8402,7 @@ function ArtistsView({
             setSelectedFileId(null);
           }}
           onOpenArtist={openArtist}
+          onEnqueuePlayback={onEnqueuePlayback}
           onPlayAlbum={onPlayAlbum}
           onPlayFile={onPlayFile}
           onSelectFile={setSelectedFileId}
@@ -6068,6 +8412,7 @@ function ArtistsView({
           albums={selectedArtistAlbums}
           artist={selectedArtist}
           playbackBusy={playbackBusy}
+          onEnqueuePlayback={onEnqueuePlayback}
           onBack={() => setSelectedArtist(null)}
           onOpenAlbum={openAlbum}
           onPlayFile={onPlayFile}
@@ -6080,19 +8425,33 @@ function ArtistsView({
         <>
           <div className="albumViewToolbar" aria-label="Artist view controls">
             <div>
-              <strong>{artistSections.length.toLocaleString()} artists</strong>
-              <span>{filteredAlbums.length.toLocaleString()} albums</span>
+              <strong>{artistSections.length.toLocaleString()} loaded artists</strong>
+              <span>{filteredAlbums.length.toLocaleString()} of {albumsState.status === "ready" ? albumsState.albums.total.toLocaleString() : filteredAlbums.length.toLocaleString()} albums</span>
             </div>
-            <AlbumFacetControls
-              facets={albumFacets}
-              filter={facetFilter}
-              groupMode={artistGroupMode}
-              groupModes={["all", "genre", "decade"]}
-              onFilterChange={setFacetFilter}
-              onGroupModeChange={setArtistGroupMode}
-            />
+            <div className="albumViewToolbarControls">
+              <SortSelect<ArtistSortMode>
+                ariaLabel="Artist sort"
+                value={artistSortMode}
+                options={[
+                  { value: "artist", label: "Artist name" },
+                  { value: "recent", label: "Recently added" },
+                  { value: "listens", label: "Most listens" },
+                  { value: "likes", label: "Most likes" },
+                  { value: "rating", label: "Highest rating" }
+                ]}
+                onChange={setArtistSortMode}
+              />
+              <AlbumFacetControls
+                facets={albumFacets}
+                filter={facetFilter}
+                groupMode={artistGroupMode}
+                groupModes={["all", "genre", "decade"]}
+                onFilterChange={setFacetFilter}
+                onGroupModeChange={setArtistGroupMode}
+              />
+            </div>
           </div>
-          <section className="artistIndexSections" aria-label="Artists">
+          <PagedScrollSection className="artistIndexSections" hasMore={hasMoreAlbums} loading={loadingMore} onLoadMore={onLoadMore}>
             {groupedArtistSections.map((group) => (
               <section className="artistIndexSection" key={group.label}>
                 {artistGroupMode === "all" ? null : (
@@ -6127,7 +8486,8 @@ function ArtistsView({
                 </div>
               </section>
             ))}
-          </section>
+            {hasMoreAlbums ? <LoadMoreRow loading={loadingMore} loaded={albums.length} total={albumsState.albums.total} onLoadMore={onLoadMore} /> : null}
+          </PagedScrollSection>
         </>
       )}
     </>
@@ -6160,27 +8520,42 @@ function AlbumFacetControls({
       </div>
       <label>
         <span>Genre</span>
-        <select value={filter.genre} onChange={(event) => onFilterChange({ ...filter, genre: event.target.value })}>
-          <option value="all">All genres</option>
-          {facets.genres.map((genre) => (
-            <option key={genre} value={genre}>
-              {genre}
-            </option>
-          ))}
-        </select>
+        <StyledSelect
+          ariaLabel="Genre"
+          options={[{ value: "all", label: "All genres" }, ...facets.genres.map((genre) => ({ value: genre, label: genre }))]}
+          value={filter.genre}
+          onChange={(genre) => onFilterChange({ ...filter, genre })}
+        />
       </label>
       <label>
         <span>Decade</span>
-        <select value={filter.decade} onChange={(event) => onFilterChange({ ...filter, decade: event.target.value })}>
-          <option value="all">All decades</option>
-          {facets.decades.map((decade) => (
-            <option key={decade} value={decade}>
-              {decade}
-            </option>
-          ))}
-        </select>
+        <StyledSelect
+          ariaLabel="Decade"
+          options={[{ value: "all", label: "All decades" }, ...facets.decades.map((decade) => ({ value: decade, label: decade }))]}
+          value={filter.decade}
+          onChange={(decade) => onFilterChange({ ...filter, decade })}
+        />
       </label>
     </div>
+  );
+}
+
+function SortSelect<T extends string>({
+  ariaLabel,
+  options,
+  value,
+  onChange
+}: {
+  ariaLabel: string;
+  options: Array<{ value: T; label: string }>;
+  value: T;
+  onChange(value: T): void;
+}): ReactElement {
+  return (
+    <label className="sortSelectControl">
+      <span>Sort</span>
+      <StyledSelect<T> ariaLabel={ariaLabel} options={options} value={value} onChange={onChange} />
+    </label>
   );
 }
 
@@ -6194,7 +8569,17 @@ function NowPlayingModal({
   onPauseResume,
   onPlayFile,
   onPrevious,
-  onRating
+  onRating,
+  onRepeatMode,
+  onSeek,
+  onOpenAlbumPage,
+  onOpenArtistPage,
+  visualizerCapabilities,
+  visualizerFrameRef,
+  visualizerMode,
+  reducedMotion,
+  waveformState,
+  onVisualizerMode
 }: {
   files: LibraryFile[];
   playback: PlaybackStateResponse;
@@ -6206,6 +8591,16 @@ function NowPlayingModal({
   onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
   onPrevious(): Promise<void>;
   onRating(fileId: string, rating: number | null): Promise<void>;
+  onRepeatMode(repeatMode: PlaybackRepeatMode): Promise<void>;
+  onSeek(ratio: number): Promise<void>;
+  onOpenAlbumPage(group: Pick<LibraryAlbumGroup, "artist" | "album" | "year">): void | Promise<void>;
+  onOpenArtistPage(artist: string): void;
+  visualizerCapabilities: VisualizerCapabilitiesResponse | null;
+  visualizerFrameRef: MutableRefObject<VisualizerFrameResponse | null>;
+  visualizerMode: VisualizerMode;
+  reducedMotion: boolean;
+  waveformState: WaveformState;
+  onVisualizerMode(mode: VisualizerMode): void;
 }): ReactElement {
   const filesById = useMemo(() => new Map(files.map((file) => [file.id, file])), [files]);
   const currentFile = playback.currentFileId ? filesById.get(playback.currentFileId) ?? null : null;
@@ -6216,6 +8611,7 @@ function NowPlayingModal({
   const displayTitle = currentFile?.displayTags.title ?? playback.currentDisplayName ?? "Nothing queued";
   const displayArtist = currentFile?.displayTags.artist ?? currentFile?.displayTags.albumartist ?? "Unknown Artist";
   const displayAlbum = currentFile?.displayTags.album ?? "Unknown Album";
+  const albumTarget = currentFile ? getFileAlbumTarget(currentFile) : null;
 
   return (
     <div className="modalBackdrop" role="presentation" onMouseDown={onClose}>
@@ -6227,18 +8623,43 @@ function NowPlayingModal({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="nowPlayingHero">
-          {playback.currentFileId ? (
-            <Artwork className="nowPlayingModalArt" src={artworkFileUrl(playback.currentFileId)} />
-          ) : (
-            <span className="nowPlayingModalArt placeholder">
-              <UiIcon name="album" />
-            </span>
-          )}
+          <div className="nowPlayingVisualStack">
+            {playback.currentFileId ? (
+              <Artwork className="nowPlayingModalArt" src={artworkFileUrl(playback.currentFileId)} />
+            ) : (
+              <span className="nowPlayingModalArt placeholder">
+                <UiIcon name="album" />
+              </span>
+            )}
+            <VisualizerPanel
+              capabilities={visualizerCapabilities}
+              frameRef={visualizerFrameRef}
+              mode={visualizerMode}
+              playback={playback}
+              reducedMotion={reducedMotion}
+              waveformState={waveformState}
+              onMode={onVisualizerMode}
+            />
+          </div>
           <div className="nowPlayingModalInfo">
             <span>{playback.status}</span>
             <h2>{displayTitle}</h2>
-            <strong>{displayArtist}</strong>
-            <small>{displayAlbum}</small>
+            <button
+              className="nowPlayingMetaLink artist"
+              disabled={!currentFile?.displayTags.artist}
+              type="button"
+              onClick={() => currentFile?.displayTags.artist ? onOpenArtistPage(currentFile.displayTags.artist) : undefined}
+            >
+              {displayArtist}
+            </button>
+            <button
+              className="nowPlayingMetaLink album"
+              disabled={!albumTarget}
+              type="button"
+              onClick={() => albumTarget ? void onOpenAlbumPage(albumTarget) : undefined}
+            >
+              {displayAlbum}
+            </button>
             {currentFile ? (
               <NowPlayingActions
                 file={currentFile}
@@ -6249,9 +8670,18 @@ function NowPlayingModal({
             ) : null}
             <div className="nowPlayingModalTime">
               <span>{formatTime(playback.positionMs)}</span>
-              <div className="progressRail">
-                <div className="progressFill" style={{ width: `${getProgressPercent(playback)}%` }} />
-              </div>
+              <button
+                aria-label="Seek playback"
+                className="modalProgressSeek"
+                disabled={playbackBusy || playback.status === "stopped" || !playback.durationMs || playback.durationMs <= 0}
+                type="button"
+                onClick={(event) => void onSeek(getPointerRatio(event.currentTarget, event.clientX))}
+              >
+              <span className="progressRail">
+                <WaveformCanvas className="modalWaveformRailCanvas" playback={playback} variant="rail" waveform={waveformState.waveform} />
+                <div className="progressFill" key={playback.currentFileId ?? "stopped"} style={{ width: `${getProgressPercent(playback)}%` }} />
+              </span>
+              </button>
               <span>{formatTime(playback.durationMs)}</span>
             </div>
             <div className="transport modalTransport">
@@ -6265,6 +8695,12 @@ function NowPlayingModal({
                 <TransportIcon shape="next" />
               </button>
             </div>
+            <RepeatControls
+              disabled={playbackBusy || playback.status === "stopped"}
+              repeatMode={playback.repeatMode}
+              variant="modal"
+              onRepeatMode={onRepeatMode}
+            />
           </div>
         </div>
         <aside className="nowPlayingQueue" aria-label="Up next">
@@ -6292,6 +8728,7 @@ function NowPlayingModal({
                   <Artwork className="queueArt" src={artworkFileUrl(file.id)} />
                   <span>
                     <strong>{file.displayTags.title ?? file.filename}</strong>
+                    {file.id === playback.currentFileId ? <MiniTrackWaveform playback={playback} waveform={waveformState.waveform} /> : null}
                     <small>
                       {file.displayTags.artist ?? file.displayTags.albumartist ?? "Unknown Artist"} · {file.displayTags.album ?? "Unknown Album"}
                     </small>
@@ -6309,18 +8746,24 @@ function NowPlayingModal({
 
 function AlbumDetailView({
   album,
+  currentWaveform,
+  playback,
   playbackBusy,
   selectedFileId,
   onBack,
+  onEnqueuePlayback,
   onOpenArtist,
   onPlayAlbum,
   onPlayFile,
   onSelectFile
 }: {
   album: AlbumGroupItem;
+  currentWaveform: WaveformSummaryResponse | null;
+  playback: PlaybackStateResponse;
   playbackBusy: boolean;
   selectedFileId: string | null;
   onBack(): void;
+  onEnqueuePlayback(fileIds: string[], position: QueueInsertPosition): Promise<void>;
   onOpenArtist(artist: string): void;
   onPlayAlbum(albumId: string): Promise<void>;
   onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
@@ -6367,19 +8810,28 @@ function AlbumDetailView({
               <dd>{album.formats.join("/")}</dd>
             </div>
           </dl>
-          <button
-            aria-label={`Play ${album.album}`}
-            className="albumDetailPlay"
-            disabled={playbackBusy || album.files.length === 0}
-            title="Play album"
-            type="button"
-            onClick={() => void onPlayAlbum(album.id)}
-          >
-            <TransportIcon shape="play" />
-          </button>
+          <div className="albumDetailQueueActions">
+            <button
+              aria-label={`Play ${album.album}`}
+              className="albumDetailPlay"
+              disabled={playbackBusy || album.files.length === 0}
+              title="Play album"
+              type="button"
+              onClick={() => void onPlayAlbum(album.id)}
+            >
+              <TransportIcon shape="play" />
+            </button>
+            <button disabled={playbackBusy || album.files.length === 0} type="button" onClick={() => void onEnqueuePlayback(albumQueueFileIds, "up_next")}>
+              Up Next
+            </button>
+            <button disabled={playbackBusy || album.files.length === 0} type="button" onClick={() => void onEnqueuePlayback(albumQueueFileIds, "end")}>
+              Add Queue
+            </button>
+          </div>
         </aside>
         <div className="albumDetailTracks">
           <div className="albumDetailTrackHeader">
+            <span></span>
             <span>#</span>
             <span>Title</span>
             <span>Length</span>
@@ -6389,23 +8841,56 @@ function AlbumDetailView({
           </div>
           {album.files.map((file) => {
             const tags = file.displayTags;
+            const isCurrent = playback.currentFileId === file.id;
+            const isSelected = selectedFile?.id === file.id;
             return (
-              <button
-                className={selectedFile?.id === file.id ? "albumDetailTrack active" : "albumDetailTrack"}
+              <div
+                className={[
+                  "albumDetailTrack",
+                  isSelected ? "active" : "",
+                  isCurrent ? "playing" : ""
+                ].filter(Boolean).join(" ")}
                 key={file.id}
-                type="button"
-                onClick={() => {
-                  onSelectFile(file.id);
-                  void onPlayFile(file.id, albumQueueFileIds);
+                role="button"
+                tabIndex={0}
+                onClick={() => onSelectFile(file.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelectFile(file.id);
+                  }
                 }}
               >
+                <span className="rowPlayActions">
+                  <button
+                    aria-label={`${isCurrent && playback.status === "playing" ? "Pause" : "Play"} ${tags.title ?? file.filename}`}
+                    className="rowPlay"
+                    disabled={playbackBusy}
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void onPlayFile(file.id, albumQueueFileIds);
+                    }}
+                  >
+                    <TransportIcon shape={isCurrent && playback.status === "playing" ? "pause" : "play"} />
+                  </button>
+                  <QueueMenuButton
+                    disabled={playbackBusy}
+                    fileIds={[file.id]}
+                    label={tags.title ?? file.filename}
+                    onEnqueue={onEnqueuePlayback}
+                  />
+                </span>
                 <span>{formatTrackNumber(file)}</span>
-                <strong title={file.path}>{tags.title ?? file.filename}</strong>
+                <span className="trackTitleCell detailTrackTitle" title={file.path}>
+                  <strong>{tags.title ?? file.filename}</strong>
+                  {isCurrent ? <MiniTrackWaveform playback={playback} waveform={currentWaveform} /> : null}
+                </span>
                 <span>{file.durationMs == null ? "-" : formatTime(file.durationMs)}</span>
                 <span>{file.rating == null ? "-" : `${file.rating}/5`}</span>
                 <span>{formatListenStats(file)}</span>
                 <span>{formatFileFormat(file) || file.extension.toUpperCase()}</span>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -6447,6 +8932,7 @@ function ArtistDetailView({
   albums,
   artist,
   playbackBusy,
+  onEnqueuePlayback,
   onBack,
   onOpenAlbum,
   onPlayFile
@@ -6454,6 +8940,7 @@ function ArtistDetailView({
   albums: AlbumGroupItem[];
   artist: string;
   playbackBusy: boolean;
+  onEnqueuePlayback(fileIds: string[], position: QueueInsertPosition): Promise<void>;
   onBack(): void;
   onOpenAlbum(album: AlbumGroupItem): void;
   onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
@@ -6549,12 +9036,16 @@ function ArtistDetailView({
           </div>
           <div className="artistSongList">
             {topSongs.map((file) => (
-              <button
-                disabled={playbackBusy}
-                key={file.id}
-                type="button"
-                onClick={() => void onPlayFile(file.id, topSongQueueFileIds)}
-              >
+              <div className="artistSongItem" key={file.id}>
+                <button
+                  aria-label={`Play ${file.displayTags.title ?? file.filename}`}
+                  className="rowPlay"
+                  disabled={playbackBusy}
+                  type="button"
+                  onClick={() => void onPlayFile(file.id, topSongQueueFileIds)}
+                >
+                  <TransportIcon shape="play" />
+                </button>
                 <Artwork className="artistSongThumb" src={artworkFileUrl(file.id)} />
                 <span>
                   <strong title={file.path}>{file.displayTags.title ?? file.filename}</strong>
@@ -6563,7 +9054,13 @@ function ArtistDetailView({
                     {file.liked ? " · liked" : ""}
                   </small>
                 </span>
-              </button>
+                <QueueMenuButton
+                  disabled={playbackBusy}
+                  fileIds={[file.id]}
+                  label={file.displayTags.title ?? file.filename}
+                  onEnqueue={onEnqueuePlayback}
+                />
+              </div>
             ))}
           </div>
         </section>
@@ -6573,22 +9070,65 @@ function ArtistDetailView({
 }
 
 function PlaylistsView({
+  currentWaveform,
+  playback,
   playbackBusy,
+  selectedPlaylist,
   playlistsState,
+  onBack,
+  onEnqueuePlayback,
+  onOpenAlbumPage,
+  onOpenArtistPage,
+  onOpenPlaylist,
+  onPlayFile,
+  onPlayFileIdsShuffled,
   onPlayPlaylist,
+  onProposeDeletePlaylist,
   onProposeUpdatePlaylist,
   onProposeRemoveItem
 }: {
+  currentWaveform: WaveformSummaryResponse | null;
+  playback: PlaybackStateResponse;
   playbackBusy: boolean;
+  selectedPlaylist: Playlist | null;
   playlistsState: PlaylistsState;
+  onBack(): void;
+  onEnqueuePlayback(fileIds: string[], position: QueueInsertPosition): Promise<void>;
+  onOpenAlbumPage(group: Pick<LibraryAlbumGroup, "artist" | "album" | "year">): void | Promise<void>;
+  onOpenArtistPage(artist: string): void;
+  onOpenPlaylist(playlistId: string): void;
+  onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
+  onPlayFileIdsShuffled(fileIds: string[]): Promise<void>;
   onPlayPlaylist(playlistId: string): Promise<void>;
+  onProposeDeletePlaylist(playlist: Playlist): Promise<void>;
   onProposeUpdatePlaylist(playlistId: string, updates: { name: string; description: string | null }): Promise<void>;
   onProposeRemoveItem(playlistId: string, itemId: string): Promise<void>;
 }): ReactElement {
   const playlists = "playlists" in playlistsState ? playlistsState.playlists : [];
 
+  if (selectedPlaylist) {
+    return (
+      <PlaylistDetailView
+        currentWaveform={currentWaveform}
+        playback={playback}
+        playbackBusy={playbackBusy}
+        playlist={selectedPlaylist}
+        onBack={onBack}
+        onEnqueuePlayback={onEnqueuePlayback}
+        onOpenAlbumPage={onOpenAlbumPage}
+        onOpenArtistPage={onOpenArtistPage}
+        onPlayFile={onPlayFile}
+        onPlayFileIdsShuffled={onPlayFileIdsShuffled}
+        onPlayPlaylist={onPlayPlaylist}
+        onProposeDeletePlaylist={onProposeDeletePlaylist}
+        onProposeUpdatePlaylist={onProposeUpdatePlaylist}
+        onProposeRemoveItem={onProposeRemoveItem}
+      />
+    );
+  }
+
   return (
-    <>
+    <section className="playlistsPage" aria-label="Playlists overview">
       {playlistsState.status === "error" ? <div className="inlineError">{playlistsState.message}</div> : null}
       <section className="playlistList" aria-label="Playlists">
         {playlists.length === 0 ? (
@@ -6599,37 +9139,136 @@ function PlaylistsView({
           </div>
         ) : (
           playlists.map((playlist) => (
-            <PlaylistCard
+            <PlaylistOverviewCard
               key={playlist.id}
               playbackBusy={playbackBusy}
               playlist={playlist}
+              onOpenPlaylist={onOpenPlaylist}
+              onPlayFileIdsShuffled={onPlayFileIdsShuffled}
               onPlayPlaylist={onPlayPlaylist}
-              onProposeUpdatePlaylist={onProposeUpdatePlaylist}
-              onProposeRemoveItem={onProposeRemoveItem}
+              onProposeDeletePlaylist={onProposeDeletePlaylist}
             />
           ))
         )}
       </section>
-    </>
+    </section>
   );
 }
 
-function PlaylistCard({
+function PlaylistOverviewCard({
   playbackBusy,
   playlist,
+  onOpenPlaylist,
+  onPlayFileIdsShuffled,
   onPlayPlaylist,
-  onProposeUpdatePlaylist,
-  onProposeRemoveItem
+  onProposeDeletePlaylist
 }: {
   playbackBusy: boolean;
   playlist: Playlist;
+  onOpenPlaylist(playlistId: string): void;
+  onPlayFileIdsShuffled(fileIds: string[]): Promise<void>;
   onPlayPlaylist(playlistId: string): Promise<void>;
+  onProposeDeletePlaylist(playlist: Playlist): Promise<void>;
+}): ReactElement {
+  const previewItems = playlist.items.slice(0, 4);
+  const playlistFileIds = useMemo(() => playlist.items.map((item) => item.file.id), [playlist.items]);
+  const leadItem = previewItems[0] ?? null;
+  const leadTitle = leadItem ? leadItem.file.displayTags.title ?? leadItem.file.filename : "No tracks";
+  const leadArtist = leadItem ? leadItem.file.displayTags.artist ?? leadItem.file.displayTags.albumartist ?? "Unknown Artist" : "Add tracks from Library";
+
+  return (
+    <article className="playlistItem">
+      <button className="playlistOpenButton" type="button" onClick={() => onOpenPlaylist(playlist.id)}>
+        <span className="playlistCoverStack" aria-hidden="true">
+          {previewItems.slice(0, 3).map((item, index) => (
+            <Artwork className={`playlistCoverArt slot${index + 1}`} key={item.id} src={artworkFileUrl(item.file.id)} />
+          ))}
+          {previewItems.length === 0 ? <Artwork className="playlistCoverArt slot1" src={null} /> : null}
+        </span>
+        <span className="playlistMain">
+          <span className="playlistKicker">
+            {playlist.items.length.toLocaleString()} track{playlist.items.length === 1 ? "" : "s"} · {playlist.type}
+          </span>
+          <strong>{playlist.name}</strong>
+          <span>{playlist.description ?? `${leadTitle} · ${leadArtist}`}</span>
+        </span>
+      </button>
+      <div className="playlistPreviewTracks">
+        {previewItems.map((item) => {
+          const tags = item.file.displayTags;
+          return (
+            <span key={item.id}>
+              {item.position + 1}. {tags.title ?? item.file.filename}
+            </span>
+          );
+        })}
+      </div>
+      <div className="playlistActions">
+        <button className="secondary" type="button" onClick={() => onOpenPlaylist(playlist.id)}>
+          View
+        </button>
+        <button disabled={playbackBusy || playlist.items.length === 0} type="button" onClick={() => void onPlayPlaylist(playlist.id)}>
+          Play
+        </button>
+        <button
+          className="secondary"
+          disabled={playbackBusy || playlist.items.length === 0}
+          title="Shuffle play"
+          type="button"
+          onClick={() => void onPlayFileIdsShuffled(playlistFileIds)}
+        >
+          <TransportIcon shape="shuffle" />
+          Shuffle
+        </button>
+        <button className="dangerButton" type="button" onClick={() => void onProposeDeletePlaylist(playlist)}>
+          Delete
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function PlaylistDetailView({
+  currentWaveform,
+  playback,
+  playbackBusy,
+  playlist,
+  onBack,
+  onEnqueuePlayback,
+  onOpenAlbumPage,
+  onOpenArtistPage,
+  onPlayFile,
+  onPlayFileIdsShuffled,
+  onPlayPlaylist,
+  onProposeDeletePlaylist,
+  onProposeUpdatePlaylist,
+  onProposeRemoveItem
+}: {
+  currentWaveform: WaveformSummaryResponse | null;
+  playback: PlaybackStateResponse;
+  playbackBusy: boolean;
+  playlist: Playlist;
+  onBack(): void;
+  onEnqueuePlayback(fileIds: string[], position: QueueInsertPosition): Promise<void>;
+  onOpenAlbumPage(group: Pick<LibraryAlbumGroup, "artist" | "album" | "year">): void | Promise<void>;
+  onOpenArtistPage(artist: string): void;
+  onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
+  onPlayFileIdsShuffled(fileIds: string[]): Promise<void>;
+  onPlayPlaylist(playlistId: string): Promise<void>;
+  onProposeDeletePlaylist(playlist: Playlist): Promise<void>;
   onProposeUpdatePlaylist(playlistId: string, updates: { name: string; description: string | null }): Promise<void>;
   onProposeRemoveItem(playlistId: string, itemId: string): Promise<void>;
 }): ReactElement {
   const [name, setName] = useState(playlist.name);
   const [description, setDescription] = useState(playlist.description ?? "");
   const changed = name.trim() !== playlist.name || description.trim() !== (playlist.description ?? "");
+  const totalDurationMs = playlist.items.reduce((sum, item) => sum + (item.file.durationMs ?? 0), 0);
+  const playlistQueueFileIds = useMemo(() => playlist.items.map((item) => item.file.id), [playlist.items]);
+
+  useEffect(() => {
+    setName(playlist.name);
+    setDescription(playlist.description ?? "");
+  }, [playlist.description, playlist.id, playlist.name]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -6644,50 +9283,153 @@ function PlaylistCard({
   }
 
   return (
-    <div className="playlistItem">
-      <div className="playlistMain">
-        <form className="playlistEditForm" onSubmit={(event) => void handleSubmit(event)}>
-          <input
-            aria-label="Playlist name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-          <input
-            aria-label="Playlist description"
-            placeholder="Description"
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-          <button disabled={!changed || !name.trim()} type="submit">
-            Propose Edit
+    <section className="playlistDetailView" aria-label={`${playlist.name} playlist detail`}>
+      <div className="detailNav">
+        <button className="secondary" type="button" onClick={onBack}>
+          Back to Playlists
+        </button>
+      </div>
+      <div className="playlistDetailShell">
+        <aside className="playlistDetailInfo">
+          <div className="playlistDetailArtwork" aria-hidden="true">
+            {playlist.items.slice(0, 4).map((item, index) => (
+              <Artwork className={`playlistDetailArt slot${index + 1}`} key={item.id} src={artworkFileUrl(item.file.id)} eager={index === 0} />
+            ))}
+            {playlist.items.length === 0 ? <Artwork className="playlistDetailArt slot1" src={null} /> : null}
+          </div>
+          <div>
+            <span className="eyebrow">{playlist.createdBy} · {playlist.type}</span>
+            <h2>{playlist.name}</h2>
+            {playlist.description ? <p>{playlist.description}</p> : <p>No description yet.</p>}
+          </div>
+          <dl className="albumFacts">
+            <div>
+              <dt>Tracks</dt>
+              <dd>{playlist.items.length.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Duration</dt>
+              <dd>{totalDurationMs > 0 ? formatTime(totalDurationMs) : "-"}</dd>
+            </div>
+            <div>
+              <dt>Source</dt>
+              <dd>{playlist.createdBy}</dd>
+            </div>
+            <div>
+              <dt>Type</dt>
+              <dd>{playlist.type}</dd>
+            </div>
+          </dl>
+          <div className="albumDetailQueueActions">
+            <button
+              aria-label={`Play ${playlist.name}`}
+              className="albumDetailPlay"
+              disabled={playbackBusy || playlist.items.length === 0}
+              title="Play playlist"
+              type="button"
+              onClick={() => void onPlayPlaylist(playlist.id)}
+            >
+              <TransportIcon shape="play" />
+            </button>
+            <button
+              disabled={playbackBusy || playlist.items.length === 0}
+              title="Shuffle play"
+              type="button"
+              onClick={() => void onPlayFileIdsShuffled(playlistQueueFileIds)}
+            >
+              <TransportIcon shape="shuffle" />
+              Shuffle
+            </button>
+            <button disabled={playbackBusy || playlist.items.length === 0} type="button" onClick={() => void onEnqueuePlayback(playlistQueueFileIds, "up_next")}>
+              Up Next
+            </button>
+            <button disabled={playbackBusy || playlist.items.length === 0} type="button" onClick={() => void onEnqueuePlayback(playlistQueueFileIds, "end")}>
+              Add Queue
+            </button>
+          </div>
+          <button className="dangerButton" type="button" onClick={() => void onProposeDeletePlaylist(playlist)}>
+            Delete Playlist
           </button>
-        </form>
-        <span>
-          {playlist.items.length} track{playlist.items.length === 1 ? "" : "s"} · {playlist.createdBy} · {playlist.type}
-        </span>
-        <div className="playlistTracks">
-          {playlist.items.slice(0, 8).map((item) => {
+        </aside>
+        <div className="playlistDetailPanel">
+          <form className="playlistEditForm" onSubmit={(event) => void handleSubmit(event)}>
+            <label>
+              <span>Name</span>
+              <input aria-label="Playlist name" value={name} onChange={(event) => setName(event.target.value)} />
+            </label>
+            <label>
+              <span>Description</span>
+              <input
+                aria-label="Playlist description"
+                placeholder="Description"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </label>
+            <button disabled={!changed || !name.trim()} type="submit">
+              Propose Edit
+            </button>
+          </form>
+          <div className="playlistTracks" role="list" aria-label="Playlist tracks">
+            {playlist.items.length === 0 ? <div className="emptyState">This playlist has no tracks.</div> : null}
+            {playlist.items.map((item) => {
             const tags = item.file.displayTags;
+            const isCurrent = playback.currentFileId === item.file.id;
+            const trackArtist = tags.artist ?? tags.albumartist ?? null;
+            const trackAlbum = tags.album ?? null;
+            const trackYear = tags.year ?? tags.date ?? null;
             return (
-              <div className="playlistTrackRow" key={item.id}>
-                <span>
-                  {item.position + 1}. {tags.title ?? item.file.filename} · {tags.artist ?? tags.albumartist ?? "Unknown Artist"}
+              <div className={isCurrent ? "playlistTrackRow active" : "playlistTrackRow"} key={item.id} role="listitem">
+                <span className="rowPlayActions">
+                  <button
+                    aria-label={`Play ${tags.title ?? item.file.filename}`}
+                    className="rowPlay"
+                    disabled={playbackBusy}
+                    type="button"
+                    onClick={() => void onPlayFile(item.file.id, playlistQueueFileIds)}
+                  >
+                    <TransportIcon shape={isCurrent && playback.status === "playing" ? "pause" : "play"} />
+                  </button>
+                  <QueueMenuButton
+                    disabled={playbackBusy}
+                    fileIds={[item.file.id]}
+                    label={tags.title ?? item.file.filename}
+                    onEnqueue={onEnqueuePlayback}
+                  />
                 </span>
+                <Artwork className="playlistTrackArt" src={artworkFileUrl(item.file.id)} />
+                <span>
+                  <strong title={item.file.path}>{tags.title ?? item.file.filename}</strong>
+                  {isCurrent ? <MiniTrackWaveform playback={playback} waveform={currentWaveform} /> : null}
+                  <small>
+                    {trackArtist ? (
+                      <button type="button" onClick={() => onOpenArtistPage(trackArtist)}>
+                        {trackArtist}
+                      </button>
+                    ) : (
+                      <span>Unknown Artist</span>
+                    )}
+                    <span aria-hidden="true">·</span>
+                    {trackArtist && trackAlbum ? (
+                      <button type="button" onClick={() => void onOpenAlbumPage({ artist: trackArtist, album: trackAlbum, year: trackYear })}>
+                        {trackAlbum}
+                      </button>
+                    ) : (
+                      <span>{trackAlbum ?? "Unknown Album"}</span>
+                    )}
+                  </small>
+                </span>
+                <span>{item.file.durationMs == null ? "-" : formatTime(item.file.durationMs)}</span>
                 <button className="secondary" type="button" onClick={() => void onProposeRemoveItem(playlist.id, item.id)}>
                   Remove
                 </button>
               </div>
             );
           })}
-          {playlist.items.length > 8 ? <span>+ {playlist.items.length - 8} more</span> : null}
+          </div>
         </div>
       </div>
-      <div className="rootActions">
-        <button disabled={playbackBusy || playlist.items.length === 0} type="button" onClick={() => void onPlayPlaylist(playlist.id)}>
-          Play
-        </button>
-      </div>
-    </div>
+    </section>
   );
 }
 
@@ -6719,17 +9461,13 @@ function AgentView({
       <div className="agentThreadBar">
         <label>
           <span>Thread</span>
-          <select
+          <StyledSelect
+            ariaLabel="Thread"
             disabled={agentBusy || threads.length === 0}
+            options={threads.map((thread) => ({ value: thread.id, label: thread.title }))}
             value={activeThreadId ?? ""}
-            onChange={(event) => void onSelectThread(event.target.value)}
-          >
-            {threads.map((thread) => (
-              <option key={thread.id} value={thread.id}>
-                {thread.title}
-              </option>
-            ))}
-          </select>
+            onChange={(threadId) => void onSelectThread(threadId)}
+          />
         </label>
         <button className="secondary" disabled={agentBusy} type="button" onClick={() => void onNewThread()}>
           New Thread
@@ -6851,8 +9589,12 @@ async function listRoots() {
   return getJson("/library/roots", libraryRootsResponseSchema);
 }
 
-async function listFiles(query: string) {
-  return getJson(`/library/files?query=${encodeURIComponent(query)}`, libraryFilesResponseSchema);
+async function listFiles(query: string, offset = 0, limit = libraryPageSize) {
+  const params = new URLSearchParams();
+  params.set("query", query);
+  params.set("offset", String(offset));
+  params.set("limit", String(limit));
+  return getJson(`/library/files?${params.toString()}`, libraryFilesResponseSchema);
 }
 
 async function getLibraryFileDiagnostics(fileId: string) {
@@ -6887,8 +9629,11 @@ async function listAlternateEditions() {
   return getJson("/library/alternate-editions", alternateEditionGroupsResponseSchema);
 }
 
-async function listAlbums() {
-  return getJson("/library/albums", albumGroupsResponseSchema);
+async function listAlbums(offset = 0, limit = albumPageSize) {
+  const params = new URLSearchParams();
+  params.set("offset", String(offset));
+  params.set("limit", String(limit));
+  return getJson(`/library/albums?${params.toString()}`, albumGroupsResponseSchema);
 }
 
 async function getTasteProfile() {
@@ -6959,7 +9704,7 @@ async function saveDiscoveryCandidate(candidate: SaveDiscoveryCandidateRequest) 
 }
 
 async function removeSavedDiscoveryCandidate(candidateId: string): Promise<void> {
-  const response = await fetch(`http://127.0.0.1:47831/discovery/saved-candidates/${encodeURIComponent(candidateId)}`, {
+  const response = await fetch(`${backendOrigin}/discovery/saved-candidates/${encodeURIComponent(candidateId)}`, {
     method: "DELETE"
   });
   if (!response.ok) {
@@ -6977,7 +9722,7 @@ async function saveDiscoveryList(list: SaveDiscoveryListRequest) {
 }
 
 async function removeSavedDiscoveryList(listId: string): Promise<void> {
-  const response = await fetch(`http://127.0.0.1:47831/discovery/saved-lists/${encodeURIComponent(listId)}`, {
+  const response = await fetch(`${backendOrigin}/discovery/saved-lists/${encodeURIComponent(listId)}`, {
     method: "DELETE"
   });
   if (!response.ok) {
@@ -7067,6 +9812,10 @@ async function proposeFileMetadata(fileId: string, metadata: EditableFileMetadat
   return postJson("/operations/propose-file-metadata", { fileId, metadata }, operationBatchResponseSchema);
 }
 
+async function proposeBulkFileMetadata(fileIds: string[], metadata: EditableFileMetadata) {
+  return postJson("/operations/propose-bulk-file-metadata", { fileIds, metadata }, operationBatchResponseSchema);
+}
+
 async function proposeRating(fileId: string, rating: number | null) {
   return postJson("/operations/propose-rating", { fileId, rating }, operationBatchResponseSchema);
 }
@@ -7078,12 +9827,49 @@ async function proposeFavoriteStatus(
   return postJson("/operations/propose-favorite-status", { fileId, ...status }, operationBatchResponseSchema);
 }
 
+async function updateFileRating(fileId: string, rating: number | null): Promise<LibraryFile> {
+  const result = await postJson(
+    `/library/files/${encodeURIComponent(fileId)}/rating`,
+    { rating },
+    libraryFilesResponseSchema
+  );
+  const file = result.files[0];
+  if (!file) {
+    throw new Error("Rating update did not return a file");
+  }
+  return file;
+}
+
+async function updateFileFavoriteStatus(
+  fileId: string,
+  status: { liked: boolean | null; disliked: boolean | null }
+): Promise<LibraryFile> {
+  const result = await postJson(
+    `/library/files/${encodeURIComponent(fileId)}/favorite-status`,
+    status,
+    libraryFilesResponseSchema
+  );
+  const file = result.files[0];
+  if (!file) {
+    throw new Error("Favorite status update did not return a file");
+  }
+  return file;
+}
+
 async function proposeRemoveFile(fileId: string) {
   return postJson("/operations/propose-remove-file", { fileId }, operationBatchResponseSchema);
 }
 
+async function proposeRemoveFiles(fileIds: string[], reason: string) {
+  return postJson("/operations/propose-remove-files", { fileIds, reason }, operationBatchResponseSchema);
+}
+
 async function proposeDuplicateCleanup(keepFileId: string, removeFileIds: string[]) {
   return postJson("/operations/propose-duplicate-cleanup", { keepFileId, removeFileIds }, operationBatchResponseSchema);
+}
+
+async function proposeBulkDuplicateCleanup(groups: Array<{ keepFileId: string; removeFileIds: string[] }>) {
+  return postJson("/operations/propose-bulk-duplicate-cleanup", { groups }, operationBatchResponseSchema);
 }
 
 async function proposeBulkInternalTags(fileIds: string[], tags: string[]) {
@@ -7102,6 +9888,10 @@ async function proposeUpdatePlaylist(playlistId: string, updates: { name: string
   return postJson("/operations/propose-update-playlist", { playlistId, ...updates }, operationBatchResponseSchema);
 }
 
+async function proposeDeletePlaylist(playlistId: string) {
+  return postJson("/operations/propose-delete-playlist", { playlistId }, operationBatchResponseSchema);
+}
+
 async function proposeAddTracksToPlaylist(playlistId: string, fileIds: string[]) {
   return postJson("/operations/propose-add-tracks-to-playlist", { playlistId, fileIds }, operationBatchResponseSchema);
 }
@@ -7112,6 +9902,10 @@ async function proposeRemoveTracksFromPlaylist(playlistId: string, itemIds: stri
 
 async function proposeAlbumMerge(canonicalAlbum: string, fileIds: string[]) {
   return postJson("/operations/propose-album-merge", { canonicalAlbum, fileIds }, operationBatchResponseSchema);
+}
+
+async function proposeBulkAlbumMerge(merges: Array<{ canonicalAlbum: string; fileIds: string[] }>) {
+  return postJson("/operations/propose-bulk-album-merge", { merges }, operationBatchResponseSchema);
 }
 
 async function approveOperationBatch(batchId: string) {
@@ -7134,8 +9928,28 @@ async function getPlaybackState() {
   return getJson("/playback/state", playbackStateSchema);
 }
 
+async function getVisualizerCapabilities() {
+  return getJson("/playback/visualizer/capabilities", visualizerCapabilitiesSchema);
+}
+
+async function getWaveform(fileId: string, signal?: AbortSignal) {
+  const response = await fetch(`${backendOrigin}/playback/waveform/${encodeURIComponent(fileId)}`, { signal });
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+  return waveformResponseSchema.parse(await response.json());
+}
+
 async function playQueue(fileIds: string[], startIndex: number) {
   return postJson("/playback/play-queue", { fileIds, startIndex }, playbackStateSchema);
+}
+
+async function enqueuePlayback(fileIds: string[], position: QueueInsertPosition) {
+  return postJson("/playback/enqueue", { fileIds, position }, playbackStateSchema);
+}
+
+async function setPlaybackRepeatMode(repeatMode: PlaybackRepeatMode) {
+  return postJson("/playback/repeat", { repeatMode }, playbackStateSchema);
 }
 
 async function playPlaylist(playlistId: string) {
@@ -7175,7 +9989,7 @@ async function nextPlayback() {
 }
 
 async function removeRoot(rootId: string) {
-  const response = await fetch(`http://127.0.0.1:47831/library/roots/${encodeURIComponent(rootId)}`, {
+  const response = await fetch(`${backendOrigin}/library/roots/${encodeURIComponent(rootId)}`, {
     method: "DELETE"
   });
   if (!response.ok) {
@@ -7184,7 +9998,7 @@ async function removeRoot(rootId: string) {
 }
 
 async function getJson<T>(path: string, schema: { parse(value: unknown): T }): Promise<T> {
-  const response = await fetch(`http://127.0.0.1:47831${path}`);
+  const response = await fetch(`${backendOrigin}${path}`);
   if (!response.ok) {
     throw new Error(await readError(response));
   }
@@ -7192,7 +10006,7 @@ async function getJson<T>(path: string, schema: { parse(value: unknown): T }): P
 }
 
 async function postJson<T>(path: string, body: unknown, schema: { parse(value: unknown): T }): Promise<T> {
-  const response = await fetch(`http://127.0.0.1:47831${path}`, {
+  const response = await fetch(`${backendOrigin}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
@@ -7204,7 +10018,7 @@ async function postJson<T>(path: string, body: unknown, schema: { parse(value: u
 }
 
 async function putJson<T>(path: string, body: unknown, schema: { parse(value: unknown): T }): Promise<T> {
-  const response = await fetch(`http://127.0.0.1:47831${path}`, {
+  const response = await fetch(`${backendOrigin}${path}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
@@ -7260,8 +10074,9 @@ function savedCandidateQuery(candidate: SavedDiscoveryCandidate): string {
   return [candidate.releaseArtist, candidate.releaseTitle].filter(Boolean).join(" ").trim() || candidate.releaseTitle;
 }
 
-function groupLibraryFilesByAlbum(files: LibraryFile[]): LibraryAlbumGroup[] {
+function groupLibraryFilesByAlbum(files: LibraryFile[], sortMode: LibrarySortMode): LibraryAlbumGroup[] {
   const groups = new Map<string, LibraryAlbumGroup>();
+  const groupFormats = new Map<string, Set<string>>();
   for (const file of files) {
     const artist = albumArtistLabel(file);
     const album = file.displayTags.album?.trim() || "Unknown Album";
@@ -7278,18 +10093,15 @@ function groupLibraryFilesByAlbum(files: LibraryFile[]): LibraryAlbumGroup[] {
         files: []
       } satisfies LibraryAlbumGroup);
     existing.files.push(file);
-    existing.formats = [...new Set([...existing.formats, file.extension.toUpperCase()])].sort();
+    const formats = groupFormats.get(key) ?? new Set<string>();
+    formats.add(file.extension.toUpperCase());
+    groupFormats.set(key, formats);
     groups.set(key, existing);
   }
 
   return [...groups.values()]
-    .map((group) => ({ ...group, files: sortAlbumTrackFiles(group.files) }))
-    .sort(
-      (left, right) =>
-        compareText(left.artist, right.artist) ||
-        compareText(left.album, right.album) ||
-        compareText(left.year ?? "", right.year ?? "")
-    );
+    .map((group) => ({ ...group, formats: [...(groupFormats.get(group.key) ?? new Set<string>())].sort(), files: sortAlbumTrackFiles(group.files) }))
+    .sort((left, right) => compareLibraryAlbumGroups(left, right, sortMode));
 }
 
 function getEstimatedLibraryAlbumGroupHeight(group: LibraryAlbumGroup): number {
@@ -7479,6 +10291,42 @@ function sortAlbumsByArtistAlbum(albums: AlbumGroupItem[]): AlbumGroupItem[] {
   return [...albums].sort((left, right) => compareText(left.artist, right.artist) || compareText(left.album, right.album));
 }
 
+function sortAlbumsByMode(albums: AlbumGroupItem[], sortMode: AlbumSortMode): AlbumGroupItem[] {
+  return [...albums].sort((left, right) => compareAlbumsByMode(left, right, sortMode));
+}
+
+function compareLibraryAlbumGroups(left: LibraryAlbumGroup, right: LibraryAlbumGroup, sortMode: LibrarySortMode): number {
+  if (sortMode === "recent") {
+    return albumRecentTimestamp(right.files) - albumRecentTimestamp(left.files) || compareLibraryAlbumGroups(left, right, "artistAlbum");
+  }
+  if (sortMode === "listens") {
+    return albumPlayCount(right.files) - albumPlayCount(left.files) || compareLibraryAlbumGroups(left, right, "artistAlbum");
+  }
+  if (sortMode === "likes") {
+    return albumLikeCount(right.files) - albumLikeCount(left.files) || compareLibraryAlbumGroups(left, right, "artistAlbum");
+  }
+  if (sortMode === "rating") {
+    return albumAverageRating(right.files) - albumAverageRating(left.files) || compareLibraryAlbumGroups(left, right, "artistAlbum");
+  }
+  return compareText(left.artist, right.artist) || compareText(left.album, right.album) || compareText(left.year ?? "", right.year ?? "");
+}
+
+function compareAlbumsByMode(left: AlbumGroupItem, right: AlbumGroupItem, sortMode: AlbumSortMode): number {
+  if (sortMode === "recent") {
+    return albumRecentTimestamp(right.files) - albumRecentTimestamp(left.files) || compareAlbumsByMode(left, right, "artistAlbum");
+  }
+  if (sortMode === "listens") {
+    return albumPlayCount(right.files) - albumPlayCount(left.files) || compareAlbumsByMode(left, right, "artistAlbum");
+  }
+  if (sortMode === "likes") {
+    return albumLikeCount(right.files) - albumLikeCount(left.files) || compareAlbumsByMode(left, right, "artistAlbum");
+  }
+  if (sortMode === "rating") {
+    return albumAverageRating(right.files) - albumAverageRating(left.files) || compareAlbumsByMode(left, right, "artistAlbum");
+  }
+  return compareText(left.artist, right.artist) || compareText(left.album, right.album);
+}
+
 function groupAlbumsByArtist(albums: AlbumGroupItem[]): { artist: string; albums: AlbumGroupItem[] }[] {
   const groups = new Map<string, AlbumGroupItem[]>();
   for (const album of albums) {
@@ -7487,6 +10335,78 @@ function groupAlbumsByArtist(albums: AlbumGroupItem[]): { artist: string; albums
   return [...groups.entries()]
     .map(([artist, groupAlbums]) => ({ artist, albums: groupAlbums }))
     .sort((left, right) => compareText(left.artist, right.artist));
+}
+
+function sortArtistSections(
+  sections: { artist: string; albums: AlbumGroupItem[] }[],
+  sortMode: ArtistSortMode
+): { artist: string; albums: AlbumGroupItem[] }[] {
+  return [...sections].sort((left, right) => compareArtistSections(left, right, sortMode));
+}
+
+function compareArtistSections(
+  left: { artist: string; albums: AlbumGroupItem[] },
+  right: { artist: string; albums: AlbumGroupItem[] },
+  sortMode: ArtistSortMode
+): number {
+  if (sortMode === "recent") {
+    return artistRecentTimestamp(right.albums) - artistRecentTimestamp(left.albums) || compareArtistSections(left, right, "artist");
+  }
+  if (sortMode === "listens") {
+    return artistPlayCount(right.albums) - artistPlayCount(left.albums) || compareArtistSections(left, right, "artist");
+  }
+  if (sortMode === "likes") {
+    return artistLikeCount(right.albums) - artistLikeCount(left.albums) || compareArtistSections(left, right, "artist");
+  }
+  if (sortMode === "rating") {
+    return artistAverageRating(right.albums) - artistAverageRating(left.albums) || compareArtistSections(left, right, "artist");
+  }
+  return compareText(left.artist, right.artist);
+}
+
+function albumRecentTimestamp(files: LibraryFile[]): number {
+  return Math.max(0, ...files.map(fileAddedTimestamp));
+}
+
+function albumPlayCount(files: LibraryFile[]): number {
+  return files.reduce((total, file) => total + file.playCount, 0);
+}
+
+function albumLikeCount(files: LibraryFile[]): number {
+  return files.reduce((total, file) => total + Number(Boolean(file.liked)), 0);
+}
+
+function albumAverageRating(files: LibraryFile[]): number {
+  const rated = files.filter((file) => file.rating != null);
+  if (rated.length === 0) {
+    return -1;
+  }
+  return rated.reduce((total, file) => total + (file.rating ?? 0), 0) / rated.length;
+}
+
+function artistRecentTimestamp(albums: AlbumGroupItem[]): number {
+  return Math.max(0, ...albums.map((album) => albumRecentTimestamp(album.files)));
+}
+
+function artistPlayCount(albums: AlbumGroupItem[]): number {
+  return albums.reduce((total, album) => total + albumPlayCount(album.files), 0);
+}
+
+function artistLikeCount(albums: AlbumGroupItem[]): number {
+  return albums.reduce((total, album) => total + albumLikeCount(album.files), 0);
+}
+
+function artistAverageRating(albums: AlbumGroupItem[]): number {
+  const ratings = albums.map((album) => albumAverageRating(album.files)).filter((rating) => rating >= 0);
+  if (ratings.length === 0) {
+    return -1;
+  }
+  return ratings.reduce((total, rating) => total + rating, 0) / ratings.length;
+}
+
+function fileAddedTimestamp(file: LibraryFile): number {
+  const timestamp = Date.parse(file.ctime ?? file.mtime);
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function groupAlbumsByMode(albums: AlbumGroupItem[], mode: AlbumGroupMode): { artist: string; albums: AlbumGroupItem[] }[] {
@@ -7637,6 +10557,10 @@ function getAlbumListenTimeMs(album: AlbumGroupItem): number {
   return album.files.reduce((total, file) => total + (file.durationMs ?? 0) * file.playCount, 0);
 }
 
+function getFilesListenTimeMs(files: LibraryFile[]): number {
+  return files.reduce((total, file) => total + (file.durationMs ?? 0) * file.playCount, 0);
+}
+
 function formatListenTime(valueMs: number): string {
   if (valueMs <= 0) {
     return "No recorded listen time";
@@ -7775,6 +10699,12 @@ function chooseDuplicateKeepFile(files: LibraryFile[]): LibraryFile {
   return [...files].sort((a, b) => getDuplicateKeepScore(b) - getDuplicateKeepScore(a) || a.path.localeCompare(b.path))[0];
 }
 
+function albumMergeFileIds(suggestion: LibraryAlbumMergeSuggestion): string[] {
+  return suggestion.variants
+    .filter((variant) => variant.album !== suggestion.canonicalAlbum)
+    .flatMap((variant) => variant.files.map((file) => file.id));
+}
+
 function getDuplicateKeepScore(file: LibraryFile): number {
   let score = 0;
   if (!file.missing) {
@@ -7821,6 +10751,15 @@ function formatTime(value: number | null): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function shuffleFileIds(fileIds: string[]): string[] {
+  const next = [...fileIds];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
 }
 
 function formatBytes(value: number | null): string {
@@ -7873,9 +10812,129 @@ function formatJobTitle(job: JobSummary): string {
   if (job.type === "discovery_download") {
     const payload = readRecord(job.payload);
     const selected = Array.isArray(payload.results) ? payload.results.length : null;
-    return selected == null ? "Discovery download" : `Discovery download · ${selected} file${selected === 1 ? "" : "s"}`;
+    return selected == null ? "Discovery Download" : `Discovery Download · ${selected} file${selected === 1 ? "" : "s"}`;
   }
-  return job.type.replace(/_/g, " ");
+  return formatJobType(job.type);
+}
+
+function formatJobType(type: string): string {
+  const known: Record<string, string> = {
+    discovery_download: "Discovery Download"
+  };
+  return known[type] ?? titleCase(type.replace(/[_-]+/g, " "));
+}
+
+function formatJobStatus(status: string): string {
+  const known: Record<string, string> = {
+    queued: "Queued",
+    running: "Running",
+    completed: "Completed",
+    failed: "Failed",
+    cancelled: "Cancelled"
+  };
+  return known[status] ?? titleCase(status.replace(/[_-]+/g, " "));
+}
+
+function formatJobLevel(level: string): string {
+  return titleCase(level.replace(/[_-]+/g, " "));
+}
+
+function jobSeverityClass(level: string): string {
+  const normalized = level.toLowerCase();
+  if (normalized === "error" || normalized === "failed" || normalized === "danger") {
+    return "isError";
+  }
+  if (normalized === "warning" || normalized === "warn") {
+    return "isWarning";
+  }
+  if (normalized === "success" || normalized === "completed") {
+    return "isSuccess";
+  }
+  return "isInfo";
+}
+
+function formatJobMessage(value: unknown): string {
+  const record = readRecord(value);
+  if (record && typeof record.message === "string") {
+    return cleanQuotedMessage(record.message);
+  }
+  if (typeof value === "string") {
+    return cleanQuotedMessage(value);
+  }
+  return formatUnknown(value);
+}
+
+function parseJobEvent(event: JobEvent): { summary: string; details: string[]; sample: string | null; path: string | null } {
+  const message = cleanQuotedMessage(event.message);
+  const segments = splitJobMessage(message);
+
+  if (message.startsWith("Waiting for remote Soulseek slots")) {
+    const transfer = parseTransferSample(segments.slice(2).join("; "));
+    return {
+      summary: "Waiting for remote Soulseek slots",
+      details: [segments[1]].filter(Boolean),
+      sample: transfer.sample,
+      path: transfer.path
+    };
+  }
+
+  if (message.startsWith("Checked slskd downloads in ")) {
+    const location = message.match(/^Checked slskd downloads in ([^;]+)/)?.[1] ?? null;
+    const transfer = parseTransferSample(segments.slice(3).join("; "));
+    return {
+      summary: location ? `Checked downloads in ${location}` : "Checked slskd downloads",
+      details: segments.slice(1, 3).filter(Boolean),
+      sample: transfer.sample,
+      path: transfer.path
+    };
+  }
+
+  if (message.startsWith("No completed files were found in ")) {
+    const location = message.match(/^No completed files were found in ([^;]+)/)?.[1] ?? null;
+    return {
+      summary: "No completed files were found",
+      details: [location ? `Folder: ${location}` : "", ...segments.slice(1)].filter(Boolean),
+      sample: event.data ? formatJobMessage(event.data) : null,
+      path: null
+    };
+  }
+
+  return {
+    summary: segments[0] || message,
+    details: segments.slice(1).filter(Boolean),
+    sample: event.data ? formatJobMessage(event.data) : null,
+    path: null
+  };
+}
+
+function splitJobMessage(message: string): string[] {
+  return message
+    .split(";")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function parseTransferSample(value: string): { sample: string | null; path: string | null } {
+  const [samplePart, pathPart] = value.split(/\s+paths:\s+/i);
+  return {
+    sample: samplePart?.trim() || null,
+    path: pathPart?.trim().replaceAll("\\", "/") || null
+  };
+}
+
+function cleanQuotedMessage(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function titleCase(value: string): string {
+  return value.replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
 function formatDiscoveryDownloadMessage(job: DiscoveryDownloadJob): string {
@@ -7918,11 +10977,63 @@ function toggleSetValue<T>(current: Set<T>, value: T): Set<T> {
   return next;
 }
 
+function filterSet<T>(current: Set<T>, allowed: Set<T>): Set<T> {
+  const next = new Set<T>();
+  for (const value of current) {
+    if (allowed.has(value)) {
+      next.add(value);
+    }
+  }
+  return next.size === current.size ? current : next;
+}
+
+function mergeFilesById(current: LibraryFile[], incoming: LibraryFile[]): LibraryFile[] {
+  const seen = new Set(current.map((file) => file.id));
+  const next = [...current];
+  for (const file of incoming) {
+    if (!seen.has(file.id)) {
+      seen.add(file.id);
+      next.push(file);
+    }
+  }
+  return next;
+}
+
+function mergeAlbumsById(current: AlbumGroupItem[], incoming: AlbumGroupItem[]): AlbumGroupItem[] {
+  const seen = new Set(current.map((album) => album.id));
+  const next = [...current];
+  for (const album of incoming) {
+    if (!seen.has(album.id)) {
+      seen.add(album.id);
+      next.push(album);
+    }
+  }
+  return next;
+}
+
 function getProgressPercent(playback: PlaybackStateResponse): number {
   if (!playback.durationMs || playback.durationMs <= 0) {
     return 0;
   }
   return Math.max(0, Math.min(100, (playback.positionMs / playback.durationMs) * 100));
+}
+
+function getPointerRatio(element: HTMLElement, clientX: number): number {
+  const bounds = element.getBoundingClientRect();
+  return bounds.width <= 0 ? 0 : (clientX - bounds.left) / bounds.width;
+}
+
+function getEffectiveVisualizerMode(mode: VisualizerMode, capabilities: VisualizerCapabilitiesResponse | null, reducedMotion = false): VisualizerMode {
+  if (reducedMotion && mode !== "meter") {
+    return "meter";
+  }
+  if (mode === "spectrogram" && capabilities?.spectrogram !== "available") {
+    return capabilities?.liveAnalyzer === "available" ? "spectrum" : "meter";
+  }
+  if (mode === "spectrum" && capabilities?.liveAnalyzer !== "available") {
+    return "meter";
+  }
+  return mode;
 }
 
 export function mergePlaybackState(
@@ -7939,10 +11050,530 @@ export function mergePlaybackState(
     return next;
   }
 
+  const loopedToStart =
+    current.durationMs != null &&
+    current.durationMs > 0 &&
+    current.positionMs >= current.durationMs - 3000 &&
+    next.positionMs <= 2500 &&
+    next.positionMs < current.positionMs;
+
+  if (loopedToStart) {
+    return next;
+  }
+
   return {
     ...next,
     positionMs: Math.max(current.positionMs, next.positionMs)
   };
+}
+
+function useVisualizerStream(
+  enabled: boolean,
+  mode: VisualizerMode,
+  currentFileId: string | null
+): { frameRef: MutableRefObject<VisualizerFrameResponse | null> } {
+  const frameRef = useRef<VisualizerFrameResponse | null>(null);
+
+  useEffect(() => {
+    frameRef.current = null;
+    if (!enabled) {
+      return;
+    }
+
+    let closed = false;
+    let retryTimer: number | null = null;
+    let source: EventSource | null = null;
+
+    function connect(): void {
+      if (closed) {
+        return;
+      }
+      source = new EventSource(`${backendOrigin}/playback/visualizer/stream?mode=${encodeURIComponent(mode)}`);
+      source.addEventListener("frame", (event) => {
+        try {
+          const parsed = visualizerFrameSchema.safeParse(JSON.parse((event as MessageEvent<string>).data));
+          if (parsed.success) {
+            frameRef.current = parsed.data;
+          }
+        } catch {
+          // Drop malformed visualizer frames. Playback controls and UI state must
+          // not depend on high-frequency visual telemetry being perfect.
+        }
+      });
+      source.onerror = () => {
+        source?.close();
+        source = null;
+        if (!closed) {
+          retryTimer = window.setTimeout(connect, 1500);
+        }
+      };
+    }
+
+    connect();
+    return () => {
+      closed = true;
+      if (retryTimer != null) {
+        window.clearTimeout(retryTimer);
+      }
+      source?.close();
+    };
+  }, [enabled, mode, currentFileId]);
+
+  return { frameRef };
+}
+
+function useDocumentVisible(): boolean {
+  const [visible, setVisible] = useState(() => document.visibilityState === "visible");
+
+  useEffect(() => {
+    function onVisibilityChange(): void {
+      setVisible(document.visibilityState === "visible");
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
+
+  return visible;
+}
+
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(() =>
+    typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)").matches : false
+  );
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      return;
+    }
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    function onChange(): void {
+      setReduced(query.matches);
+    }
+    if ("addEventListener" in query) {
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    }
+    const legacyQuery = query as MediaQueryList & {
+      addListener(listener: (event: MediaQueryListEvent) => void): void;
+      removeListener(listener: (event: MediaQueryListEvent) => void): void;
+    };
+    legacyQuery.addListener(onChange);
+    return () => legacyQuery.removeListener(onChange);
+  }, []);
+
+  return reduced;
+}
+
+function useWaveform(fileId: string | null, enabled: boolean): WaveformState {
+  const [state, setState] = useState<WaveformState>({ status: "idle", waveform: null, message: null });
+  const cacheRef = useRef<Map<string, WaveformSummaryResponse>>(new Map());
+
+  useEffect(() => {
+    if (!enabled || !fileId) {
+      setState({ status: "idle", waveform: null, message: null });
+      return;
+    }
+
+    const requestedFileId = fileId;
+    const cached = cacheRef.current.get(requestedFileId);
+    if (cached) {
+      setState({ status: "ready", waveform: cached, message: null });
+      return;
+    }
+
+    let cancelled = false;
+    let retryTimer: number | null = null;
+    const controller = new AbortController();
+
+    async function load(): Promise<void> {
+      try {
+        const response = await getWaveform(requestedFileId, controller.signal);
+        if (cancelled) {
+          return;
+        }
+        if (response.status === "ready") {
+          cacheRef.current.set(requestedFileId, response.waveform);
+          setState({ status: "ready", waveform: response.waveform, message: null });
+          return;
+        }
+        setState({ status: response.status, waveform: null, message: response.message });
+        if (response.status === "pending") {
+          retryTimer = window.setTimeout(load, 2500);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setState({ status: "error", waveform: null, message: getErrorMessage(error) });
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (retryTimer != null) {
+        window.clearTimeout(retryTimer);
+      }
+    };
+  }, [enabled, fileId]);
+
+  return state;
+}
+
+function MiniTrackWaveform({
+  playback,
+  waveform
+}: {
+  playback: PlaybackStateResponse;
+  waveform: WaveformSummaryResponse | null;
+}): ReactElement {
+  return (
+    <span className="miniTrackWaveform" aria-hidden="true">
+      <WaveformCanvas className="miniTrackWaveformCanvas" playback={playback} variant="rail" waveform={waveform} />
+    </span>
+  );
+}
+
+function WaveformCanvas({
+  className,
+  playback,
+  waveform,
+  variant
+}: {
+  className: string;
+  playback: PlaybackStateResponse;
+  waveform: WaveformSummaryResponse | null;
+  variant: "rail" | "hero";
+}): ReactElement {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+    const draw = () => drawWaveform(canvas, waveform?.peaks ?? null, getProgressPercent(playback) / 100, variant);
+    draw();
+    const observer = new ResizeObserver(draw);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [playback.currentFileId, playback.positionMs, playback.durationMs, variant, waveform]);
+
+  return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
+}
+
+function SpectrumCanvas({
+  className,
+  frameRef,
+  mode,
+  playing
+}: {
+  className: string;
+  frameRef: MutableRefObject<VisualizerFrameResponse | null>;
+  mode: "meter" | "spectrum";
+  playing: boolean;
+}): ReactElement {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+    if (!playing && !frameRef.current) {
+      drawSpectrum(canvas, new Array(mode === "meter" ? 8 : 32).fill(0), mode);
+      return;
+    }
+    let animationFrame = 0;
+    const levels = new Array(mode === "meter" ? 8 : 32).fill(0);
+    const draw = () => {
+      const frame = frameRef.current;
+      const incoming = frame?.bands?.length ? frame.bands : [];
+      for (let index = 0; index < levels.length; index += 1) {
+        const next = playing ? incoming[Math.floor((index / levels.length) * incoming.length)] ?? 0 : 0;
+        const attack = mode === "meter" ? 0.92 : 0.82;
+        const decay = mode === "meter" ? 0.68 : 0.78;
+        levels[index] = next > levels[index]
+          ? levels[index] + (next - levels[index]) * attack
+          : Math.max(next, levels[index] * decay);
+      }
+      drawSpectrum(canvas, levels, mode);
+      animationFrame = window.requestAnimationFrame(draw);
+    };
+    draw();
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [frameRef, mode, playing]);
+
+  return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
+}
+
+function SpectrogramCanvas({
+  className,
+  frameRef,
+  fileId
+}: {
+  className: string;
+  frameRef: MutableRefObject<VisualizerFrameResponse | null>;
+  fileId: string | null;
+}): ReactElement {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+    let animationFrame = 0;
+    let lastFrameId = -1;
+    let lastIdleColumnAt = 0;
+    const context = prepareCanvas(canvas);
+    const { width, height } = canvas.getBoundingClientRect();
+    context.clearRect(0, 0, width, height);
+    const draw = () => {
+      const frame = frameRef.current;
+      if ((frame?.fftBins?.length || frame?.bands?.length) && frame.frameId !== lastFrameId) {
+        lastFrameId = frame.frameId;
+        drawSpectrogramColumn(canvas, frame.fftBins?.length ? frame.fftBins : frame.bands);
+      } else if (!(frame?.fftBins?.length || frame?.bands?.length) && performance.now() - lastIdleColumnAt > 75) {
+        lastIdleColumnAt = performance.now();
+        drawSpectrogramColumn(canvas, fallbackPeaks(64).map((value) => value * 0.14));
+      }
+      animationFrame = window.requestAnimationFrame(draw);
+    };
+    draw();
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [frameRef, fileId]);
+
+  return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
+}
+
+function VisualizerPanel({
+  capabilities,
+  frameRef,
+  mode,
+  playback,
+  reducedMotion,
+  waveformState,
+  onMode
+}: {
+  capabilities: VisualizerCapabilitiesResponse | null;
+  frameRef: MutableRefObject<VisualizerFrameResponse | null>;
+  mode: VisualizerMode;
+  playback: PlaybackStateResponse;
+  reducedMotion: boolean;
+  waveformState: WaveformState;
+  onMode(mode: VisualizerMode): void;
+}): ReactElement {
+  const liveAvailable = !reducedMotion && capabilities?.liveAnalyzer === "available";
+  const spectrogramAvailable = !reducedMotion && capabilities?.spectrogram === "available";
+  const statusText = getVisualizerStatusText(waveformState, capabilities, reducedMotion);
+  return (
+    <section className="visualizerPanel" aria-label="Playback visualizer">
+      <div className="visualizerToolbar">
+        <span>{statusText}</span>
+        <div className="visualizerModes" role="group" aria-label="Visualizer mode">
+          <button className={mode === "meter" ? "active" : ""} type="button" onClick={() => onMode("meter")}>
+            Meter
+          </button>
+          <button className={mode === "spectrum" ? "active" : ""} disabled={!liveAvailable} type="button" onClick={() => onMode("spectrum")}>
+            Spectrum
+          </button>
+          <button
+            className={mode === "spectrogram" ? "active" : ""}
+            disabled={!spectrogramAvailable}
+            type="button"
+            onClick={() => onMode("spectrogram")}
+          >
+            Spectrogram
+          </button>
+        </div>
+      </div>
+      <div className="visualizerStage">
+        {mode === "spectrogram" && spectrogramAvailable ? null : (
+          <WaveformCanvas className="heroWaveformCanvas" playback={playback} variant="hero" waveform={waveformState.waveform} />
+        )}
+        {mode === "spectrogram" && spectrogramAvailable ? (
+          <SpectrogramCanvas className="spectrogramCanvas" fileId={playback.currentFileId} frameRef={frameRef} />
+        ) : (
+          <SpectrumCanvas className="spectrumCanvas" frameRef={frameRef} mode={mode === "meter" ? "meter" : "spectrum"} playing={playback.status === "playing"} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function getVisualizerStatusText(
+  waveformState: WaveformState,
+  capabilities: VisualizerCapabilitiesResponse | null,
+  reducedMotion: boolean
+): string {
+  if (reducedMotion) {
+    return "Reduced motion";
+  }
+  if (capabilities?.liveAnalyzer === "missing_dependency") {
+    return "Install ffmpeg for live spectrum";
+  }
+  if (waveformState.status === "ready") {
+    return "Cached waveform";
+  }
+  return waveformState.message ?? "Visualizer";
+}
+
+function drawWaveform(canvas: HTMLCanvasElement, peaks: number[] | null, progress: number, variant: "rail" | "hero"): void {
+  const context = prepareCanvas(canvas);
+  const { width, height } = canvas.getBoundingClientRect();
+  if (width <= 0 || height <= 0) {
+    return;
+  }
+  const clampedProgress = Math.max(0, Math.min(1, progress));
+  const colors = getCanvasThemeColors(canvas);
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = rgba(colors.accent, variant === "hero" ? 0.12 : 0.18);
+  const values = peaks && peaks.length > 0 ? peaks : fallbackPeaks(96);
+  const step = Math.max(1, width / values.length);
+  for (let index = 0; index < values.length; index += 1) {
+    const value = Math.max(0.035, values[index] ?? 0);
+    const barHeight = Math.max(1, value * height * (variant === "hero" ? 0.82 : 0.9));
+    const x = index * step;
+    context.fillRect(x, (height - barHeight) / 2, Math.max(1, step * 0.72), barHeight);
+  }
+  context.fillStyle = rgba(colors.accent, variant === "hero" ? 0.82 : 0.46);
+  context.fillRect(clampedProgress * width, 0, 1.5, height);
+}
+
+function drawSpectrum(canvas: HTMLCanvasElement, levels: number[], mode: "meter" | "spectrum"): void {
+  const context = prepareCanvas(canvas);
+  const { width, height } = canvas.getBoundingClientRect();
+  if (width <= 0 || height <= 0) {
+    return;
+  }
+  context.clearRect(0, 0, width, height);
+  const colors = getCanvasThemeColors(canvas);
+  const gap = mode === "meter" ? 2 : 3;
+  const barWidth = Math.max(2, (width - gap * (levels.length - 1)) / levels.length);
+  for (let index = 0; index < levels.length; index += 1) {
+    const value = Math.max(0.025, Math.min(mode === "meter" ? 0.86 : 0.96, levels[index] ?? 0));
+    const barHeight = Math.max(2, value * height);
+    const heat = index / Math.max(1, levels.length - 1);
+    const color = mixRgb(colors.accent, colors.accentInk, mode === "meter" ? heat * 0.18 : heat * 0.28);
+    context.fillStyle = rgba(color, mode === "meter" ? 0.86 : 0.76);
+    context.fillRect(index * (barWidth + gap), height - barHeight, barWidth, barHeight);
+  }
+}
+
+function drawSpectrogramColumn(canvas: HTMLCanvasElement, bins: number[]): void {
+  const context = prepareCanvas(canvas);
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const displayWidth = canvas.width / ratio;
+  const displayHeight = canvas.height / ratio;
+  if (displayWidth <= 1 || displayHeight <= 0 || bins.length === 0) {
+    return;
+  }
+  const colors = getCanvasThemeColors(canvas);
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  const columnWidth = Math.max(2, Math.round(ratio));
+  const image = context.getImageData(columnWidth, 0, Math.max(1, canvas.width - columnWidth), canvas.height);
+  context.putImageData(image, 0, 0);
+  context.clearRect(canvas.width - columnWidth, 0, columnWidth, canvas.height);
+  for (let y = 0; y < canvas.height; y += 1) {
+    const bin = Math.max(0.025, bins[Math.floor((1 - y / Math.max(1, canvas.height - 1)) * (bins.length - 1))] ?? 0);
+    const color = mixRgb(colors.bg, colors.accent, Math.min(1, Math.pow(bin, 0.72) * 1.15));
+    context.fillStyle = rgba(color, 0.94);
+    context.fillRect(canvas.width - columnWidth, y, columnWidth, 1);
+  }
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+}
+
+function prepareCanvas(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  const rect = canvas.getBoundingClientRect();
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.floor(rect.width));
+  const height = Math.max(1, Math.floor(rect.height));
+  if (canvas.width !== Math.floor(width * ratio) || canvas.height !== Math.floor(height * ratio)) {
+    canvas.width = Math.floor(width * ratio);
+    canvas.height = Math.floor(height * ratio);
+  }
+  const context = canvas.getContext("2d")!;
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  return context;
+}
+
+function fallbackPeaks(count: number): number[] {
+  return Array.from({ length: count }, (_, index) => {
+    const angle = index / count;
+    return 0.18 + Math.abs(Math.sin(angle * Math.PI * 8)) * 0.32 + Math.abs(Math.sin(angle * Math.PI * 19)) * 0.16;
+  });
+}
+
+interface RgbColor {
+  r: number;
+  g: number;
+  b: number;
+}
+
+function getCanvasThemeColors(canvas: HTMLCanvasElement): { accent: RgbColor; accentInk: RgbColor; bg: RgbColor } {
+  const styles = getComputedStyle(canvas);
+  return {
+    accent: parseCssColor(styles.getPropertyValue("--acc")) ?? { r: 195, g: 245, b: 60 },
+    accentInk: parseCssColor(styles.getPropertyValue("--acc-ink")) ?? { r: 16, g: 19, b: 10 },
+    bg: parseCssColor(styles.getPropertyValue("--bg0")) ?? { r: 11, g: 13, b: 16 }
+  };
+}
+
+function parseCssColor(value: string): RgbColor | null {
+  const trimmed = value.trim();
+  const hex = trimmed.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (hex) {
+    const hexValue = hex[1];
+    if (!hexValue) {
+      return null;
+    }
+    const raw = hexValue.length === 3 ? hexValue.split("").map((char) => `${char}${char}`).join("") : hexValue;
+    return {
+      r: Number.parseInt(raw.slice(0, 2), 16),
+      g: Number.parseInt(raw.slice(2, 4), 16),
+      b: Number.parseInt(raw.slice(4, 6), 16)
+    };
+  }
+  const rgb = trimmed.match(/^rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/i);
+  if (rgb) {
+    const [, red, green, blue] = rgb;
+    if (!red || !green || !blue) {
+      return null;
+    }
+    return {
+      r: clampColor(Number(red)),
+      g: clampColor(Number(green)),
+      b: clampColor(Number(blue))
+    };
+  }
+  return null;
+}
+
+function mixRgb(left: RgbColor, right: RgbColor, amount: number): RgbColor {
+  const clamped = Math.max(0, Math.min(1, amount));
+  return {
+    r: Math.round(left.r + (right.r - left.r) * clamped),
+    g: Math.round(left.g + (right.g - left.g) * clamped),
+    b: Math.round(left.b + (right.b - left.b) * clamped)
+  };
+}
+
+function rgba(color: RgbColor, alpha: number): string {
+  return `rgb(${clampColor(color.r)} ${clampColor(color.g)} ${clampColor(color.b)} / ${Math.max(0, Math.min(1, alpha))})`;
+}
+
+function clampColor(value: number): number {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function loadVisualizerMode(): VisualizerMode {
+  try {
+    const value = window.localStorage.getItem(visualizerModeStorageKey);
+    return value === "meter" || value === "spectrum" || value === "spectrogram" ? value : "spectrum";
+  } catch {
+    return "spectrum";
+  }
 }
 
 function getErrorMessage(error: unknown): string {
@@ -8103,7 +11734,23 @@ function pathToBackgroundUrl(path: string): string {
   return encodeURI(normalized);
 }
 
+function getFileAlbumTarget(file: LibraryFile): Pick<LibraryAlbumGroup, "artist" | "album" | "year"> | null {
+  const album = file.displayTags.album?.trim();
+  const artist = (file.displayTags.albumartist ?? file.displayTags.artist)?.trim();
+  if (!album || !artist) {
+    return null;
+  }
+  return {
+    album,
+    artist,
+    year: (file.displayTags.year ?? file.displayTags.date ?? null)?.trim() || null
+  };
+}
+
 function getViewSubtitle(view: string): string {
+  if (view === "Home") {
+    return "Dashboard";
+  }
   if (view === "Imports") {
     return "Stage files, review detected metadata, then approve import into the library.";
   }
@@ -8160,6 +11807,7 @@ function isOperationRevertible(operation: OperationBatch["operations"][number]):
   return (
     operation.before != null &&
     (operation.type === "update_playlist" ||
+      operation.type === "delete_playlist" ||
       operation.type === "add_tracks_to_playlist" ||
       operation.type === "remove_tracks_from_playlist" ||
       operation.type === "associate_file_with_track" ||

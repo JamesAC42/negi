@@ -148,8 +148,55 @@ export const playbackStateSchema = z.object({
   durationMs: z.number().nonnegative().nullable(),
   queue: z.array(z.string()),
   queueIndex: z.number().int().nonnegative().nullable(),
+  repeatMode: z.enum(["none", "song", "queue"]).default("none"),
   volumePercent: z.number().min(0).max(100).default(100),
   error: z.string().nullable()
+});
+
+export const visualizerStreamModeSchema = z.enum(["meter", "spectrum", "spectrogram"]);
+
+export const visualizerFrameSchema = z.object({
+  version: z.literal(1),
+  frameId: z.number().int().nonnegative(),
+  emittedAt: z.string(),
+  fileId: z.string().nullable(),
+  status: z.enum(["stopped", "playing", "paused", "error"]),
+  positionMs: z.number().nonnegative(),
+  durationMs: z.number().nonnegative().nullable(),
+  rms: z.number().min(0).max(1),
+  peak: z.number().min(0).max(1),
+  bands: z.array(z.number().min(0).max(1)).max(128),
+  fftBins: z.array(z.number().min(0).max(1)).max(512).optional(),
+  waveform: z.array(z.number().min(-1).max(1)).max(4096).optional(),
+  source: z.enum(["none", "cached", "sidecar", "mpv"])
+});
+
+export const waveformSummarySchema = z.object({
+  version: z.literal(1),
+  fileId: z.string().min(1),
+  filePath: z.string().min(1),
+  fileSize: z.number().int().nonnegative(),
+  fileMtimeMs: z.number().nonnegative(),
+  durationMs: z.number().nonnegative().nullable(),
+  channels: z.number().int().positive(),
+  sampleCount: z.number().int().nonnegative(),
+  samplesPerPoint: z.number().positive(),
+  peaks: z.array(z.number().min(-1).max(1)).max(4096),
+  rms: z.array(z.number().min(0).max(1)).max(4096).optional(),
+  createdAt: z.string()
+});
+
+export const waveformResponseSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("ready"), waveform: waveformSummarySchema }),
+  z.object({ status: z.literal("pending"), message: z.string() }),
+  z.object({ status: z.literal("unavailable"), message: z.string() }),
+  z.object({ status: z.literal("error"), message: z.string() })
+]);
+
+export const visualizerCapabilitiesSchema = z.object({
+  waveformCache: z.enum(["available", "missing_dependency", "disabled"]),
+  liveAnalyzer: z.enum(["available", "missing_dependency", "disabled", "error"]),
+  spectrogram: z.enum(["available", "disabled"])
 });
 
 export const playFileRequestSchema = z.object({
@@ -159,6 +206,15 @@ export const playFileRequestSchema = z.object({
 export const playQueueRequestSchema = z.object({
   fileIds: z.array(z.string().min(1)).min(1),
   startIndex: z.number().int().nonnegative().default(0)
+});
+
+export const enqueuePlaybackRequestSchema = z.object({
+  fileIds: z.array(z.string().min(1)).min(1),
+  position: z.enum(["up_next", "end"])
+});
+
+export const setPlaybackRepeatModeRequestSchema = z.object({
+  repeatMode: z.enum(["none", "song", "queue"])
 });
 
 export const importItemSchema = z.object({
@@ -288,6 +344,10 @@ export const createUpdatePlaylistBatchRequestSchema = z.object({
   playlistId: z.string().min(1),
   name: z.string().min(1),
   description: z.string().nullable().optional()
+});
+
+export const createDeletePlaylistBatchRequestSchema = z.object({
+  playlistId: z.string().min(1)
 });
 
 export const createAddTracksToPlaylistBatchRequestSchema = z.object({
@@ -795,8 +855,24 @@ export const createAlbumMergeBatchRequestSchema = z.object({
   fileIds: z.array(z.string().min(1)).min(1)
 });
 
+export const createBulkAlbumMergeBatchRequestSchema = z.object({
+  merges: z
+    .array(
+      z.object({
+        canonicalAlbum: z.string().min(1),
+        fileIds: z.array(z.string().min(1)).min(1)
+      })
+    )
+    .min(1)
+});
+
 export const createSetFileMetadataBatchRequestSchema = z.object({
   fileId: z.string().min(1),
+  metadata: editableFileMetadataSchema
+});
+
+export const createBulkSetFileMetadataBatchRequestSchema = z.object({
+  fileIds: z.array(z.string().min(1)).min(1),
   metadata: editableFileMetadataSchema
 });
 
@@ -804,9 +880,25 @@ export const createRemoveFileBatchRequestSchema = z.object({
   fileId: z.string().min(1)
 });
 
+export const createRemoveFilesBatchRequestSchema = z.object({
+  fileIds: z.array(z.string().min(1)).min(1),
+  reason: z.string().min(1).optional()
+});
+
 export const createDuplicateCleanupBatchRequestSchema = z.object({
   keepFileId: z.string().min(1),
   removeFileIds: z.array(z.string().min(1)).min(1)
+});
+
+export const createBulkDuplicateCleanupBatchRequestSchema = z.object({
+  groups: z
+    .array(
+      z.object({
+        keepFileId: z.string().min(1),
+        removeFileIds: z.array(z.string().min(1)).min(1)
+      })
+    )
+    .min(1)
 });
 
 export const createMarkDuplicateBatchRequestSchema = z.object({
@@ -845,8 +937,14 @@ export type DuplicateGroupsResponse = z.infer<typeof duplicateGroupsResponseSche
 export type MetadataCandidate = z.infer<typeof metadataCandidateSchema>;
 export type MetadataDiagnosticsResponse = z.infer<typeof metadataDiagnosticsResponseSchema>;
 export type PlaybackStateResponse = z.infer<typeof playbackStateSchema>;
+export type VisualizerFrameResponse = z.infer<typeof visualizerFrameSchema>;
+export type WaveformResponse = z.infer<typeof waveformResponseSchema>;
+export type WaveformSummaryResponse = z.infer<typeof waveformSummarySchema>;
+export type VisualizerCapabilitiesResponse = z.infer<typeof visualizerCapabilitiesSchema>;
 export type PlayFileRequest = z.infer<typeof playFileRequestSchema>;
 export type PlayQueueRequest = z.infer<typeof playQueueRequestSchema>;
+export type EnqueuePlaybackRequest = z.infer<typeof enqueuePlaybackRequestSchema>;
+export type SetPlaybackRepeatModeRequest = z.infer<typeof setPlaybackRepeatModeRequestSchema>;
 export type ImportItem = z.infer<typeof importItemSchema>;
 export type ImportBatch = z.infer<typeof importBatchSchema>;
 export type CreateImportFromPathsRequest = z.infer<typeof createImportFromPathsRequestSchema>;
@@ -865,6 +963,7 @@ export type OperationBatchResponse = z.infer<typeof operationBatchResponseSchema
 export type CreateImportApprovalBatchRequest = z.infer<typeof createImportApprovalBatchRequestSchema>;
 export type CreatePlaylistBatchRequest = z.infer<typeof createPlaylistBatchRequestSchema>;
 export type CreateUpdatePlaylistBatchRequest = z.infer<typeof createUpdatePlaylistBatchRequestSchema>;
+export type CreateDeletePlaylistBatchRequest = z.infer<typeof createDeletePlaylistBatchRequestSchema>;
 export type CreateAddTracksToPlaylistBatchRequest = z.infer<typeof createAddTracksToPlaylistBatchRequestSchema>;
 export type CreateRemoveTracksFromPlaylistBatchRequest = z.infer<typeof createRemoveTracksFromPlaylistBatchRequestSchema>;
 export type CreateAssociateFileWithTrackBatchRequest = z.infer<typeof createAssociateFileWithTrackBatchRequestSchema>;
@@ -933,9 +1032,13 @@ export type TasteProfileEntry = z.infer<typeof tasteProfileEntrySchema>;
 export type TasteProfileResponse = z.infer<typeof tasteProfileResponseSchema>;
 export type UpdateTasteProfileRequest = z.infer<typeof updateTasteProfileRequestSchema>;
 export type CreateAlbumMergeBatchRequest = z.infer<typeof createAlbumMergeBatchRequestSchema>;
+export type CreateBulkAlbumMergeBatchRequest = z.infer<typeof createBulkAlbumMergeBatchRequestSchema>;
 export type CreateSetFileMetadataBatchRequest = z.infer<typeof createSetFileMetadataBatchRequestSchema>;
+export type CreateBulkSetFileMetadataBatchRequest = z.infer<typeof createBulkSetFileMetadataBatchRequestSchema>;
 export type CreateRemoveFileBatchRequest = z.infer<typeof createRemoveFileBatchRequestSchema>;
+export type CreateRemoveFilesBatchRequest = z.infer<typeof createRemoveFilesBatchRequestSchema>;
 export type CreateDuplicateCleanupBatchRequest = z.infer<typeof createDuplicateCleanupBatchRequestSchema>;
+export type CreateBulkDuplicateCleanupBatchRequest = z.infer<typeof createBulkDuplicateCleanupBatchRequestSchema>;
 export type CreateSetInternalTagsBatchRequest = z.infer<typeof createSetInternalTagsBatchRequestSchema>;
 export type CreateBulkSetInternalTagsBatchRequest = z.infer<typeof createBulkSetInternalTagsBatchRequestSchema>;
 export type OperationBatchIdRequest = z.infer<typeof operationBatchIdRequestSchema>;

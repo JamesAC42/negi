@@ -307,7 +307,7 @@ function slskdSearchGraceMs(): number {
 }
 
 function slskdSearchPartialAfterMs(): number {
-  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_PARTIAL_AFTER_MS", 8_000);
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_PARTIAL_AFTER_MS", 1_500);
 }
 
 function slskdSearchCompletedEmptyGraceMs(): number {

@@ -1,5 +1,7 @@
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
+import { statSync } from "node:fs";
+import { basename, extname, resolve } from "node:path";
 import type {
   AudioFile,
   AlbumGroup,
@@ -43,6 +45,25 @@ export interface FileUpsertResult {
   id: string;
   inserted: boolean;
 }
+
+const DISPLAY_TAG_KEYS = [
+  "title",
+  "artist",
+  "album",
+  "albumartist",
+  "date",
+  "year",
+  "genre",
+  "track",
+  "tracknumber",
+  "tracktotal",
+  "totaltracks",
+  "disc",
+  "discnumber",
+  "disctotal",
+  "totaldiscs"
+] as const;
+const displayTagSqlList = DISPLAY_TAG_KEYS.map((key) => `'${key}'`).join(", ");
 
 export class LibraryRepository {
   constructor(private readonly db: Database.Database) {}
@@ -232,6 +253,39 @@ export class LibraryRepository {
     write();
   }
 
+  promoteStagedFile(fileId: string, libraryRootId: string, finalPath: string): void {
+    const fileStat = statSync(finalPath);
+    this.db
+      .prepare(
+        `UPDATE files
+         SET library_root_id = ?,
+             path = ?,
+             normalized_path = ?,
+             filename = ?,
+             extension = ?,
+             size_bytes = ?,
+             mtime = ?,
+             ctime = ?,
+             date_updated = datetime('now'),
+             scan_status = CASE WHEN scan_status = 'import_warning' THEN scan_status ELSE 'scanned' END,
+             missing = 0,
+             staged = 0,
+             import_item_id = NULL
+         WHERE id = ?`
+      )
+      .run(
+        libraryRootId,
+        finalPath,
+        normalizeRepositoryPath(finalPath),
+        basename(finalPath),
+        extname(finalPath).toLowerCase().replace(/^\./, ""),
+        fileStat.size,
+        fileStat.mtime.toISOString(),
+        fileStat.ctime.toISOString(),
+        fileId
+      );
+  }
+
   markMissingFiles(rootId: string, seenNormalizedPaths: Set<string>): number {
     const rows = this.db
       .prepare("SELECT id, normalized_path FROM files WHERE library_root_id = ? AND missing = 0")
@@ -260,8 +314,9 @@ export class LibraryRepository {
       .run(rootId);
   }
 
-  listFiles(query = ""): LibraryFilesResponse["files"] {
+  listFiles(query = "", limit = Number.POSITIVE_INFINITY, offset = 0): LibraryFilesResponse["files"] {
     const like = `%${query.trim().toLowerCase()}%`;
+    const pagination = getPaginationClause(limit, offset);
     const rows = query.trim()
       ? this.db
           .prepare(
@@ -280,22 +335,19 @@ export class LibraryRepository {
                  )
                )
              ORDER BY files.date_updated DESC
-             LIMIT 1000`
+             ${pagination.sql}`
           )
-          .all({ like })
+          .all({ like, ...pagination.params })
       : this.db
           .prepare(
             `${filesWithPlaybackStatsSql}
              WHERE files.staged = 0
              ORDER BY files.date_updated DESC
-             LIMIT 1000`
+             ${pagination.sql}`
           )
-          .all();
+          .all(pagination.params);
 
-    return rows.map((row) => {
-      const file = mapFile(row as FileRow);
-      return { ...file, displayTags: this.getDisplayTags(file.id) };
-    });
+    return this.mapRowsWithDisplayTags(rows as FileRow[]);
   }
 
   getFile(id: string): LibraryFilesResponse["files"][number] {
@@ -308,12 +360,37 @@ export class LibraryRepository {
     return { ...file, displayTags: this.getDisplayTags(file.id) };
   }
 
-  countFiles(): number {
-    const row = this.db.prepare("SELECT COUNT(*) as total FROM files WHERE staged = 0").get() as { total: number };
+  countFiles(query = ""): number {
+    const trimmed = query.trim().toLowerCase();
+    if (!trimmed) {
+      const row = this.db.prepare("SELECT COUNT(*) as total FROM files WHERE staged = 0").get() as { total: number };
+      return row.total;
+    }
+
+    const like = `%${trimmed}%`;
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) as total
+         FROM files
+         WHERE files.staged = 0
+           AND (
+             lower(files.filename) LIKE @like OR
+             lower(files.path) LIKE @like OR
+             files.id IN (
+               SELECT file_id FROM embedded_tags
+               WHERE lower(tag_value) LIKE @like
+             ) OR
+             files.id IN (
+               SELECT file_id FROM file_metadata_overrides
+               WHERE lower(tag_value) LIKE @like
+             )
+           )`
+      )
+      .get({ like }) as { total: number };
     return row.total;
   }
 
-  listAlbumGroups(limit = 500): AlbumGroup[] {
+  listAlbumGroups(limit = Number.POSITIVE_INFINITY, offset = 0): AlbumGroup[] {
     const rows = this.db
       .prepare(
         `${filesWithPlaybackStatsSql}
@@ -323,10 +400,9 @@ export class LibraryRepository {
       )
       .all() as FileRow[];
 
+    const files = this.mapRowsWithDisplayTags(rows);
     const groups = new Map<string, AlbumGroup>();
-    for (const row of rows) {
-      const file = mapFile(row);
-      const fileWithTags = { ...file, displayTags: this.getDisplayTags(file.id) };
+    for (const fileWithTags of files) {
       const album = cleanAlbumLabel(fileWithTags.displayTags.album);
       if (!album) {
         continue;
@@ -367,7 +443,7 @@ export class LibraryRepository {
           (left.year ?? "").localeCompare(right.year ?? "") ||
           left.album.localeCompare(right.album)
       )
-      .slice(0, limit);
+      .slice(offset, Number.isFinite(limit) ? offset + limit : undefined);
   }
 
   getAlbumFiles(albumId: string): LibraryFilesResponse["files"] {
@@ -379,26 +455,55 @@ export class LibraryRepository {
   }
 
   getDisplayTags(fileId: string): Record<string, string> {
-    const embeddedRows = this.db
-      .prepare(
-        `SELECT tag_key, tag_value FROM embedded_tags
-         WHERE file_id = ?
-           AND tag_key IN ('title', 'artist', 'album', 'albumartist', 'date', 'year', 'genre', 'track', 'tracknumber', 'tracktotal', 'totaltracks', 'disc', 'discnumber', 'disctotal', 'totaldiscs')`
-      )
-      .all(fileId) as Array<{ tag_key: string; tag_value: string }>;
+    return this.getDisplayTagsForFileIds([fileId]).get(fileId) ?? {};
+  }
 
-    const overrideRows = this.db
-      .prepare(
-        `SELECT tag_key, tag_value FROM file_metadata_overrides
-         WHERE file_id = ?
-           AND tag_key IN ('title', 'artist', 'album', 'albumartist', 'date', 'year', 'genre', 'track', 'tracknumber', 'tracktotal', 'totaltracks', 'disc', 'discnumber', 'disctotal', 'totaldiscs')`
-      )
-      .all(fileId) as Array<{ tag_key: string; tag_value: string }>;
+  private mapRowsWithDisplayTags(rows: FileRow[]): LibraryFilesResponse["files"] {
+    const files = rows.map((row) => mapFile(row));
+    const tagsByFileId = this.getDisplayTagsForFileIds(files.map((file) => file.id));
+    return files.map((file) => ({ ...file, displayTags: tagsByFileId.get(file.id) ?? {} }));
+  }
 
-    return {
-      ...Object.fromEntries(embeddedRows.map((row) => [row.tag_key, row.tag_value])),
-      ...Object.fromEntries(overrideRows.map((row) => [row.tag_key, row.tag_value]))
+  private getDisplayTagsForFileIds(fileIds: string[]): Map<string, Record<string, string>> {
+    const tagsByFileId = new Map<string, Record<string, string>>();
+    const uniqueFileIds = [...new Set(fileIds)];
+    if (uniqueFileIds.length === 0) {
+      return tagsByFileId;
+    }
+
+    const readRows = (
+      table: "embedded_tags" | "file_metadata_overrides",
+      ids: string[]
+    ): Array<{ file_id: string; tag_key: string; tag_value: string }> => {
+      const rows: Array<{ file_id: string; tag_key: string; tag_value: string }> = [];
+      for (const chunk of chunkArray(ids, 800)) {
+        const placeholders = chunk.map(() => "?").join(",");
+        rows.push(
+          ...(this.db
+            .prepare(
+              `SELECT file_id, tag_key, tag_value FROM ${table}
+               WHERE file_id IN (${placeholders})
+                 AND tag_key IN (${displayTagSqlList})`
+            )
+            .all(...chunk) as Array<{ file_id: string; tag_key: string; tag_value: string }>)
+        );
+      }
+      return rows;
     };
+
+    for (const row of readRows("embedded_tags", uniqueFileIds)) {
+      const tags = tagsByFileId.get(row.file_id) ?? {};
+      tags[row.tag_key] = row.tag_value;
+      tagsByFileId.set(row.file_id, tags);
+    }
+
+    for (const row of readRows("file_metadata_overrides", uniqueFileIds)) {
+      const tags = tagsByFileId.get(row.file_id) ?? {};
+      tags[row.tag_key] = row.tag_value;
+      tagsByFileId.set(row.file_id, tags);
+    }
+
+    return tagsByFileId;
   }
 
   setFileMetadataOverrides(fileId: string, metadata: EditableFileMetadata): LibraryFilesResponse["files"][number] {
@@ -427,6 +532,7 @@ export class LibraryRepository {
           remove.run(fileId, key);
         }
       }
+      this.db.prepare("UPDATE files SET date_updated = datetime('now') WHERE id = ?").run(fileId);
     });
 
     write();
@@ -912,6 +1018,10 @@ function mapFile(row: FileRow): AudioFile {
   };
 }
 
+function normalizeRepositoryPath(path: string): string {
+  return resolve(path).toLowerCase();
+}
+
 function getMissingMetadataFields(displayTags: Record<string, string>): MetadataGap["missingFields"] {
   const fields: MetadataGap["missingFields"] = [];
   if (!hasTag(displayTags.title)) {
@@ -1059,6 +1169,14 @@ function normalizeComparisonValue(value: string): string {
     .trim();
 }
 
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
 function normalizeAlbumMergeTitle(value: string): string {
   return normalizeComparisonValue(
     value
@@ -1100,6 +1218,20 @@ function titleCase(value: string): string {
     .split(" ")
     .map((word) => (word.length <= 2 ? word.toUpperCase() : `${word[0]?.toUpperCase() ?? ""}${word.slice(1).toLowerCase()}`))
     .join(" ");
+}
+
+function getPaginationClause(limit: number, offset: number): { sql: string; params: { limit?: number; offset?: number } } {
+  if (!Number.isFinite(limit)) {
+    return { sql: "", params: {} };
+  }
+
+  return {
+    sql: "LIMIT @limit OFFSET @offset",
+    params: {
+      limit: Math.max(0, Math.floor(limit)),
+      offset: Math.max(0, Math.floor(offset))
+    }
+  };
 }
 
 function toQualityUpgradeCandidate(file: LibraryFilesResponse["files"][number]): QualityUpgradeCandidate {

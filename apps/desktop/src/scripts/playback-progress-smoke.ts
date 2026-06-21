@@ -10,6 +10,7 @@ const current: PlaybackStateResponse = {
   durationMs: 180_000,
   queue: ["file-1"],
   queueIndex: 0,
+  repeatMode: "none",
   volumePercent: 100,
   error: null
 };
@@ -38,6 +39,16 @@ const nextTrack: PlaybackStateResponse = {
   positionMs: 0
 };
 assert(mergePlaybackState(current, nextTrack).positionMs === 0, "expected track changes to reset position");
+
+const nearTrackEnd: PlaybackStateResponse = {
+  ...current,
+  positionMs: 178_500
+};
+const loopedTrack: PlaybackStateResponse = {
+  ...current,
+  positionMs: 500
+};
+assert(mergePlaybackState(nearTrackEnd, loopedTrack).positionMs === 500, "expected looped track to reset position");
 
 console.log(JSON.stringify({ ok: true }, null, 2));
 

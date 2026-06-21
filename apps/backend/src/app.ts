@@ -20,6 +20,9 @@ import { JobService } from "./services/job-service.js";
 import { TasteProfileService } from "./services/taste-profile-service.js";
 import { PlaybackHistoryService } from "./services/playback-history-service.js";
 import { ArtworkService } from "./services/artwork-service.js";
+import { WaveformService } from "./services/waveform-service.js";
+import { VisualizerService } from "./services/visualizer-service.js";
+import { LiveAnalyzerService } from "./services/live-analyzer-service.js";
 
 export interface BackendApp {
   db: Database.Database;
@@ -39,6 +42,8 @@ export interface BackendApp {
   tasteProfile: TasteProfileService;
   playbackHistory: PlaybackHistoryService;
   artwork: ArtworkService;
+  waveforms: WaveformService;
+  visualizer: VisualizerService;
   health(): HealthResponse;
   close(): void;
 }
@@ -63,6 +68,9 @@ export function createBackendApp(config: BackendConfig): BackendApp {
   const jobs = new JobService(db);
   const tasteProfile = new TasteProfileService(db);
   const artwork = new ArtworkService(library, config);
+  const waveforms = new WaveformService(config);
+  const liveAnalyzer = new LiveAnalyzerService(config);
+  const visualizer = new VisualizerService(playback, waveforms, liveAnalyzer);
 
   return {
     db,
@@ -82,6 +90,8 @@ export function createBackendApp(config: BackendConfig): BackendApp {
     tasteProfile,
     playbackHistory,
     artwork,
+    waveforms,
+    visualizer,
     health() {
       return healthResponseSchema.parse({
         status: "ok",
@@ -97,6 +107,8 @@ export function createBackendApp(config: BackendConfig): BackendApp {
       });
     },
     close() {
+      visualizer.close();
+      waveforms.close();
       playback.close();
       db.close();
     }

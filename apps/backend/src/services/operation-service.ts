@@ -171,6 +171,21 @@ export class OperationService {
     });
   }
 
+  createDeletePlaylistBatch(playlistId: string, source: OperationSource = "user"): OperationBatch {
+    const playlist = this.getPlaylistRecord(playlistId);
+    return this.createBatch({
+      source,
+      summary: `Delete playlist ${playlist.name}`,
+      riskLevel: "medium",
+      operations: [
+        {
+          type: "delete_playlist",
+          payload: { playlistId }
+        }
+      ]
+    });
+  }
+
   createAddTracksToPlaylistBatch(playlistId: string, fileIds: string[], source: OperationSource = "user"): OperationBatch {
     const playlist = this.getPlaylistRecord(playlistId);
     const uniqueFileIds = [...new Set(fileIds)];
@@ -394,6 +409,32 @@ export class OperationService {
     });
   }
 
+  createBulkSetFileMetadataBatch(fileIds: string[], metadata: EditableFileMetadata): OperationBatch {
+    const uniqueFileIds = [...new Set(fileIds)];
+    if (uniqueFileIds.length === 0) {
+      throw new Error("Bulk metadata update requires at least one file");
+    }
+    const normalized = normalizeEditableMetadata(metadata);
+    if (normalized.artist && !("albumartist" in normalized)) {
+      normalized.albumartist = normalized.artist;
+    }
+    if (Object.keys(normalized).length === 0) {
+      throw new Error("Bulk metadata update requires at least one metadata field");
+    }
+    const files = uniqueFileIds.map((fileId) => this.library.getFile(fileId));
+    const fields = Object.keys(normalized).join(", ");
+
+    return this.createBatch({
+      source: "user",
+      summary: `Update ${fields} for ${files.length} selected file${files.length === 1 ? "" : "s"}`,
+      riskLevel: "low",
+      operations: files.map((file) => ({
+        type: "set_file_metadata",
+        payload: { fileId: file.id, metadata: normalized, reason: "bulk_selection" }
+      }))
+    });
+  }
+
   createSetRatingBatch(fileId: string, rating: number | null): OperationBatch {
     const file = this.library.getFile(fileId);
     return this.createBatch({
@@ -453,6 +494,48 @@ export class OperationService {
     });
   }
 
+  createBulkAlbumMergeBatch(merges: Array<{ canonicalAlbum: string; fileIds: string[] }>): OperationBatch {
+    const operations: CreateOperationInput[] = [];
+    const canonicalAlbums = new Set<string>();
+
+    for (const merge of merges) {
+      const album = merge.canonicalAlbum.trim();
+      const uniqueFileIds = [...new Set(merge.fileIds)];
+      if (!album) {
+        throw new Error("Album merge requires a canonical album name");
+      }
+      if (uniqueFileIds.length === 0) {
+        throw new Error("Album merge requires at least one file");
+      }
+      canonicalAlbums.add(album);
+      const files = uniqueFileIds.map((fileId) => this.library.getFile(fileId));
+      operations.push(
+        ...files.map((file) => ({
+          type: "set_file_metadata" as const,
+          payload: {
+            fileId: file.id,
+            metadata: { album },
+            currentAlbum: file.displayTags.album ?? null,
+            reason: "bulk_album_merge"
+          }
+        }))
+      );
+    }
+
+    if (operations.length === 0) {
+      throw new Error("Bulk album merge requires at least one file");
+    }
+
+    return this.createBatch({
+      source: "user",
+      summary: `Merge ${operations.length} file${operations.length === 1 ? "" : "s"} across ${
+        canonicalAlbums.size
+      } album suggestion${canonicalAlbums.size === 1 ? "" : "s"}`,
+      riskLevel: "low",
+      operations
+    });
+  }
+
   createRemoveFileBatch(fileId: string): OperationBatch {
     const file = this.library.getFile(fileId);
     return this.createBatch({
@@ -465,6 +548,29 @@ export class OperationService {
           payload: { fileId, path: file.path }
         }
       ]
+    });
+  }
+
+  createRemoveFilesBatch(fileIds: string[], reason?: string): OperationBatch {
+    const uniqueFileIds = [...new Set(fileIds)];
+    if (uniqueFileIds.length === 0) {
+      throw new Error("Remove files requires at least one file");
+    }
+    const files = uniqueFileIds.map((fileId) => this.library.getFile(fileId));
+    const label =
+      reason?.trim() ||
+      (files.length === 1
+        ? files[0].displayTags.title ?? files[0].filename
+        : `${files.length} selected file${files.length === 1 ? "" : "s"}`);
+
+    return this.createBatch({
+      source: "user",
+      summary: `Remove ${label} from library index`,
+      riskLevel: "medium",
+      operations: files.map((file) => ({
+        type: "remove_file_from_library",
+        payload: { fileId: file.id, path: file.path, reason: "user_selection" }
+      }))
     });
   }
 
@@ -506,6 +612,58 @@ export class OperationService {
           reason: "exact_duplicate_cleanup"
         }
       }))
+    });
+  }
+
+  createBulkDuplicateCleanupBatch(groups: Array<{ keepFileId: string; removeFileIds: string[] }>): OperationBatch {
+    const operations: CreateOperationInput[] = [];
+    const seenRemoveFileIds = new Set<string>();
+
+    for (const group of groups) {
+      const keepFile = this.library.getFile(group.keepFileId);
+      const uniqueRemoveFileIds = [...new Set(group.removeFileIds)].filter((fileId) => fileId !== keepFile.id);
+      if (uniqueRemoveFileIds.length === 0) {
+        continue;
+      }
+      if (!keepFile.sha256) {
+        throw new Error("Duplicate cleanup requires a hashed file to keep");
+      }
+      const removeFiles = uniqueRemoveFileIds.map((fileId) => this.library.getFile(fileId));
+      for (const file of removeFiles) {
+        if (seenRemoveFileIds.has(file.id)) {
+          continue;
+        }
+        if (file.sha256 !== keepFile.sha256) {
+          throw new Error(`File is not an exact duplicate of the kept file: ${file.path}`);
+        }
+        if (file.missing) {
+          throw new Error(`Cannot clean up a missing duplicate file: ${file.path}`);
+        }
+        seenRemoveFileIds.add(file.id);
+        operations.push({
+          type: "remove_file_from_library",
+          payload: {
+            fileId: file.id,
+            path: file.path,
+            keptFileId: keepFile.id,
+            keptPath: keepFile.path,
+            reason: "bulk_exact_duplicate_cleanup"
+          }
+        });
+      }
+    }
+
+    if (operations.length === 0) {
+      throw new Error("Bulk duplicate cleanup requires at least one file to remove");
+    }
+
+    return this.createBatch({
+      source: "user",
+      summary: `Remove ${operations.length} exact duplicate index entr${operations.length === 1 ? "y" : "ies"} across ${
+        groups.length
+      } group${groups.length === 1 ? "" : "s"}`,
+      riskLevel: "medium",
+      operations
     });
   }
 
@@ -689,6 +847,14 @@ export class OperationService {
       return this.getPlaylistRecord(payload.playlistId);
     }
 
+    if (operation.type === "delete_playlist") {
+      const payload = playlistIdPayload(operation.payload, "Delete playlist operation requires playlistId");
+      return {
+        playlist: this.getPlaylistRecord(payload.playlistId),
+        items: this.getAllPlaylistItemSnapshots(payload.playlistId)
+      };
+    }
+
     if (operation.type === "add_tracks_to_playlist") {
       const payload = playlistFileIdsPayload(operation.payload, "Add to playlist operation requires fileIds");
       return this.getPlaylistSnapshot(payload.playlistId);
@@ -804,6 +970,11 @@ export class OperationService {
       return this.updatePlaylist(payload);
     }
 
+    if (operation.type === "delete_playlist") {
+      const payload = playlistIdPayload(operation.payload, "Delete playlist operation requires playlistId");
+      return this.deletePlaylist(payload.playlistId);
+    }
+
     if (operation.type === "add_tracks_to_playlist") {
       const payload = playlistFileIdsPayload(operation.payload, "Add to playlist operation requires fileIds");
       return this.addTracksToPlaylist(payload);
@@ -885,6 +1056,7 @@ export class OperationService {
     return (
       operation.type === "create_playlist" ||
       operation.type === "update_playlist" ||
+      operation.type === "delete_playlist" ||
       operation.type === "add_tracks_to_playlist" ||
       operation.type === "remove_tracks_from_playlist" ||
       operation.type === "associate_file_with_track" ||
@@ -905,6 +1077,11 @@ export class OperationService {
 
     if (operation.type === "update_playlist") {
       return this.restorePlaylist(playlistRecordBefore(operation.before));
+    }
+
+    if (operation.type === "delete_playlist") {
+      const before = playlistRemoveBefore(operation.before);
+      return this.restoreDeletedPlaylist(before.playlist, before.items);
     }
 
     if (operation.type === "add_tracks_to_playlist") {
@@ -1082,7 +1259,7 @@ export class OperationService {
 
   private getPlaylistRecord(playlistId: string): PlaylistRecord {
     const row = this.db
-      .prepare("SELECT id, name, description, type FROM playlists WHERE id = ?")
+      .prepare("SELECT id, name, description, type, created_by, created_at FROM playlists WHERE id = ?")
       .get(playlistId) as PlaylistRecord | undefined;
     if (!row) {
       throw new Error(`Playlist not found: ${playlistId}`);
@@ -1156,6 +1333,17 @@ export class OperationService {
       .all(playlistId, ...itemIds) as PlaylistItemSnapshot[];
   }
 
+  private getAllPlaylistItemSnapshots(playlistId: string): PlaylistItemSnapshot[] {
+    return this.db
+      .prepare(
+        `SELECT id, playlist_id, track_id, position, added_at, added_by, reason
+         FROM playlist_items
+         WHERE playlist_id = ?
+         ORDER BY position ASC`
+      )
+      .all(playlistId) as PlaylistItemSnapshot[];
+  }
+
   private addTracksToPlaylist(payload: PlaylistFileIdsPayload): PlaylistEditAfter {
     const playlist = this.getPlaylistRecord(payload.playlistId);
     const existingTrackRows = this.db
@@ -1216,6 +1404,16 @@ export class OperationService {
     return { playlistId: payload.playlistId, removedItems: items };
   }
 
+  private deletePlaylist(playlistId: string): { playlistId: string; removedItems: number } {
+    this.getPlaylistRecord(playlistId);
+    const remove = this.db.transaction(() => {
+      const deletedItems = this.db.prepare("DELETE FROM playlist_items WHERE playlist_id = ?").run(playlistId);
+      this.db.prepare("DELETE FROM playlists WHERE id = ?").run(playlistId);
+      return deletedItems.changes;
+    });
+    return { playlistId, removedItems: remove() };
+  }
+
   private revertAddTracksToPlaylist(after: PlaylistEditAfter): { playlistId: string; removedItems: number } {
     this.getPlaylistRecord(after.playlistId);
     if (after.addedItemIds.length === 0) {
@@ -1254,6 +1452,37 @@ export class OperationService {
     });
     restore();
     return { playlistId, restoredItems: items.length };
+  }
+
+  private restoreDeletedPlaylist(playlist: PlaylistRecord, items: PlaylistItemSnapshot[]): { playlistId: string; restoredItems: number } {
+    const existing = this.db.prepare("SELECT id FROM playlists WHERE id = ?").get(playlist.id);
+    if (existing) {
+      throw new Error(`Playlist already exists and cannot be restored safely: ${playlist.id}`);
+    }
+    const nameConflict = this.db
+      .prepare("SELECT id, name FROM playlists WHERE lower(name) = lower(?)")
+      .get(playlist.name) as { id: string; name: string } | undefined;
+    if (nameConflict) {
+      throw new Error(`Playlist name is now in use and cannot be restored: ${nameConflict.name}`);
+    }
+
+    const restore = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO playlists (id, name, description, type, created_by, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
+        )
+        .run(playlist.id, playlist.name, playlist.description, playlist.type, playlist.created_by, playlist.created_at);
+      const insertItem = this.db.prepare(
+        `INSERT INTO playlist_items (id, playlist_id, track_id, position, added_at, added_by, reason)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      );
+      for (const item of items) {
+        insertItem.run(item.id, item.playlist_id, item.track_id, item.position, item.added_at, item.added_by, item.reason);
+      }
+    });
+    restore();
+    return { playlistId: playlist.id, restoredItems: items.length };
   }
 
   private getTrackRecord(trackId: string): TrackRecord {
@@ -1682,6 +1911,8 @@ interface PlaylistRecord {
   name: string;
   description: string | null;
   type: string;
+  created_by: string;
+  created_at: string;
 }
 
 interface UpdatePlaylistPayload {
@@ -1994,6 +2225,15 @@ function updatePlaylistPayload(value: unknown): UpdatePlaylistPayload {
   return { playlistId, name, description };
 }
 
+function playlistIdPayload(value: unknown, message: string): { playlistId: string } {
+  const record = asRecord(value);
+  const playlistId = typeof record?.playlistId === "string" && record.playlistId.trim() ? record.playlistId.trim() : "";
+  if (!playlistId) {
+    throw new Error(message);
+  }
+  return { playlistId };
+}
+
 function associateFileWithTrackPayload(value: unknown): AssociateFileWithTrackPayload {
   const record = asRecord(value);
   if (!record) {
@@ -2168,6 +2408,19 @@ function setFileMetadataPayload(value: unknown): SetFileMetadataPayload {
   return { fileId: payload.fileId, metadata };
 }
 
+function normalizeEditableMetadata(input: EditableFileMetadata): EditableFileMetadata {
+  const metadata: EditableFileMetadata = {};
+  for (const key of ["title", "artist", "albumartist", "album", "year", "date", "genre", "tracknumber", "discnumber"] as const) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) {
+      metadata[key] = value.trim();
+    } else if (value === null) {
+      metadata[key] = null;
+    }
+  }
+  return metadata;
+}
+
 function editableMetadataFromBefore(value: unknown): EditableFileMetadata {
   const record = asRecord(value);
   const displayTags = asRecord(record?.displayTags);
@@ -2241,7 +2494,9 @@ function playlistRecordBefore(value: unknown): PlaylistRecord {
     id: record.id,
     name: record.name,
     description: typeof record.description === "string" ? record.description : null,
-    type: record.type
+    type: record.type,
+    created_by: typeof record.created_by === "string" ? record.created_by : "user",
+    created_at: typeof record.created_at === "string" ? record.created_at : new Date().toISOString()
   };
 }
 
@@ -2291,7 +2546,9 @@ function playlistRemoveBefore(value: unknown): { playlist: PlaylistRecord; items
       id: playlist.id,
       name: playlist.name,
       description: typeof playlist.description === "string" ? playlist.description : null,
-      type: playlist.type
+      type: playlist.type,
+      created_by: typeof playlist.created_by === "string" ? playlist.created_by : "user",
+      created_at: typeof playlist.created_at === "string" ? playlist.created_at : new Date().toISOString()
     },
     items: items.map(playlistItemSnapshot)
   };

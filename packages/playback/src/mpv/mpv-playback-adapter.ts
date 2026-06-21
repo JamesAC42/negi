@@ -11,6 +11,7 @@ export class MpvPlaybackAdapter implements PlaybackAdapter {
     durationMs: null,
     queue: [],
     queueIndex: null,
+    repeatMode: "none",
     volumePercent: 100,
     error: null
   };
@@ -29,6 +30,7 @@ export class MpvPlaybackAdapter implements PlaybackAdapter {
       durationMs: null,
       queue: [],
       queueIndex: null,
+      repeatMode: this.state.repeatMode,
       volumePercent: this.state.volumePercent,
       error: null
     };

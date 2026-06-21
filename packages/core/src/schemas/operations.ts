@@ -17,6 +17,7 @@ export const riskLevelSchema = z.enum(["low", "medium", "high", "dangerous"]);
 export const operationTypeSchema = z.enum([
   "create_playlist",
   "update_playlist",
+  "delete_playlist",
   "add_tracks_to_playlist",
   "remove_tracks_from_playlist",
   "set_internal_tags",

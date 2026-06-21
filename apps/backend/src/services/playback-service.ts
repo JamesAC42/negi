@@ -7,6 +7,7 @@ import { MpvIpcClient, type MpvIpcEvent } from "./mpv-ipc.js";
 import type { PlaybackEndReason, PlaybackHistoryRecorder } from "./playback-history-service.js";
 
 type LibraryFile = LibraryFilesResponse["files"][number];
+type PlaybackRepeatMode = PlaybackState["repeatMode"];
 
 export class PlaybackService {
   private process: ChildProcessWithoutNullStreams | null = null;
@@ -21,6 +22,7 @@ export class PlaybackService {
   private positionUpdatedAt: number | null = null;
   private trackedFileId: string | null = null;
   private volumePercent = 100;
+  private repeatMode: PlaybackRepeatMode = "none";
 
   constructor(
     private readonly config: BackendConfig,
@@ -44,6 +46,36 @@ export class PlaybackService {
     });
   }
 
+  async enqueue(files: LibraryFile[], position: "up_next" | "end"): Promise<PlaybackState> {
+    return this.runPlaybackOperation(async () => {
+      if (files.length === 0) {
+        throw new Error("Cannot enqueue an empty file list");
+      }
+      if (this.state.status === "stopped" || this.queueIndex == null || this.queue.length === 0) {
+        this.queue = files;
+        this.queueIndex = 0;
+        return this.playQueuedFile(files[0]);
+      }
+
+      const insertAt = position === "up_next" ? this.queueIndex + 1 : this.queue.length;
+      this.queue.splice(insertAt, 0, ...files);
+      this.state = {
+        ...this.state,
+        queue: this.queue.map((item) => item.id),
+        queueIndex: this.queueIndex
+      };
+      return this.state;
+    });
+  }
+
+  async setRepeatMode(repeatMode: PlaybackRepeatMode): Promise<PlaybackState> {
+    return this.runPlaybackOperation(async () => {
+      this.repeatMode = repeatMode;
+      this.state = { ...this.state, repeatMode };
+      return this.state;
+    });
+  }
+
   async next(): Promise<PlaybackState> {
     return this.runPlaybackOperation(async () => {
       if (this.queueIndex == null || this.queue.length === 0) {
@@ -53,6 +85,10 @@ export class PlaybackService {
 
       const nextIndex = this.queueIndex + 1;
       if (nextIndex >= this.queue.length) {
+        if (this.repeatMode === "queue") {
+          this.queueIndex = 0;
+          return this.playQueuedFile(this.queue[0]);
+        }
         return this.stopUnlocked();
       }
 
@@ -91,6 +127,7 @@ export class PlaybackService {
       durationMs: file.durationMs,
       queue: this.queue.map((item) => item.id),
       queueIndex: this.queueIndex,
+      repeatMode: this.repeatMode,
       volumePercent: this.volumePercent,
       error: null
     };
@@ -154,7 +191,7 @@ export class PlaybackService {
     this.queue = [];
     this.queueIndex = null;
     this.positionUpdatedAt = null;
-    this.state = createStoppedState(this.volumePercent);
+    this.state = createStoppedState(this.volumePercent, this.repeatMode);
     return this.state;
   }
 
@@ -189,6 +226,23 @@ export class PlaybackService {
     return this.state;
   }
 
+  getCurrentFile(): LibraryFile | null {
+    if (this.queueIndex == null) {
+      return null;
+    }
+    return this.queue[this.queueIndex] ?? null;
+  }
+
+  getSnapshot(): PlaybackState {
+    if (this.state.status !== "playing") {
+      return this.state;
+    }
+    return {
+      ...this.state,
+      positionMs: this.getEstimatedPositionMs()
+    };
+  }
+
   close(): void {
     if (!this.process) {
       return;
@@ -200,7 +254,7 @@ export class PlaybackService {
     this.queue = [];
     this.queueIndex = null;
     this.positionUpdatedAt = null;
-    this.state = createStoppedState(this.volumePercent);
+    this.state = createStoppedState(this.volumePercent, this.repeatMode);
   }
 
   private async ensureProcess(): Promise<void> {
@@ -255,7 +309,7 @@ export class PlaybackService {
         this.queue = [];
         this.queueIndex = null;
         this.positionUpdatedAt = null;
-        this.state = createStoppedState(this.volumePercent);
+        this.state = createStoppedState(this.volumePercent, this.repeatMode);
       }
     });
 
@@ -295,12 +349,20 @@ export class PlaybackService {
     }
     this.recordCurrentListen("completed");
 
+    if (this.repeatMode === "song") {
+      return this.playQueuedFile(this.queue[this.queueIndex]);
+    }
+
     const nextIndex = this.queueIndex + 1;
     if (nextIndex >= this.queue.length) {
+      if (this.repeatMode === "queue") {
+        this.queueIndex = 0;
+        return this.playQueuedFile(this.queue[0]);
+      }
       this.queue = [];
       this.queueIndex = null;
       this.positionUpdatedAt = null;
-      this.state = createStoppedState(this.volumePercent);
+      this.state = createStoppedState(this.volumePercent, this.repeatMode);
       return this.state;
     }
 
@@ -444,7 +506,7 @@ function getDisplayName(file: LibraryFile): string {
   return title ?? basename(file.path);
 }
 
-function createStoppedState(volumePercent = 100): PlaybackState {
+function createStoppedState(volumePercent = 100, repeatMode: PlaybackRepeatMode = "none"): PlaybackState {
   return {
     status: "stopped",
     currentFileId: null,
@@ -454,6 +516,7 @@ function createStoppedState(volumePercent = 100): PlaybackState {
     durationMs: null,
     queue: [],
     queueIndex: null,
+    repeatMode,
     volumePercent,
     error: null
   };

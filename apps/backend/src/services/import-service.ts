@@ -102,9 +102,15 @@ export class ImportService {
     const finalPath = await uniqueDestination(destination);
     await rename(item.stagingPath, finalPath);
 
-    const scanned = await scanAudioFile(root.id, finalPath);
-    const upsert = this.library.upsertFile({ ...scanned, staged: false, importItemId: null });
-    await this.storeFingerprint(upsert.id, finalPath);
+    let importedFileId = item.fileId;
+    if (importedFileId) {
+      this.library.promoteStagedFile(importedFileId, root.id, finalPath);
+    } else {
+      const scanned = await scanAudioFile(root.id, finalPath);
+      const upsert = this.library.upsertFile({ ...scanned, staged: false, importItemId: null });
+      await this.storeFingerprint(upsert.id, finalPath);
+      importedFileId = upsert.id;
+    }
 
     this.db
       .prepare(
@@ -112,8 +118,7 @@ export class ImportService {
          SET file_id = ?, staging_path = ?, status = 'imported', proposed_destination = ?, updated_at = datetime('now')
          WHERE id = ?`
       )
-      .run(upsert.id, finalPath, finalPath, importItemId);
-    this.deleteStagedFile(item.fileId);
+      .run(importedFileId, finalPath, finalPath, importItemId);
 
     this.refreshImportStatus(item.importId);
     return this.getItem(importItemId);

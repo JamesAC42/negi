@@ -18,6 +18,7 @@ export interface BackendConfig {
   musicBrainzEnabled?: boolean;
   musicBrainzUserAgent?: string;
   fpcalcPath?: string | null;
+  ffmpegPath?: string | null;
   slskdUrl?: string | null;
   slskdApiKey?: string | null;
   slskdUsername?: string | null;
@@ -36,6 +37,7 @@ export function getBackendConfig(): BackendConfig {
     musicBrainzEnabled: process.env.MUSIC_OS_MUSICBRAINZ_ENABLED !== "0",
     musicBrainzUserAgent: process.env.MUSIC_OS_MUSICBRAINZ_USER_AGENT ?? "MusicOS/0.1.0 (local-dev)",
     fpcalcPath: process.env.MUSIC_OS_FPCALC_PATH ?? detectFpcalcPath(),
+    ffmpegPath: process.env.MUSIC_OS_FFMPEG_PATH ?? detectFfmpegPath(),
     slskdUrl: process.env.MUSIC_OS_SLSKD_URL ?? "http://127.0.0.1:5030",
     slskdApiKey: process.env.MUSIC_OS_SLSKD_API_KEY ?? null,
     slskdUsername: process.env.MUSIC_OS_SLSKD_USERNAME ?? null,
@@ -58,6 +60,16 @@ function detectDefaultMpvPath(): string {
 
 function detectFpcalcPath(): string | null {
   const candidates = ["/usr/bin/fpcalc", "/usr/local/bin/fpcalc"];
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function detectFfmpegPath(): string | null {
+  const candidates = [
+    "/usr/bin/ffmpeg",
+    "/usr/local/bin/ffmpeg",
+    "/mnt/c/Program Files/ffmpeg/bin/ffmpeg.exe",
+    "/mnt/c/Program Files (x86)/ffmpeg/bin/ffmpeg.exe"
+  ];
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 

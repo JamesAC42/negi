@@ -12,9 +12,12 @@ import {
   createAddTracksToPlaylistBatchRequestSchema,
   approveImportItemRequestSchema,
   createAlbumMergeBatchRequestSchema,
+  createBulkAlbumMergeBatchRequestSchema,
+  createBulkDuplicateCleanupBatchRequestSchema,
   createAssociateFileWithTrackBatchRequestSchema,
   createAssociateTrackWithAlbumBatchRequestSchema,
   createBulkImportApprovalBatchRequestSchema,
+  createBulkSetFileMetadataBatchRequestSchema,
   createDuplicateCleanupBatchRequestSchema,
   createBulkSetInternalTagsBatchRequestSchema,
   createImportApprovalBatchRequestSchema,
@@ -24,7 +27,9 @@ import {
   createMoveFileBatchRequestSchema,
   createQueueDownloadBatchRequestSchema,
   createBulkRenameFilesBatchRequestSchema,
+  createDeletePlaylistBatchRequestSchema,
   createPlaylistBatchRequestSchema,
+  createRemoveFilesBatchRequestSchema,
   createRemoveTracksFromPlaylistBatchRequestSchema,
   createRemoveFileBatchRequestSchema,
   createRenameFileBatchRequestSchema,
@@ -63,12 +68,16 @@ import {
   playAlbumRequestSchema,
   playPlaylistRequestSchema,
   playQueueRequestSchema,
+  enqueuePlaybackRequestSchema,
   playbackStateSchema,
+  visualizerCapabilitiesSchema,
+  waveformResponseSchema,
   playlistResponseSchema,
   playlistsResponseSchema,
   qualityUpgradeSuggestionsResponseSchema,
   rejectImportItemRequestSchema,
   scanLibraryRootRequestSchema,
+  setPlaybackRepeatModeRequestSchema,
   savedDiscoveryCandidateResponseSchema,
   savedDiscoveryCandidatesResponseSchema,
   savedDiscoveryListResponseSchema,
@@ -285,14 +294,19 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/library/files") {
       const query = url.searchParams.get("query") ?? "";
-      const files = app.library.listFiles(query);
-      writeJson(response, 200, libraryFilesResponseSchema.parse({ files, total: app.library.countFiles() }));
+      const limit = parseOptionalPositiveInteger(url.searchParams.get("limit"));
+      const offset = parseOptionalPositiveInteger(url.searchParams.get("offset")) ?? 0;
+      const files = app.library.listFiles(query, limit ?? Number.POSITIVE_INFINITY, offset);
+      writeJson(response, 200, libraryFilesResponseSchema.parse({ files, total: app.library.countFiles(query) }));
       return;
     }
 
     if (request.method === "GET" && url.pathname === "/library/albums") {
-      const albums = app.library.listAlbumGroups();
-      writeJson(response, 200, albumGroupsResponseSchema.parse({ albums, total: albums.length }));
+      const limit = parseOptionalPositiveInteger(url.searchParams.get("limit"));
+      const offset = parseOptionalPositiveInteger(url.searchParams.get("offset")) ?? 0;
+      const allAlbums = app.library.listAlbumGroups();
+      const albums = limit == null ? allAlbums.slice(offset) : allAlbums.slice(offset, offset + limit);
+      writeJson(response, 200, albumGroupsResponseSchema.parse({ albums, total: allAlbums.length }));
       return;
     }
 
@@ -300,6 +314,31 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && fileDiagnosticsMatch) {
       const diagnostics = await inspectLibraryFile(app.library, decodeURIComponent(fileDiagnosticsMatch[1]));
       writeJson(response, 200, metadataDiagnosticsResponseSchema.parse(diagnostics));
+      return;
+    }
+
+    const fileRatingMatch = url.pathname.match(/^\/library\/files\/([^/]+)\/rating$/);
+    if (request.method === "POST" && fileRatingMatch) {
+      const body = (await readJson(request)) as { rating?: unknown };
+      const rating = body.rating == null ? null : Number(body.rating);
+      if (rating != null && (!Number.isInteger(rating) || rating < 0 || rating > 5)) {
+        throw new Error("rating must be null or an integer from 0 to 5");
+      }
+      const file = app.library.setFileRating(decodeURIComponent(fileRatingMatch[1]), rating);
+      writeJson(response, 200, libraryFilesResponseSchema.parse({ files: [file], total: 1 }));
+      return;
+    }
+
+    const fileFavoriteMatch = url.pathname.match(/^\/library\/files\/([^/]+)\/favorite-status$/);
+    if (request.method === "POST" && fileFavoriteMatch) {
+      const body = (await readJson(request)) as { liked?: unknown; disliked?: unknown };
+      const liked = parseNullableBoolean(body.liked, "liked");
+      const disliked = parseNullableBoolean(body.disliked, "disliked");
+      if (liked === true && disliked === true) {
+        throw new Error("A file cannot be both liked and disliked");
+      }
+      const file = app.library.setFileFavoriteStatus(decodeURIComponent(fileFavoriteMatch[1]), { liked, disliked });
+      writeJson(response, 200, libraryFilesResponseSchema.parse({ files: [file], total: 1 }));
       return;
     }
 
@@ -447,6 +486,13 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/operations/propose-delete-playlist") {
+      const body = createDeletePlaylistBatchRequestSchema.parse(await readJson(request));
+      const batch = app.operations.createDeletePlaylistBatch(body.playlistId);
+      writeJson(response, 201, operationBatchResponseSchema.parse({ batch }));
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/operations/propose-add-tracks-to-playlist") {
       const body = createAddTracksToPlaylistBatchRequestSchema.parse(await readJson(request));
       const batch = app.operations.createAddTracksToPlaylistBatch(body.playlistId, body.fileIds);
@@ -510,6 +556,13 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/operations/propose-bulk-file-metadata") {
+      const body = createBulkSetFileMetadataBatchRequestSchema.parse(await readJson(request));
+      const batch = app.operations.createBulkSetFileMetadataBatch(body.fileIds, body.metadata);
+      writeJson(response, 201, operationBatchResponseSchema.parse({ batch }));
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/operations/propose-rating") {
       const body = createSetRatingBatchRequestSchema.parse(await readJson(request));
       const batch = app.operations.createSetRatingBatch(body.fileId, body.rating);
@@ -531,6 +584,13 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/operations/propose-bulk-album-merge") {
+      const body = createBulkAlbumMergeBatchRequestSchema.parse(await readJson(request));
+      const batch = app.operations.createBulkAlbumMergeBatch(body.merges);
+      writeJson(response, 201, operationBatchResponseSchema.parse({ batch }));
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/operations/propose-remove-file") {
       const body = createRemoveFileBatchRequestSchema.parse(await readJson(request));
       const batch = app.operations.createRemoveFileBatch(body.fileId);
@@ -538,9 +598,23 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/operations/propose-remove-files") {
+      const body = createRemoveFilesBatchRequestSchema.parse(await readJson(request));
+      const batch = app.operations.createRemoveFilesBatch(body.fileIds, body.reason);
+      writeJson(response, 201, operationBatchResponseSchema.parse({ batch }));
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/operations/propose-duplicate-cleanup") {
       const body = createDuplicateCleanupBatchRequestSchema.parse(await readJson(request));
       const batch = app.operations.createDuplicateCleanupBatch(body.keepFileId, body.removeFileIds);
+      writeJson(response, 201, operationBatchResponseSchema.parse({ batch }));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/operations/propose-bulk-duplicate-cleanup") {
+      const body = createBulkDuplicateCleanupBatchRequestSchema.parse(await readJson(request));
+      const batch = app.operations.createBulkDuplicateCleanupBatch(body.groups);
       writeJson(response, 201, operationBatchResponseSchema.parse({ batch }));
       return;
     }
@@ -606,6 +680,24 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/playback/visualizer/capabilities") {
+      writeJson(response, 200, visualizerCapabilitiesSchema.parse(app.visualizer.capabilities()));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/playback/visualizer/stream") {
+      app.visualizer.subscribe(response, url.searchParams.get("mode"));
+      return;
+    }
+
+    const waveformMatch = request.method === "GET" ? url.pathname.match(/^\/playback\/waveform\/([^/]+)$/) : null;
+    if (waveformMatch) {
+      const file = app.library.getFile(decodeURIComponent(waveformMatch[1]));
+      const waveform = waveformResponseSchema.parse(await app.waveforms.getWaveform(file));
+      writeJson(response, waveform.status === "pending" ? 202 : 200, waveform);
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/playback/play-playlist") {
       const body = playPlaylistRequestSchema.parse(await readJson(request));
       const files = app.playlists.getPlaylistFiles(body.playlistId);
@@ -635,6 +727,20 @@ const server = createServer(async (request, response) => {
       const files = body.fileIds.map((fileId) => app.library.getFile(fileId));
       const state = await app.playback.playQueue(files, body.startIndex);
       writeJson(response, 200, playbackStateSchema.parse(state));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/playback/enqueue") {
+      const body = enqueuePlaybackRequestSchema.parse(await readJson(request));
+      const files = body.fileIds.map((fileId) => app.library.getFile(fileId));
+      const state = await app.playback.enqueue(files, body.position);
+      writeJson(response, 200, playbackStateSchema.parse(state));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/playback/repeat") {
+      const body = setPlaybackRepeatModeRequestSchema.parse(await readJson(request));
+      writeJson(response, 200, playbackStateSchema.parse(await app.playback.setRepeatMode(body.repeatMode)));
       return;
     }
 
@@ -763,12 +869,33 @@ function writeJson(response: import("node:http").ServerResponse, status: number,
   response.end(JSON.stringify(body));
 }
 
+function parseOptionalPositiveInteger(value: string | null): number | null {
+  if (value == null || value.trim() === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+  return Math.floor(parsed);
+}
+
+function parseNullableBoolean(value: unknown, key: string): boolean | null {
+  if (value == null) {
+    return null;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`${key} must be boolean or null`);
+  }
+  return value;
+}
+
 function writeArtwork(
   response: import("node:http").ServerResponse,
   artwork: { data: Buffer; mimeType: string } | null
 ): void {
   if (!artwork) {
-    response.writeHead(404, { "content-type": "text/plain", "cache-control": "public, max-age=300" });
+    response.writeHead(404, { "content-type": "text/plain", "cache-control": "public, max-age=30" });
     response.end("no artwork");
     return;
   }

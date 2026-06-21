@@ -102,7 +102,7 @@ This file tracks implementation against `PLAN.md`. It is the working delivery mo
 
 ## Visual / Player Roadmap (not yet started)
 
-- [ ] Audio visualizers in the player (spectrum/waveform). Constraint: mpv plays audio out-of-process, so the renderer has no sample stream to analyze. Candidate approaches: route playback through the renderer's Web Audio for analysis, or have mpv render a lavfi visualization (`avectorscope`/`showspectrum`) into a window/stream the shell can embed. Needs a design decision before implementation; the animated EQ glyph in the player bar is a placeholder, not a real visualizer.
+- [x] Audio visualizer foundation with mpv retained as the playback engine: separate `/playback/visualizer/stream` SSE channel, `/playback/waveform/:fileId` cached waveform endpoint, `/playback/visualizer/capabilities`, canvas-based renderer surfaces, bottom-player waveform/meter, Now Playing waveform/spectrum/spectrogram modes, optional ffmpeg-backed waveform cache, and optional ffmpeg sidecar analyzer for live meter/spectrum/spectrogram frames. Visualizer frames are kept out of `/playback/state` and out of React per-frame state; stream frames use playback snapshots instead of polling mpv IPC at visualizer cadence.
 - [ ] Album art correction workflow (choose/replace art, persist overrides through operation batches) per PLAN.md "Album art display and correction later".
 - [ ] Optional on-disk artwork cache so Cover Art Archive lookups survive backend restarts.
 

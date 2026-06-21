@@ -63,6 +63,50 @@ export type DiscoveryLibraryMatch = {
   remoteQualityLabel: string | null;
 };
 
+export type IndexedDiscoveryLibraryFile = {
+  file: DiscoveryLibraryFile;
+  album: string;
+  title: string;
+  artist: string;
+  filename: string;
+};
+
+export type DiscoveryLibraryIndex = {
+  files: IndexedDiscoveryLibraryFile[];
+  albums: Map<string, IndexedDiscoveryLibraryFile[]>;
+  titles: Map<string, IndexedDiscoveryLibraryFile[]>;
+  filenameTokens: Map<string, IndexedDiscoveryLibraryFile[]>;
+};
+
+export function createDiscoveryLibraryIndex(libraryFiles: DiscoveryLibraryFile[]): DiscoveryLibraryIndex {
+  const files: IndexedDiscoveryLibraryFile[] = [];
+  const albums = new Map<string, IndexedDiscoveryLibraryFile[]>();
+  const titles = new Map<string, IndexedDiscoveryLibraryFile[]>();
+  const filenameTokens = new Map<string, IndexedDiscoveryLibraryFile[]>();
+
+  for (const file of libraryFiles) {
+    if (file.missing || file.staged) {
+      continue;
+    }
+    const tags = file.displayTags;
+    const indexed = {
+      file,
+      album: normalizeIdentity(tags.album ?? ""),
+      title: normalizeIdentity(tags.title ?? stripExtension(file.filename)),
+      artist: normalizeIdentity(tags.albumartist ?? tags.artist ?? ""),
+      filename: normalizeIdentity(file.filename)
+    };
+    files.push(indexed);
+    addIndexedLibraryFile(albums, indexed.album, indexed);
+    addIndexedLibraryFile(titles, indexed.title, indexed);
+    for (const token of identityTokens(indexed.filename)) {
+      addIndexedLibraryFile(filenameTokens, token, indexed);
+    }
+  }
+
+  return { files, albums, titles, filenameTokens };
+}
+
 export function filterDiscoveryGroups(
   groups: DiscoveryGroup[],
   formatFilter: DiscoveryFormatFilter,
@@ -90,7 +134,12 @@ export function clusterDiscoveryGroups(groups: DiscoveryGroup[]): DiscoveryClust
   const clusters = new Map<string, DiscoveryGroup[]>();
   for (const group of groups) {
     const key = discoveryClusterKey(group);
-    clusters.set(key, [...(clusters.get(key) ?? []), group]);
+    const cluster = clusters.get(key);
+    if (cluster) {
+      cluster.push(group);
+    } else {
+      clusters.set(key, [group]);
+    }
   }
 
   return [...clusters.entries()]
@@ -134,8 +183,9 @@ export function filterDiscoveryGroupsByLibrary(
     return groups;
   }
 
+  const libraryIndex = createDiscoveryLibraryIndex(libraryFiles);
   return groups.filter((group) => {
-    const match = summarizeDiscoveryLibraryMatch(group, libraryFiles);
+    const match = summarizeDiscoveryLibraryMatch(group, libraryIndex);
     if (libraryFilter === "actionable") {
       return match.status !== "already_owned";
     }
@@ -146,11 +196,12 @@ export function filterDiscoveryGroupsByLibrary(
   });
 }
 
-export function summarizeDiscoveryLibraryMatch(group: DiscoveryGroup, libraryFiles: DiscoveryLibraryFile[]): DiscoveryLibraryMatch {
-  const activeFiles = libraryFiles.filter((file) => !file.missing && !file.staged);
+export function summarizeDiscoveryLibraryMatch(group: DiscoveryGroup, library: DiscoveryLibraryFile[] | DiscoveryLibraryIndex): DiscoveryLibraryMatch {
+  const libraryIndex = Array.isArray(library) ? createDiscoveryLibraryIndex(library) : library;
   const releaseTitle = normalizeIdentity(group.releaseTitle);
   const releaseArtist = group.releaseArtist ? normalizeIdentity(group.releaseArtist) : null;
-  const matchedFiles = activeFiles.filter((file) => isLibraryReleaseMatch(file, releaseTitle, releaseArtist, group));
+  const groupTrackTitles = new Set(group.files.map((result) => normalizeIdentity(stripTrackPrefix(stripExtension(result.filename)))));
+  const matchedFiles = getDiscoveryLibraryMatchFiles(libraryIndex, releaseTitle, releaseArtist, group, groupTrackTitles);
   const remoteQuality = getRemoteQuality(group);
 
   if (matchedFiles.length === 0) {
@@ -178,12 +229,102 @@ export function summarizeDiscoveryLibraryMatch(group: DiscoveryGroup, libraryFil
   };
 }
 
+function getDiscoveryLibraryMatchFiles(
+  libraryIndex: DiscoveryLibraryIndex,
+  releaseTitle: string,
+  releaseArtist: string | null,
+  group: DiscoveryGroup,
+  groupTrackTitles: Set<string>
+): DiscoveryLibraryFile[] {
+  const candidates = new Set<IndexedDiscoveryLibraryFile>();
+  addCandidateMatches(candidates, libraryIndex.albums, releaseTitle);
+  if (group.files.length === 1) {
+    for (const title of groupTrackTitles) {
+      addCandidateMatches(candidates, libraryIndex.titles, title);
+    }
+  }
+
+  const matchedFiles: DiscoveryLibraryFile[] = [];
+  for (const indexed of candidates) {
+    if (isIndexedLibraryReleaseMatch(indexed, releaseTitle, releaseArtist, group, groupTrackTitles)) {
+      matchedFiles.push(indexed.file);
+    }
+  }
+
+  if (matchedFiles.length === 0) {
+    for (const indexed of getFilenameFallbackCandidates(libraryIndex, releaseTitle, releaseArtist)) {
+      if (isFilenameFallbackMatch(indexed, releaseTitle, releaseArtist)) {
+        matchedFiles.push(indexed.file);
+      }
+    }
+  }
+
+  return matchedFiles;
+}
+
+function addIndexedLibraryFile(
+  index: Map<string, IndexedDiscoveryLibraryFile[]>,
+  key: string,
+  file: IndexedDiscoveryLibraryFile
+): void {
+  if (!key) {
+    return;
+  }
+  const files = index.get(key);
+  if (files) {
+    files.push(file);
+  } else {
+    index.set(key, [file]);
+  }
+}
+
+function addCandidateMatches(
+  candidates: Set<IndexedDiscoveryLibraryFile>,
+  index: Map<string, IndexedDiscoveryLibraryFile[]>,
+  identity: string
+): void {
+  if (!identity) {
+    return;
+  }
+  for (const [key, files] of index) {
+    if (identitiesMatch(key, identity)) {
+      for (const file of files) {
+        candidates.add(file);
+      }
+    }
+  }
+}
+
+function getFilenameFallbackCandidates(
+  libraryIndex: DiscoveryLibraryIndex,
+  releaseTitle: string,
+  releaseArtist: string | null
+): IndexedDiscoveryLibraryFile[] {
+  const tokens = [...identityTokens(releaseTitle), ...identityTokens(releaseArtist ?? "")];
+  let best: IndexedDiscoveryLibraryFile[] | null = null;
+  for (const token of tokens) {
+    const files = libraryIndex.filenameTokens.get(token);
+    if (!files) {
+      continue;
+    }
+    if (!best || files.length < best.length) {
+      best = files;
+    }
+  }
+  return best ?? [];
+}
+
 export function groupDiscoveryResults(results: DiscoveryResult[], query = ""): DiscoveryGroup[] {
   const groups = new Map<string, DiscoveryResult[]>();
 
   for (const result of results) {
     const key = `${result.username ?? "unknown"}\u0000${result.folder ?? "single files"}`;
-    groups.set(key, [...(groups.get(key) ?? []), result]);
+    const group = groups.get(key);
+    if (group) {
+      group.push(result);
+    } else {
+      groups.set(key, [result]);
+    }
   }
 
   return [...groups.entries()]
@@ -482,28 +623,30 @@ function getPrimaryFormat(files: DiscoveryResult[]): string | null {
   return mostCommon(files.map((file) => file.extension?.toUpperCase()).filter((value): value is string => Boolean(value)));
 }
 
-function isLibraryReleaseMatch(
-  file: DiscoveryLibraryFile,
+function isIndexedLibraryReleaseMatch(
+  file: IndexedDiscoveryLibraryFile,
   releaseTitle: string,
   releaseArtist: string | null,
-  group: DiscoveryGroup
+  group: DiscoveryGroup,
+  groupTrackTitles: Set<string>
 ): boolean {
-  const tags = file.displayTags;
-  const album = normalizeIdentity(tags.album ?? "");
-  const title = normalizeIdentity(tags.title ?? stripExtension(file.filename));
-  const artist = normalizeIdentity(tags.albumartist ?? tags.artist ?? "");
-  const filename = normalizeIdentity(file.filename);
-  const groupTrackTitles = new Set(group.files.map((result) => normalizeIdentity(stripTrackPrefix(stripExtension(result.filename)))));
-
-  if (releaseTitle && album && identitiesMatch(album, releaseTitle)) {
-    return !releaseArtist || !artist || identitiesMatch(artist, releaseArtist);
+  if (releaseTitle && file.album && identitiesMatch(file.album, releaseTitle)) {
+    return !releaseArtist || !file.artist || identitiesMatch(file.artist, releaseArtist);
   }
 
-  if (group.files.length === 1 && groupTrackTitles.has(title)) {
-    return !releaseArtist || !artist || identitiesMatch(artist, releaseArtist) || filename.includes(releaseArtist);
+  if (group.files.length === 1 && groupTrackTitles.has(file.title)) {
+    return !releaseArtist || !file.artist || identitiesMatch(file.artist, releaseArtist) || file.filename.includes(releaseArtist);
   }
 
-  return Boolean(releaseTitle && filename.includes(releaseTitle) && (!releaseArtist || filename.includes(releaseArtist)));
+  return isFilenameFallbackMatch(file, releaseTitle, releaseArtist);
+}
+
+function isFilenameFallbackMatch(
+  file: IndexedDiscoveryLibraryFile,
+  releaseTitle: string,
+  releaseArtist: string | null
+): boolean {
+  return Boolean(releaseTitle && file.filename.includes(releaseTitle) && (!releaseArtist || file.filename.includes(releaseArtist)));
 }
 
 function identitiesMatch(a: string, b: string): boolean {
@@ -540,6 +683,17 @@ function getLocalQuality(files: DiscoveryLibraryFile[]): { score: number; label:
 function normalizeIdentity(value: string): string {
   return normalizeSearchText(cleanReleaseText(value));
 }
+
+function identityTokens(value: string): Set<string> {
+  return new Set(
+    value
+      .split(" ")
+      .map((token) => token.trim())
+      .filter((token) => token.length > 2 && !COMMON_IDENTITY_TOKENS.has(token))
+  );
+}
+
+const COMMON_IDENTITY_TOKENS = new Set(["the", "and", "with", "feat", "ft", "vol", "disc", "disk", "cd"]);
 
 function mostCommon(values: string[]): string | null {
   const counts = new Map<string, number>();
