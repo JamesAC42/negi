@@ -11436,9 +11436,14 @@ function VisualizerPanel({
         <div className="spectrogramFloor">
           <div className="visualizerLabel">
             <strong>Spectrogram</strong>
-            <span>-42 dB</span>
-            <span>-12 dB</span>
             <span>{spectrogramAvailable ? "Live" : "Cached"}</span>
+          </div>
+          <div className="spectrogramKey" aria-hidden="true">
+            <span>-60 dB</span>
+            <i />
+            <span>-36</span>
+            <span>-18</span>
+            <span>0 dB</span>
           </div>
           <SpectrogramCanvas className="spectrogramCanvas" fileId={playback.currentFileId} frameRef={frameRef} />
         </div>
@@ -11521,9 +11526,9 @@ function drawSpectrogramColumn(canvas: HTMLCanvasElement, bins: number[]): void 
   context.putImageData(image, 0, 0);
   context.clearRect(canvas.width - columnWidth, 0, columnWidth, canvas.height);
   for (let y = 0; y < canvas.height; y += 1) {
-    const bin = Math.max(0.025, bins[Math.floor((1 - y / Math.max(1, canvas.height - 1)) * (bins.length - 1))] ?? 0);
-    const color = mixRgb(colors.bg, colors.accent, Math.min(1, Math.pow(bin, 0.72) * 1.15));
-    context.fillStyle = rgba(color, 0.94);
+    const bin = Math.max(0, bins[Math.floor((1 - y / Math.max(1, canvas.height - 1)) * (bins.length - 1))] ?? 0);
+    const color = getSpectrogramColor(colors, Math.min(1, Math.pow(bin, 0.68) * 1.18));
+    context.fillStyle = rgba(color, 0.96);
     context.fillRect(canvas.width - columnWidth, y, columnWidth, 1);
   }
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -11602,6 +11607,30 @@ function mixRgb(left: RgbColor, right: RgbColor, amount: number): RgbColor {
     g: Math.round(left.g + (right.g - left.g) * clamped),
     b: Math.round(left.b + (right.b - left.b) * clamped)
   };
+}
+
+function getSpectrogramColor(colors: { accent: RgbColor; accentInk: RgbColor; bg: RgbColor }, value: number): RgbColor {
+  const accentShadow = mixRgb(colors.bg, colors.accent, 0.22);
+  const accentMid = mixRgb(colors.bg, colors.accent, 0.68);
+  const accentHot = mixRgb(colors.accent, { r: 255, g: 226, b: 95 }, 0.44);
+  const whiteHot = mixRgb(accentHot, { r: 255, g: 255, b: 240 }, 0.58);
+  const stops: Array<{ at: number; color: RgbColor }> = [
+    { at: 0, color: mixRgb(colors.bg, colors.accentInk, 0.3) },
+    { at: 0.2, color: accentShadow },
+    { at: 0.42, color: mixRgb(accentShadow, { r: 28, g: 164, b: 190 }, 0.46) },
+    { at: 0.66, color: accentMid },
+    { at: 0.84, color: accentHot },
+    { at: 1, color: whiteHot }
+  ];
+  const clamped = Math.max(0, Math.min(1, value));
+  for (let index = 1; index < stops.length; index += 1) {
+    const previous = stops[index - 1]!;
+    const next = stops[index]!;
+    if (clamped <= next.at) {
+      return mixRgb(previous.color, next.color, (clamped - previous.at) / Math.max(0.001, next.at - previous.at));
+    }
+  }
+  return stops[stops.length - 1]!.color;
 }
 
 function rgba(color: RgbColor, alpha: number): string {
