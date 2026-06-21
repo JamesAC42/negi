@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   CSSProperties,
@@ -8603,6 +8603,30 @@ function NowPlayingModal({
   const displayArtist = currentFile?.displayTags.artist ?? currentFile?.displayTags.albumartist ?? "Unknown Artist";
   const displayAlbum = currentFile?.displayTags.album ?? "Unknown Album";
   const albumTarget = currentFile ? getFileAlbumTarget(currentFile) : null;
+  const queueFileIdsRef = useRef(playback.queue);
+  const onPlayFileRef = useRef(onPlayFile);
+  useEffect(() => {
+    queueFileIdsRef.current = playback.queue;
+    onPlayFileRef.current = onPlayFile;
+  }, [onPlayFile, playback.queue]);
+  const onQueueRowPlay = useMemo(
+    () => (fileId: string) => {
+      void onPlayFileRef.current(fileId, queueFileIdsRef.current);
+    },
+    []
+  );
+  const queueRows = useMemo(
+    () => queueFiles.map((file, index) => (
+      <NowPlayingQueueRow
+        active={file.id === playback.currentFileId}
+        file={file}
+        index={index}
+        key={`${file.id}-${index}`}
+        onPlayFile={onQueueRowPlay}
+      />
+    )),
+    [onQueueRowPlay, playback.currentFileId, queueFiles]
+  );
 
   return (
     <div className="modalBackdrop" role="presentation" onMouseDown={onClose}>
@@ -8717,35 +8741,43 @@ function NowPlayingModal({
             </div>
           </header>
           <div className="queueRows">
-            {queueFiles.length === 0 ? (
-              <div className="emptyState">No queued songs.</div>
-            ) : (
-              queueFiles.map((file, index) => (
-                <button
-                  className={file.id === playback.currentFileId ? "queueRow active" : "queueRow"}
-                  key={`${file.id}-${index}`}
-                  type="button"
-                  onClick={() => void onPlayFile(file.id, playback.queue)}
-                >
-                  <span>{index + 1}</span>
-                  <Artwork className="queueArt" src={artworkFileUrl(file.id)} />
-                  <span>
-                    <strong>{file.displayTags.title ?? file.filename}</strong>
-                    {file.id === playback.currentFileId ? <MiniTrackWaveform playback={playback} waveform={waveformState.waveform} /> : null}
-                    <small>
-                      {file.displayTags.artist ?? file.displayTags.albumartist ?? "Unknown Artist"} · {file.displayTags.album ?? "Unknown Album"}
-                    </small>
-                  </span>
-                  <small>{file.durationMs == null ? "-" : formatTime(file.durationMs)}</small>
-                </button>
-              ))
-            )}
+            {queueFiles.length === 0 ? <div className="emptyState">No queued songs.</div> : queueRows}
           </div>
         </aside>
       </section>
     </div>
   );
 }
+
+const NowPlayingQueueRow = memo(function NowPlayingQueueRow({
+  active,
+  file,
+  index,
+  onPlayFile
+}: {
+  active: boolean;
+  file: LibraryFile;
+  index: number;
+  onPlayFile(fileId: string): void;
+}): ReactElement {
+  return (
+    <button
+      className={active ? "queueRow active" : "queueRow"}
+      type="button"
+      onClick={() => onPlayFile(file.id)}
+    >
+      <span>{index + 1}</span>
+      <Artwork className="queueArt" src={artworkFileUrl(file.id)} />
+      <span>
+        <strong>{file.displayTags.title ?? file.filename}</strong>
+        <small>
+          {file.displayTags.artist ?? file.displayTags.albumartist ?? "Unknown Artist"} - {file.displayTags.album ?? "Unknown Album"}
+        </small>
+      </span>
+      <small>{file.durationMs == null ? "-" : formatTime(file.durationMs)}</small>
+    </button>
+  );
+});
 
 function AlbumDetailView({
   album,
