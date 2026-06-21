@@ -7251,8 +7251,8 @@ img.playerArt {
   display: grid;
   place-items: center;
   background:
-    linear-gradient(90deg, rgb(5 6 8 / 42%), rgb(5 6 8 / 86%) 13%, rgb(5 6 8 / 84%) 87%, rgb(5 6 8 / 42%)),
-    rgb(5 6 8 / 62%);
+    linear-gradient(90deg, rgb(5 6 8 / 18%), rgb(5 6 8 / 74%) 14%, rgb(5 6 8 / 74%) 86%, rgb(5 6 8 / 18%)),
+    rgb(5 6 8 / 42%);
   padding: 0.75rem;
   animation: fadeIn var(--fast) both;
 }
@@ -7271,9 +7271,9 @@ img.playerArt {
   border: 0.0625rem solid rgb(104 127 151 / 28%);
   border-radius: var(--r-m);
   background:
-    linear-gradient(90deg, rgb(7 10 13 / 0%), rgb(7 10 13 / 52%) 7%, rgb(7 10 13 / 97%) 18%, rgb(9 13 18 / 98%) 76%, rgb(7 10 13 / 58%) 91%, rgb(7 10 13 / 8%)),
+    linear-gradient(90deg, rgb(7 10 13 / 0%), rgb(7 10 13 / 42%) 7%, rgb(7 10 13 / 96%) 18%, rgb(9 13 18 / 96%) 76%, rgb(7 10 13 / 50%) 91%, rgb(7 10 13 / 0%)),
     radial-gradient(circle at 34% 38%, rgb(183 255 44 / 8%), transparent 32%),
-    rgb(5 7 10 / 38%);
+    rgb(5 7 10 / 12%);
   box-shadow: 0 1.5rem 6rem rgb(0 0 0 / 58%);
   animation: modalIn var(--med) both;
 }
@@ -7284,7 +7284,7 @@ img.playerArt {
   inset: 0;
   z-index: -2;
   background:
-    linear-gradient(90deg, rgb(8 11 15 / 0%), rgb(8 11 15 / 36%) 8%, rgb(8 11 15 / 96%) 19%, rgb(8 11 15 / 98%) 76%, rgb(8 11 15 / 34%) 92%, rgb(8 11 15 / 0%)),
+    linear-gradient(90deg, rgb(8 11 15 / 0%), rgb(8 11 15 / 20%) 7%, rgb(8 11 15 / 92%) 18%, rgb(8 11 15 / 94%) 78%, rgb(8 11 15 / 18%) 93%, rgb(8 11 15 / 0%)),
     repeating-linear-gradient(90deg, rgb(139 164 190 / 7%) 0 0.0625rem, transparent 0.0625rem 5rem),
     repeating-linear-gradient(0deg, rgb(139 164 190 / 5%) 0 0.0625rem, transparent 0.0625rem 4rem);
 }
@@ -7296,7 +7296,7 @@ img.playerArt {
   z-index: -1;
   pointer-events: none;
   background:
-    linear-gradient(90deg, rgb(0 0 0 / 0%), rgb(0 0 0 / 28%) 9%, rgb(0 0 0 / 42%) 19%, rgb(0 0 0 / 32%) 78%, rgb(0 0 0 / 8%) 92%, rgb(0 0 0 / 0%)),
+    linear-gradient(90deg, rgb(0 0 0 / 0%), rgb(0 0 0 / 18%) 9%, rgb(0 0 0 / 38%) 19%, rgb(0 0 0 / 28%) 78%, rgb(0 0 0 / 0%) 94%),
     linear-gradient(0deg, rgb(5 7 10 / 82%), transparent 42%);
 }
 
@@ -7341,38 +7341,10 @@ img.playerArt {
 .overlayTopbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: end;
   gap: 1rem;
   min-width: 0;
   padding-right: clamp(0.25rem, 1vw, 0.875rem);
-}
-
-.overlayTopbar > div {
-  display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-  min-width: 0;
-}
-
-.overlayTopbar span,
-.overlayTopbar strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.overlayTopbar span {
-  color: var(--tx2);
-  font-size: 0.6875rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.overlayTopbar strong {
-  color: var(--acc);
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
 }
 
 .nowPlayingFocus {
@@ -7381,13 +7353,14 @@ img.playerArt {
   align-self: center;
   display: grid;
   grid-template-columns: minmax(14rem, 24rem) minmax(18rem, 27rem);
+  grid-template-rows: auto auto;
   align-items: center;
   gap: clamp(1rem, 3vw, 2rem);
   min-width: 0;
   min-height: 0;
   width: min(100%, 56rem);
   margin: 0 auto;
-  padding: 1rem clamp(0.5rem, 1.8vw, 1.25rem) min(32vh, 18rem);
+  padding: 1rem clamp(0.5rem, 1.8vw, 1.25rem) min(28vh, 16rem);
 }
 
 .nowPlayingArtShell {
@@ -7439,7 +7412,7 @@ img.playerArt {
 
 .nowPlayingModalInfo {
   display: grid;
-  align-content: center;
+  align-content: start;
   gap: 0.45rem;
   min-width: 0;
   min-height: 0;
@@ -7451,6 +7424,15 @@ img.playerArt {
     linear-gradient(135deg, rgb(13 18 24 / 90%), rgb(10 14 19 / 72%)),
     rgb(10 14 19 / 84%);
   box-shadow: 0 1rem 3rem rgb(0 0 0 / 26%);
+}
+
+.nowPlayingRightColumn {
+  display: grid;
+  align-self: stretch;
+  grid-template-rows: auto minmax(5rem, 1fr);
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: 0;
 }
 
 .nowPlayingModalInfo > span {
@@ -7521,8 +7503,7 @@ img.playerArt {
   inset: 0;
   z-index: 1;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 0.75rem;
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   border: 0;
@@ -7530,59 +7511,6 @@ img.playerArt {
   background: transparent;
   padding: clamp(1rem, 2vw, 1.625rem);
   pointer-events: none;
-}
-
-.visualizerToolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  min-width: 0;
-  color: var(--tx2);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  pointer-events: auto;
-}
-
-.visualizerToolbar > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.visualizerModes {
-  display: inline-flex;
-  flex: none;
-  overflow: hidden;
-  border: 0.0625rem solid var(--line);
-  border-radius: var(--r-s);
-}
-
-.visualizerModes button {
-  min-height: 1.5rem;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  color: var(--tx1);
-  font-size: 0.625rem;
-  padding: 0 0.5rem;
-}
-
-.visualizerModes button + button {
-  border-left: 0.0625rem solid var(--line);
-}
-
-.visualizerModes button.active {
-  background: var(--acc);
-  color: var(--acc-ink);
-}
-
-.visualizerModes button:disabled {
-  color: var(--tx2);
-  opacity: 0.55;
 }
 
 .visualizerStage {
@@ -7604,7 +7532,6 @@ img.playerArt {
 }
 
 .waveformRibbon,
-.spectrumField,
 .spectrogramFloor,
 .meterRail {
   position: absolute;
@@ -7614,34 +7541,12 @@ img.playerArt {
 }
 
 .waveformRibbon {
-  top: clamp(2.75rem, 7vh, 4.75rem);
+  top: clamp(3rem, 7vh, 4.75rem);
   left: clamp(4rem, 12vw, 11rem);
   right: clamp(2rem, 4vw, 4rem);
   height: clamp(3rem, 7vh, 4.75rem);
   border-radius: var(--r-s);
   opacity: 0.82;
-}
-
-.waveformRibbon > span {
-  position: absolute;
-  top: 0.375rem;
-  left: 0.5rem;
-  z-index: 3;
-  color: var(--tx2);
-  font-size: 0.625rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.spectrumField {
-  left: clamp(4.5rem, 12vw, 12rem);
-  right: clamp(2rem, 4vw, 4rem);
-  bottom: clamp(10rem, 26vh, 18rem);
-  height: clamp(8rem, 24vh, 16rem);
-  border-color: transparent;
-  background: linear-gradient(0deg, rgb(7 10 13 / 44%), rgb(7 10 13 / 4%));
-  mask-image: linear-gradient(90deg, transparent, black 12%, black 88%, transparent);
 }
 
 .spectrogramFloor {
@@ -7714,6 +7619,16 @@ img.playerArt {
   text-transform: uppercase;
 }
 
+.focusSpectrum {
+  position: relative;
+  min-width: 0;
+  min-height: 5rem;
+  overflow: hidden;
+  border: 0.0625rem solid rgb(104 127 151 / 18%);
+  border-radius: var(--r-s);
+  background: linear-gradient(0deg, rgb(7 10 13 / 72%), rgb(7 10 13 / 34%));
+}
+
 .visualizerLabel strong {
   color: var(--acc);
 }
@@ -7762,7 +7677,8 @@ img.playerArt {
 .spectrumCanvas,
 .spectrogramCanvas,
 .heroWaveformCanvas,
-.meterRailCanvas {
+.meterRailCanvas,
+.focusSpectrumCanvas {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -7781,6 +7697,13 @@ img.playerArt {
   padding: 2rem 1rem 0.5rem;
   opacity: 0.84;
   filter: drop-shadow(0 0 0.625rem rgb(183 255 44 / 18%));
+}
+
+.focusSpectrumCanvas {
+  z-index: 1;
+  padding: 0.875rem 0.875rem 0.625rem;
+  opacity: 0.92;
+  filter: drop-shadow(0 0 0.625rem rgb(183 255 44 / 20%));
 }
 
 .spectrogramCanvas {
@@ -7803,8 +7726,17 @@ img.playerArt {
 .overlayControls {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.875rem;
-  margin-top: 0.75rem;
+}
+
+.overlayPlaybackControls {
+  display: grid;
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: min(38rem, 100%);
+  gap: 0.75rem;
+  margin-top: -0.25rem;
 }
 
 .nowPlayingQueue {
@@ -7819,8 +7751,8 @@ img.playerArt {
   border-left: 0.0625rem solid rgb(104 127 151 / 24%);
   border-radius: 0;
   background:
-    linear-gradient(90deg, rgb(8 12 17 / 86%), rgb(8 12 17 / 58%)),
-    rgb(8 12 17 / 70%);
+    linear-gradient(90deg, rgb(8 12 17 / 94%), rgb(8 12 17 / 88%) 82%, rgb(8 12 17 / 68%)),
+    rgb(8 12 17 / 76%);
   padding: clamp(1rem, 2vw, 1.625rem) clamp(1rem, 1.6vw, 1.375rem);
   backdrop-filter: blur(0.5rem);
 }
@@ -8250,8 +8182,7 @@ img.playerArt {
     right: clamp(2rem, 4vw, 4rem);
   }
 
-  .waveformRibbon,
-  .spectrumField {
+  .waveformRibbon {
     right: clamp(2rem, 4vw, 4rem);
   }
 }
@@ -8461,12 +8392,6 @@ img.playerArt {
   .waveformRibbon {
     left: 1rem;
     right: 1rem;
-  }
-
-  .spectrumField {
-    left: 1rem;
-    right: 1rem;
-    bottom: 11rem;
   }
 
   .spectrogramFloor {
