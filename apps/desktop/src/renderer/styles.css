@@ -7330,12 +7330,12 @@ img.playerArt {
   position: relative;
   z-index: 2;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto clamp(5.75rem, 10vh, 7rem) auto minmax(10rem, 1fr);
   gap: clamp(0.75rem, 1.2vw, 1rem);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  padding: clamp(1rem, 2vw, 1.625rem) clamp(7rem, 9vw, 9.5rem) clamp(1rem, 2vw, 1.625rem);
+  padding: clamp(1rem, 2vw, 1.625rem) clamp(8rem, 11vw, 11rem) clamp(1rem, 2vw, 1.625rem);
 }
 
 .overlayTopbar {
@@ -7350,17 +7350,18 @@ img.playerArt {
 .nowPlayingFocus {
   position: relative;
   z-index: 3;
-  align-self: center;
+  grid-row: 3;
+  align-self: start;
   display: grid;
-  grid-template-columns: minmax(13rem, 20rem) minmax(24rem, 34rem);
+  grid-template-columns: minmax(12rem, 18rem) minmax(22rem, 31rem);
   grid-template-rows: auto auto;
   align-items: center;
   gap: clamp(1rem, 3vw, 2rem);
   min-width: 0;
   min-height: 0;
-  width: min(100%, 58rem);
+  width: min(100%, 50rem);
   margin: 0 auto;
-  padding: 1rem clamp(0.5rem, 1.8vw, 1.25rem) min(28vh, 16rem);
+  padding: 0 clamp(0.5rem, 1.8vw, 1.25rem) clamp(1rem, 2vh, 1.75rem);
 }
 
 .nowPlayingArtShell {
@@ -7531,10 +7532,10 @@ img.playerArt {
 }
 
 .waveformRibbon {
-  top: clamp(3rem, 7vh, 4.75rem);
-  left: clamp(7rem, 10vw, 9.5rem);
-  right: clamp(7rem, 10vw, 9.5rem);
-  height: clamp(3rem, 7vh, 4.75rem);
+  top: clamp(3.5rem, 6vh, 4.25rem);
+  left: clamp(8rem, 11vw, 11rem);
+  right: clamp(8rem, 11vw, 11rem);
+  height: clamp(3rem, 6vh, 4rem);
   border-radius: var(--r-s);
   opacity: 1;
   background:
@@ -7550,11 +7551,10 @@ img.playerArt {
   background:
     linear-gradient(180deg, rgb(5 8 11 / 26%), rgb(5 8 11 / 84%)),
     rgb(5 8 11 / 62%);
-  mask-image: linear-gradient(90deg, transparent, black 9%, black 87%, transparent);
 }
 
 .meterRail {
-  top: clamp(7rem, 17vh, 10rem);
+  top: clamp(9.75rem, 20vh, 12.5rem);
   bottom: clamp(10rem, 26vh, 18rem);
   width: clamp(5rem, 6vw, 6.25rem);
   border-radius: var(--r-s);
@@ -8215,8 +8215,8 @@ img.playerArt {
   }
 
   .nowPlayingFocus {
-    grid-template-columns: minmax(12rem, 16rem) minmax(22rem, 1fr);
-    width: min(100%, 52rem);
+    grid-template-columns: minmax(10rem, 14rem) minmax(18rem, 1fr);
+    width: min(100%, 42rem);
   }
 
   .meterRail.right {
@@ -8224,8 +8224,8 @@ img.playerArt {
   }
 
   .waveformRibbon {
-    left: clamp(6.5rem, 10vw, 9rem);
-    right: clamp(6.5rem, 10vw, 9rem);
+    left: clamp(8rem, 11vw, 10rem);
+    right: clamp(8rem, 11vw, 10rem);
     width: auto;
   }
 }
