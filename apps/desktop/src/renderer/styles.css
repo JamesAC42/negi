@@ -1094,6 +1094,25 @@ h2 {
   width: min(9rem, 100%);
 }
 
+.homeNowSpectrum {
+  position: relative;
+  width: min(14rem, 100%);
+  height: 2.75rem;
+  margin-top: 0.25rem;
+  overflow: hidden;
+  border: 0.0625rem solid color-mix(in srgb, var(--acc) 20%, var(--line));
+  border-radius: var(--r-s);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--acc) 9%, transparent), rgb(5 8 11 / 44%)),
+    rgb(5 8 11 / 58%);
+  box-shadow: inset 0 -0.75rem 1.75rem rgb(0 0 0 / 22%);
+}
+
+.homeNowSpectrumCanvas {
+  opacity: 0.95;
+  mix-blend-mode: screen;
+}
+
 .homeNowBody strong,
 .homeAlbumCard strong,
 .homeArtistRow strong,
@@ -7699,6 +7718,7 @@ img.playerArt {
 .spectrogramCanvas,
 .heroWaveformCanvas,
 .meterRailCanvas,
+.homeNowSpectrumCanvas,
 .focusSpectrumCanvas {
   position: absolute;
   inset: 0;

@@ -2568,6 +2568,7 @@ export function App(): ReactElement {
             playback={playback}
             playbackBusy={playbackBusy}
             playlists={playlists}
+            visualizerFrameRef={barVisualizer.frameRef}
             onOpenAlbum={openAlbumDetailPage}
             onOpenArtistPage={openArtistPage}
             onPlayAlbum={handlePlayAlbum}
@@ -7577,6 +7578,7 @@ function HomeView({
   playback,
   playbackBusy,
   playlists,
+  visualizerFrameRef,
   onOpenAlbum,
   onOpenArtistPage,
   onPlayAlbum,
@@ -7589,6 +7591,7 @@ function HomeView({
   playback: PlaybackStateResponse;
   playbackBusy: boolean;
   playlists: Playlist[];
+  visualizerFrameRef: MutableRefObject<VisualizerFrameResponse | null>;
   onOpenAlbum(album: AlbumGroupItem): void;
   onOpenArtistPage(artist: string): void;
   onPlayAlbum(albumId: string): Promise<void>;
@@ -7686,6 +7689,14 @@ function HomeView({
               {nowPlayingArtist}
             </button>
             {playback.currentFileId ? <MiniTrackWaveform playback={playback} waveform={currentWaveform} /> : null}
+            <div className="homeNowSpectrum" aria-hidden="true">
+              <SpectrumCanvas
+                className="homeNowSpectrumCanvas"
+                frameRef={visualizerFrameRef}
+                mode="spectrum"
+                playing={playback.status === "playing"}
+              />
+            </div>
           </div>
         </div>
         <div className="homeNowMeta">
