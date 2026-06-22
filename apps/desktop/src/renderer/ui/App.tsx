@@ -3038,6 +3038,7 @@ export function App(): ReactElement {
 
       {nowPlayingOpen ? (
         <NowPlayingModal
+          appearanceMode={appearance.mode}
           files={playbackFiles}
           playback={playback}
           playbackBusy={playbackBusy}
@@ -3249,6 +3250,160 @@ function artworkFailedRecently(src: string): boolean {
   }
   failedArtworkSrcs.delete(src);
   return false;
+}
+
+type VisualizerPalette = { acc: string; accDim: string; accInk: string; accLine: string };
+
+const artworkVisualizerPaletteCache = new Map<string, VisualizerPalette | null>();
+
+function useArtworkVisualizerPalette(src: string | null, mode: AppearanceMode): VisualizerPalette | null {
+  const cacheKey = src ? `${mode}:${src}` : "";
+  const [palette, setPalette] = useState<VisualizerPalette | null>(() => (
+    cacheKey ? artworkVisualizerPaletteCache.get(cacheKey) ?? null : null
+  ));
+
+  useEffect(() => {
+    if (!src) {
+      setPalette(null);
+      return;
+    }
+    const cached = artworkVisualizerPaletteCache.get(cacheKey);
+    if (cached !== undefined) {
+      setPalette(cached);
+      return;
+    }
+
+    let cancelled = false;
+    setPalette(null);
+    void getArtworkObjectUrl(src)
+      .then((objectUrl) => extractArtworkVisualizerPalette(objectUrl, mode))
+      .then((nextPalette) => {
+        artworkVisualizerPaletteCache.set(cacheKey, nextPalette);
+        if (!cancelled) {
+          setPalette(nextPalette);
+        }
+      })
+      .catch(() => {
+        artworkVisualizerPaletteCache.set(cacheKey, null);
+        if (!cancelled) {
+          setPalette(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheKey, mode, src]);
+
+  return palette;
+}
+
+async function extractArtworkVisualizerPalette(src: string, mode: AppearanceMode): Promise<VisualizerPalette | null> {
+  const image = new Image();
+  image.decoding = "async";
+  const loadPromise = new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("Artwork image failed to load"));
+  });
+  image.src = src;
+  try {
+    await image.decode();
+  } catch {
+    await loadPromise;
+  }
+  if (!image.naturalWidth || !image.naturalHeight) {
+    return null;
+  }
+
+  const canvas = document.createElement("canvas");
+  const size = 32;
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    return null;
+  }
+  context.drawImage(image, 0, 0, size, size);
+  const pixels = context.getImageData(0, 0, size, size).data;
+  const buckets = new Map<string, { count: number; r: number; g: number; b: number; saturation: number; lightness: number }>();
+
+  for (let index = 0; index < pixels.length; index += 4) {
+    const alpha = pixels[index + 3] ?? 255;
+    if (alpha < 160) {
+      continue;
+    }
+    const color = {
+      r: pixels[index] ?? 0,
+      g: pixels[index + 1] ?? 0,
+      b: pixels[index + 2] ?? 0
+    };
+    const hsl = rgbToHsl(color);
+    if (hsl.s < 0.16 || hsl.l < 0.1 || hsl.l > 0.92) {
+      continue;
+    }
+    const key = `${Math.round(color.r / 24)}:${Math.round(color.g / 24)}:${Math.round(color.b / 24)}`;
+    const bucket = buckets.get(key);
+    if (bucket) {
+      bucket.count += 1;
+      bucket.r += color.r;
+      bucket.g += color.g;
+      bucket.b += color.b;
+      bucket.saturation += hsl.s;
+      bucket.lightness += hsl.l;
+    } else {
+      buckets.set(key, {
+        count: 1,
+        r: color.r,
+        g: color.g,
+        b: color.b,
+        saturation: hsl.s,
+        lightness: hsl.l
+      });
+    }
+  }
+
+  let best: RgbColor | null = null;
+  let bestScore = 0;
+  for (const bucket of buckets.values()) {
+    const color = {
+      r: bucket.r / bucket.count,
+      g: bucket.g / bucket.count,
+      b: bucket.b / bucket.count
+    };
+    const saturation = bucket.saturation / bucket.count;
+    const lightness = bucket.lightness / bucket.count;
+    const themeVisibility = mode === "dark" ? 1 - Math.abs(lightness - 0.58) : 1 - Math.abs(lightness - 0.36);
+    const score = Math.pow(bucket.count, 0.42) * (0.5 + saturation) * Math.max(0.35, themeVisibility);
+    if (score > bestScore) {
+      best = color;
+      bestScore = score;
+    }
+  }
+  if (!best) {
+    return null;
+  }
+
+  const accent = normalizeVisualizerAccent(best, mode);
+  const accentInk = mode === "dark"
+    ? mixRgb(accent, { r: 0, g: 0, b: 0 }, 0.78)
+    : mixRgb(accent, { r: 255, g: 255, b: 255 }, 0.86);
+  return {
+    acc: rgbToCss(accent),
+    accDim: rgba(accent, mode === "dark" ? 0.16 : 0.13),
+    accInk: rgbToCss(accentInk),
+    accLine: rgba(accent, mode === "dark" ? 0.46 : 0.38)
+  };
+}
+
+function normalizeVisualizerAccent(color: RgbColor, mode: AppearanceMode): RgbColor {
+  const hsl = rgbToHsl(color);
+  return hslToRgb({
+    h: hsl.h,
+    s: Math.max(mode === "dark" ? 0.62 : 0.5, Math.min(0.92, hsl.s * 1.18)),
+    l: mode === "dark"
+      ? Math.max(0.56, Math.min(0.72, hsl.l < 0.42 ? hsl.l + 0.24 : hsl.l))
+      : Math.max(0.28, Math.min(0.42, hsl.l > 0.5 ? hsl.l - 0.22 : hsl.l))
+  });
 }
 
 function ArtistHeroAlbumArtwork({
@@ -8571,6 +8726,7 @@ function SortSelect<T extends string>({
 }
 
 function NowPlayingModal({
+  appearanceMode,
   files,
   playback,
   playbackBusy,
@@ -8589,6 +8745,7 @@ function NowPlayingModal({
   visualizerFrameRef,
   waveformState
 }: {
+  appearanceMode: AppearanceMode;
   files: LibraryFile[];
   playback: PlaybackStateResponse;
   playbackBusy: boolean;
@@ -8617,6 +8774,19 @@ function NowPlayingModal({
   const displayArtist = currentFile?.displayTags.artist ?? currentFile?.displayTags.albumartist ?? "Unknown Artist";
   const displayAlbum = currentFile?.displayTags.album ?? "Unknown Album";
   const albumTarget = currentFile ? getFileAlbumTarget(currentFile) : null;
+  const artworkUrl = playback.currentFileId ? artworkFileUrl(playback.currentFileId) : null;
+  const visualizerPalette = useArtworkVisualizerPalette(artworkUrl, appearanceMode);
+  const visualizerStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!visualizerPalette) {
+      return undefined;
+    }
+    return {
+      "--acc": visualizerPalette.acc,
+      "--acc-ink": visualizerPalette.accInk,
+      "--acc-line": visualizerPalette.accLine,
+      "--acc-dim": visualizerPalette.accDim
+    } as CSSProperties;
+  }, [visualizerPalette]);
   const queueFileIdsRef = useRef(playback.queue);
   const onPlayFileRef = useRef(onPlayFile);
   useEffect(() => {
@@ -8649,6 +8819,7 @@ function NowPlayingModal({
         aria-modal="true"
         className="nowPlayingOverlay"
         role="dialog"
+        style={visualizerStyle}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="overlayEdgeReveal left" aria-hidden="true" />
@@ -8667,7 +8838,7 @@ function NowPlayingModal({
           <div className="nowPlayingFocus">
             <div className="nowPlayingArtShell">
               {playback.currentFileId ? (
-                <Artwork className="nowPlayingModalArt" src={artworkFileUrl(playback.currentFileId)} />
+                <Artwork className="nowPlayingModalArt" src={artworkUrl} />
               ) : (
                 <span className="nowPlayingModalArt placeholder">
                   <UiIcon name="album" />
@@ -11642,6 +11813,12 @@ interface RgbColor {
   b: number;
 }
 
+interface HslColor {
+  h: number;
+  s: number;
+  l: number;
+}
+
 function getCanvasThemeColors(canvas: HTMLCanvasElement): { accent: RgbColor; accentInk: RgbColor; bg: RgbColor } {
   const styles = getComputedStyle(canvas);
   return {
@@ -11690,6 +11867,67 @@ function mixRgb(left: RgbColor, right: RgbColor, amount: number): RgbColor {
   };
 }
 
+function rgbToHsl(color: RgbColor): HslColor {
+  const red = color.r / 255;
+  const green = color.g / 255;
+  const blue = color.b / 255;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const lightness = (max + min) / 2;
+  const delta = max - min;
+  if (delta === 0) {
+    return { h: 0, s: 0, l: lightness };
+  }
+  const saturation = delta / (1 - Math.abs(2 * lightness - 1));
+  let hue = 0;
+  if (max === red) {
+    hue = ((green - blue) / delta) % 6;
+  } else if (max === green) {
+    hue = (blue - red) / delta + 2;
+  } else {
+    hue = (red - green) / delta + 4;
+  }
+  return {
+    h: (hue * 60 + 360) % 360,
+    s: saturation,
+    l: lightness
+  };
+}
+
+function hslToRgb(color: HslColor): RgbColor {
+  const chroma = (1 - Math.abs(2 * color.l - 1)) * color.s;
+  const hue = color.h / 60;
+  const x = chroma * (1 - Math.abs((hue % 2) - 1));
+  const match = color.l - chroma / 2;
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  if (hue >= 0 && hue < 1) {
+    red = chroma;
+    green = x;
+  } else if (hue < 2) {
+    red = x;
+    green = chroma;
+  } else if (hue < 3) {
+    green = chroma;
+    blue = x;
+  } else if (hue < 4) {
+    green = x;
+    blue = chroma;
+  } else if (hue < 5) {
+    red = x;
+    blue = chroma;
+  } else {
+    red = chroma;
+    blue = x;
+  }
+  return {
+    r: clampColor((red + match) * 255),
+    g: clampColor((green + match) * 255),
+    b: clampColor((blue + match) * 255)
+  };
+}
+
 function getSpectrogramColor(colors: { accent: RgbColor; accentInk: RgbColor; bg: RgbColor }, value: number): RgbColor {
   const accentShadow = mixRgb(colors.bg, colors.accent, 0.22);
   const accentMid = mixRgb(colors.bg, colors.accent, 0.68);
@@ -11716,6 +11954,10 @@ function getSpectrogramColor(colors: { accent: RgbColor; accentInk: RgbColor; bg
 
 function rgba(color: RgbColor, alpha: number): string {
   return `rgb(${clampColor(color.r)} ${clampColor(color.g)} ${clampColor(color.b)} / ${Math.max(0, Math.min(1, alpha))})`;
+}
+
+function rgbToCss(color: RgbColor): string {
+  return `rgb(${clampColor(color.r)} ${clampColor(color.g)} ${clampColor(color.b)})`;
 }
 
 function clampColor(value: number): number {
