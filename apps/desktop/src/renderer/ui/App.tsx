@@ -8766,10 +8766,6 @@ function NowPlayingModal({
 }): ReactElement {
   const filesById = useMemo(() => new Map(files.map((file) => [file.id, file])), [files]);
   const currentFile = playback.currentFileId ? filesById.get(playback.currentFileId) ?? null : null;
-  const queueFiles = useMemo(
-    () => playback.queue.map((fileId) => filesById.get(fileId)).filter((file): file is LibraryFile => file != null),
-    [filesById, playback.queue]
-  );
   const displayTitle = currentFile?.displayTags.title ?? playback.currentDisplayName ?? "Nothing queued";
   const displayArtist = currentFile?.displayTags.artist ?? currentFile?.displayTags.albumartist ?? "Unknown Artist";
   const displayAlbum = currentFile?.displayTags.album ?? "Unknown Album";
@@ -8799,19 +8795,6 @@ function NowPlayingModal({
     },
     []
   );
-  const queueRows = useMemo(
-    () => queueFiles.map((file, index) => (
-      <NowPlayingQueueRow
-        active={file.id === playback.currentFileId}
-        file={file}
-        index={index}
-        key={`${file.id}-${index}`}
-        onPlayFile={onQueueRowPlay}
-      />
-    )),
-    [onQueueRowPlay, playback.currentFileId, queueFiles]
-  );
-
   return (
     <div className="modalBackdrop" role="presentation" onMouseDown={onClose}>
       <section
@@ -8932,20 +8915,93 @@ function NowPlayingModal({
             </div>
           </div>
         </div>
-        <aside className="nowPlayingQueue" aria-label="Up next">
-          <header>
-            <div>
-              <strong>Up Next</strong>
-              <span>{playback.queue.length.toLocaleString()} item{playback.queue.length === 1 ? "" : "s"}</span>
-            </div>
-          </header>
-          <div className="queueRows">
-            {queueFiles.length === 0 ? <div className="emptyState">No queued songs.</div> : queueRows}
-          </div>
-        </aside>
+        <NowPlayingQueue
+          currentFileId={playback.currentFileId}
+          filesById={filesById}
+          queueFileIds={playback.queue}
+          onPlayFile={onQueueRowPlay}
+        />
       </section>
     </div>
   );
+}
+
+const NowPlayingQueue = memo(function NowPlayingQueue({
+  currentFileId,
+  filesById,
+  queueFileIds,
+  onPlayFile
+}: {
+  currentFileId: string | null;
+  filesById: Map<string, LibraryFile>;
+  queueFileIds: string[];
+  onPlayFile(fileId: string): void;
+}): ReactElement {
+  const queueFiles = useMemo(
+    () => queueFileIds.map((fileId) => filesById.get(fileId)).filter((file): file is LibraryFile => file != null),
+    [filesById, queueFileIds]
+  );
+  const queueRows = useMemo(
+    () => queueFiles.map((file, index) => (
+      <NowPlayingQueueRow
+        active={file.id === currentFileId}
+        file={file}
+        index={index}
+        key={`${file.id}-${index}`}
+        onPlayFile={onPlayFile}
+      />
+    )),
+    [currentFileId, onPlayFile, queueFiles]
+  );
+
+  return (
+    <aside className="nowPlayingQueue" aria-label="Up next">
+      <header>
+        <div>
+          <strong>Up Next</strong>
+          <span>{queueFileIds.length.toLocaleString()} item{queueFileIds.length === 1 ? "" : "s"}</span>
+        </div>
+      </header>
+      <div className="queueRows">
+        {queueFiles.length === 0 ? <div className="emptyState">No queued songs.</div> : queueRows}
+      </div>
+    </aside>
+  );
+}, areNowPlayingQueuePropsEqual);
+
+function areNowPlayingQueuePropsEqual(
+  previous: {
+    currentFileId: string | null;
+    filesById: Map<string, LibraryFile>;
+    queueFileIds: string[];
+    onPlayFile(fileId: string): void;
+  },
+  next: {
+    currentFileId: string | null;
+    filesById: Map<string, LibraryFile>;
+    queueFileIds: string[];
+    onPlayFile(fileId: string): void;
+  }
+): boolean {
+  return previous.currentFileId === next.currentFileId &&
+    previous.filesById === next.filesById &&
+    previous.onPlayFile === next.onPlayFile &&
+    areStringArraysEqual(previous.queueFileIds, next.queueFileIds);
+}
+
+function areStringArraysEqual(left: string[], right: string[]): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 const NowPlayingQueueRow = memo(function NowPlayingQueueRow({

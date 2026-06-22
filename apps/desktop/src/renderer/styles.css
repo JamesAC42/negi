@@ -7296,8 +7296,8 @@ img.playerArt {
   grid-template-rows: minmax(0, 1fr);
   gap: 0;
   width: min(100%, 104rem);
-  height: min(100%, calc(100vh - clamp(3rem, 6vw, 6rem)));
-  min-height: min(40rem, calc(100vh - clamp(3rem, 6vw, 6rem)));
+  height: min(100%, calc(100vh - clamp(6rem, 12vw, 10rem)));
+  min-height: min(34rem, calc(100vh - clamp(6rem, 12vw, 10rem)));
   overflow: hidden;
   border: 0;
   border-radius: var(--r-m);
@@ -7590,8 +7590,8 @@ img.playerArt {
 }
 
 .meterRail {
-  top: clamp(9.75rem, 20vh, 12.5rem);
-  bottom: clamp(10rem, 26vh, 18rem);
+  top: clamp(10.5rem, 22vh, 13rem);
+  bottom: clamp(12rem, 28vh, 18rem);
   width: clamp(5rem, 6vw, 6.25rem);
   border-radius: var(--r-s);
   background: linear-gradient(180deg, color-mix(in srgb, var(--bg1) 72%, transparent), color-mix(in srgb, var(--bg1) 28%, transparent));
@@ -7882,7 +7882,9 @@ img.playerArt {
   grid-template-columns: 2rem 2.5rem minmax(0, 1fr) minmax(2.5rem, auto);
   align-items: center;
   justify-items: start;
+  content-visibility: auto;
   gap: 0.625rem;
+  contain-intrinsic-size: auto 3.25rem;
   min-width: 0;
   max-width: 100%;
   min-height: 3.25rem;
