@@ -7268,7 +7268,7 @@ img.playerArt {
   height: min(100%, calc(100vh - clamp(3rem, 6vw, 6rem)));
   min-height: min(40rem, calc(100vh - clamp(3rem, 6vw, 6rem)));
   overflow: hidden;
-  border: 0.0625rem solid rgb(104 127 151 / 28%);
+  border: 0;
   border-radius: var(--r-m);
   background:
     linear-gradient(90deg, rgb(7 10 13 / 0%), rgb(7 10 13 / 42%) 7%, rgb(7 10 13 / 96%) 18%, rgb(9 13 18 / 96%) 76%, rgb(7 10 13 / 50%) 91%, rgb(7 10 13 / 0%)),
@@ -7335,7 +7335,7 @@ img.playerArt {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  padding: clamp(1rem, 2vw, 1.625rem) clamp(1rem, 1.5vw, 1.375rem) clamp(1rem, 2vw, 1.625rem) clamp(1rem, 2vw, 1.625rem);
+  padding: clamp(1rem, 2vw, 1.625rem) clamp(1rem, 1.5vw, 1.375rem) clamp(1rem, 2vw, 1.625rem) clamp(2rem, 4.5vw, 5rem);
 }
 
 .overlayTopbar {
@@ -7352,13 +7352,13 @@ img.playerArt {
   z-index: 3;
   align-self: center;
   display: grid;
-  grid-template-columns: minmax(14rem, 23rem) minmax(24rem, 34rem);
+  grid-template-columns: minmax(14rem, 23rem) minmax(28rem, 38rem);
   grid-template-rows: auto auto;
   align-items: center;
   gap: clamp(1rem, 3vw, 2rem);
   min-width: 0;
   min-height: 0;
-  width: min(100%, 64rem);
+  width: min(100%, 68rem);
   margin: 0 auto;
   padding: 1rem clamp(0.5rem, 1.8vw, 1.25rem) min(28vh, 16rem);
 }
@@ -7429,7 +7429,7 @@ img.playerArt {
 .nowPlayingRightColumn {
   display: grid;
   align-self: stretch;
-  grid-template-rows: auto minmax(5rem, 1fr);
+  grid-template-rows: auto minmax(7rem, 1fr);
   gap: 0.75rem;
   min-width: 0;
   min-height: 0;
@@ -7532,9 +7532,8 @@ img.playerArt {
 
 .waveformRibbon {
   top: clamp(3rem, 7vh, 4.75rem);
-  left: 50%;
-  width: min(58rem, calc(100% - clamp(5rem, 12vw, 12rem)));
-  transform: translateX(-50%);
+  left: clamp(7rem, 10vw, 9.5rem);
+  right: clamp(7rem, 10vw, 9.5rem);
   height: clamp(3rem, 7vh, 4.75rem);
   border-radius: var(--r-s);
   opacity: 1;
@@ -7557,8 +7556,9 @@ img.playerArt {
 .meterRail {
   top: clamp(7rem, 17vh, 10rem);
   bottom: clamp(10rem, 26vh, 18rem);
-  width: clamp(2.75rem, 4vw, 4rem);
+  width: clamp(5rem, 6vw, 6.25rem);
   border-radius: var(--r-s);
+  background: linear-gradient(180deg, rgb(6 10 14 / 72%), rgb(6 10 14 / 28%));
 }
 
 .meterRail.left {
@@ -7569,30 +7569,52 @@ img.playerArt {
   right: clamp(2rem, 4vw, 4rem);
 }
 
-.meterRail > span,
+.meterHeader,
+.meterTicks,
 .meterRail > small {
   position: absolute;
   z-index: 2;
-  color: var(--tx2);
-  font-size: 0.625rem;
+}
+
+.meterHeader {
+  top: 0.625rem;
+  left: 0;
+  right: 0;
+  display: grid;
+  justify-items: center;
+  gap: 0.25rem;
+  color: var(--tx1);
+  font-size: 0.6875rem;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
-.meterRail > span {
-  top: 0.375rem;
-  left: 0.5rem;
-  color: var(--acc);
+.meterHeader strong {
+  color: var(--tx0);
+  font-size: 0.875rem;
 }
 
-.meterRail > small:nth-of-type(1) {
-  bottom: 35%;
-  right: 0.375rem;
+.meterTicks {
+  top: 4.75rem;
+  bottom: 1.875rem;
+  left: 0.625rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: var(--tx2);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
-.meterRail > small:nth-of-type(2) {
-  top: 20%;
-  right: 0.375rem;
+.meterRail > small {
+  right: 0.75rem;
+  bottom: 0.5rem;
+  color: var(--tx1);
+  font-size: 0.6875rem;
+  font-weight: 800;
 }
 
 .visualizerLabel {
@@ -7615,7 +7637,7 @@ img.playerArt {
 .focusSpectrum {
   position: relative;
   min-width: 0;
-  min-height: 5rem;
+  min-height: 7rem;
   overflow: hidden;
   border: 0.0625rem solid rgb(104 127 151 / 18%);
   border-radius: var(--r-s);
@@ -7694,7 +7716,7 @@ img.playerArt {
 
 .focusSpectrumCanvas {
   z-index: 1;
-  padding: 0.875rem 0.875rem 0.625rem;
+  padding: 0.875rem 0.875rem 0.5rem;
   opacity: 0.92;
   filter: drop-shadow(0 0 0.625rem color-mix(in srgb, var(--acc) 22%, transparent));
 }
@@ -7707,8 +7729,8 @@ img.playerArt {
 
 .meterRailCanvas {
   z-index: 1;
-  padding: 1.75rem 0.5rem 0.625rem;
-  opacity: 0.9;
+  padding: 4.75rem 1.25rem 1.875rem 2.6rem;
+  opacity: 1;
 }
 
 .modalTransport {
@@ -7716,11 +7738,37 @@ img.playerArt {
   margin-top: 0;
 }
 
+.modalTransport button {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 999rem;
+}
+
+.modalTransport button.tPlay {
+  width: 3.75rem;
+  height: 3.75rem;
+  border-radius: 999rem;
+}
+
+.modalTransport button.tPlay svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
 .overlayControls {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.875rem;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.overlayControls .repeatControls.modal {
+  margin-top: 0;
+}
+
+.volumeControl.modal {
+  width: min(12rem, 24vw);
 }
 
 .overlayPlaybackControls {
@@ -7741,8 +7789,8 @@ img.playerArt {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border-left: 0.0625rem solid rgb(104 127 151 / 24%);
-  border-radius: 0;
+  border: 0.0625rem solid rgb(104 127 151 / 28%);
+  border-radius: var(--r-m);
   background:
     linear-gradient(90deg, rgb(8 12 17 / 94%), rgb(8 12 17 / 88%) 82%, rgb(8 12 17 / 68%)),
     rgb(8 12 17 / 76%);
@@ -8167,8 +8215,8 @@ img.playerArt {
   }
 
   .nowPlayingFocus {
-    grid-template-columns: minmax(12rem, 18rem) minmax(22rem, 1fr);
-    width: min(100%, 56rem);
+    grid-template-columns: minmax(12rem, 17rem) minmax(24rem, 1fr);
+    width: min(100%, 60rem);
   }
 
   .meterRail.right {
@@ -8176,7 +8224,9 @@ img.playerArt {
   }
 
   .waveformRibbon {
-    width: min(48rem, calc(100% - 5rem));
+    left: clamp(6.5rem, 10vw, 9rem);
+    right: clamp(6.5rem, 10vw, 9rem);
+    width: auto;
   }
 }
 
@@ -8367,6 +8417,7 @@ img.playerArt {
   .nowPlayingCockpit {
     min-height: 42rem;
     padding-right: clamp(1rem, 2vw, 1.625rem);
+    padding-left: clamp(1rem, 2vw, 1.625rem);
   }
 
   .nowPlayingFocus {
@@ -8378,13 +8429,12 @@ img.playerArt {
 
   .nowPlayingQueue {
     min-height: 18rem;
-    border-top: 0.0625rem solid rgb(104 127 151 / 24%);
-    border-left: 0;
   }
 
   .waveformRibbon {
     left: 50%;
     right: auto;
+    transform: translateX(-50%);
     width: calc(100% - 2rem);
   }
 

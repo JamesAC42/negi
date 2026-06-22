@@ -3051,6 +3051,7 @@ export function App(): ReactElement {
           onSeek={seekPlaybackFromRatio}
           onOpenAlbumPage={openAlbumPage}
           onOpenArtistPage={openArtistPage}
+          onVolumeChange={handleVolumeChange}
           visualizerFrameRef={modalVisualizer.frameRef}
           waveformState={currentWaveform}
         />
@@ -8573,6 +8574,7 @@ function NowPlayingModal({
   onSeek,
   onOpenAlbumPage,
   onOpenArtistPage,
+  onVolumeChange,
   visualizerFrameRef,
   waveformState
 }: {
@@ -8590,6 +8592,7 @@ function NowPlayingModal({
   onSeek(ratio: number): Promise<void>;
   onOpenAlbumPage(group: Pick<LibraryAlbumGroup, "artist" | "album" | "year">): void | Promise<void>;
   onOpenArtistPage(artist: string): void;
+  onVolumeChange(value: string): Promise<void>;
   visualizerFrameRef: MutableRefObject<VisualizerFrameResponse | null>;
   waveformState: WaveformState;
 }): ReactElement {
@@ -8712,6 +8715,12 @@ function NowPlayingModal({
                 <span>{formatTime(playback.durationMs)}</span>
               </div>
               <div className="overlayControls">
+                <RepeatControls
+                  disabled={playbackBusy || playback.status === "stopped"}
+                  repeatMode={playback.repeatMode}
+                  variant="modal"
+                  onRepeatMode={onRepeatMode}
+                />
                 <div className="transport modalTransport">
                   <button disabled={playbackBusy || playback.status === "stopped"} type="button" onClick={() => void onPrevious()}>
                     <TransportIcon shape="previous" />
@@ -8723,12 +8732,20 @@ function NowPlayingModal({
                     <TransportIcon shape="next" />
                   </button>
                 </div>
-                <RepeatControls
-                  disabled={playbackBusy || playback.status === "stopped"}
-                  repeatMode={playback.repeatMode}
-                  variant="modal"
-                  onRepeatMode={onRepeatMode}
-                />
+                <label className="volumeControl modal">
+                  <span className="volumeIcon" aria-hidden="true">
+                    <UiIcon name="volume" />
+                  </span>
+                  <input
+                    aria-label="Playback volume"
+                    max={100}
+                    min={0}
+                    type="range"
+                    value={playback.volumePercent}
+                    onChange={(event) => void onVolumeChange(event.target.value)}
+                  />
+                  <strong>{playback.volumePercent}</strong>
+                </label>
               </div>
             </div>
           </div>
@@ -11325,7 +11342,8 @@ function SpectrumCanvas({
       const frame = frameRef.current;
       const incoming = frame?.bands?.length ? frame.bands : [];
       for (let index = 0; index < levels.length; index += 1) {
-        const next = playing ? incoming[Math.floor((index / levels.length) * incoming.length)] ?? 0 : 0;
+        const rawNext = playing ? incoming[Math.floor((index / levels.length) * incoming.length)] ?? 0 : 0;
+        const next = mode === "spectrum" ? Math.min(1, Math.pow(rawNext, 0.78) * 1.18) : rawNext;
         const attack = mode === "meter" ? 0.92 : 0.82;
         const decay = mode === "meter" ? 0.68 : 0.78;
         levels[index] = next > levels[index]
@@ -11338,6 +11356,47 @@ function SpectrumCanvas({
     draw();
     return () => window.cancelAnimationFrame(animationFrame);
   }, [frameRef, mode, playing]);
+
+  return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
+}
+
+function LevelMeterCanvas({
+  channel,
+  className,
+  frameRef,
+  playing
+}: {
+  channel: "left" | "right";
+  className: string;
+  frameRef: MutableRefObject<VisualizerFrameResponse | null>;
+  playing: boolean;
+}): ReactElement {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+    let animationFrame = 0;
+    let level = 0;
+    let peak = 0;
+    const draw = () => {
+      const frame = frameRef.current;
+      const bands = frame?.bands ?? [];
+      const sideBias = channel === "left" ? 0 : 0.5;
+      const bandIndex = bands.length > 0 ? Math.floor(sideBias * (bands.length - 1)) : 0;
+      const incoming = playing
+        ? Math.max(frame?.rms ?? 0, bands[bandIndex] ?? 0, frame?.peak ? frame.peak * 0.72 : 0)
+        : 0;
+      level = incoming > level ? level + (incoming - level) * 0.88 : Math.max(incoming, level * 0.72);
+      peak = Math.max(level, peak * 0.93);
+      drawLevelMeter(canvas, level, peak);
+      animationFrame = window.requestAnimationFrame(draw);
+    };
+    draw();
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [channel, frameRef, playing]);
 
   return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
 }
@@ -11404,16 +11463,26 @@ function VisualizerPanel({
           <WaveformCanvas className="heroWaveformCanvas" playback={playback} variant="hero" waveform={waveformState.waveform} />
         </div>
         <div className="meterRail left" aria-hidden="true">
-          <span>L</span>
-          <SpectrumCanvas className="meterRailCanvas" frameRef={frameRef} mode="meter" playing={playback.status === "playing"} />
-          <small>-18</small>
-          <small>-6</small>
+          <div className="meterHeader">
+            <strong>L</strong>
+            <span>Meter</span>
+          </div>
+          <LevelMeterCanvas className="meterRailCanvas" frameRef={frameRef} playing={playback.status === "playing"} channel="left" />
+          <div className="meterTicks">
+            {[0, -6, -12, -18, -24, -36, -48, -60].map((tick) => <span key={tick}>{tick}</span>)}
+          </div>
+          <small>dB</small>
         </div>
         <div className="meterRail right" aria-hidden="true">
-          <span>R</span>
-          <SpectrumCanvas className="meterRailCanvas" frameRef={frameRef} mode="meter" playing={playback.status === "playing"} />
-          <small>-18</small>
-          <small>-6</small>
+          <div className="meterHeader">
+            <strong>R</strong>
+            <span>Meter</span>
+          </div>
+          <LevelMeterCanvas className="meterRailCanvas" frameRef={frameRef} playing={playback.status === "playing"} channel="right" />
+          <div className="meterTicks">
+            {[0, -6, -12, -18, -24, -36, -48, -60].map((tick) => <span key={tick}>{tick}</span>)}
+          </div>
+          <small>dB</small>
         </div>
         <div className="spectrogramFloor">
           <div className="visualizerLabel">
@@ -11472,6 +11541,43 @@ function drawSpectrum(canvas: HTMLCanvasElement, levels: number[], mode: "meter"
     const color = mixRgb(colors.accent, colors.accentInk, mode === "meter" ? heat * 0.18 : heat * 0.28);
     context.fillStyle = rgba(color, mode === "meter" ? 0.86 : 0.76);
     context.fillRect(index * (barWidth + gap), height - barHeight, barWidth, barHeight);
+  }
+}
+
+function drawLevelMeter(canvas: HTMLCanvasElement, level: number, peak: number): void {
+  const context = prepareCanvas(canvas);
+  const { width, height } = canvas.getBoundingClientRect();
+  if (width <= 0 || height <= 0) {
+    return;
+  }
+  const colors = getCanvasThemeColors(canvas);
+  context.clearRect(0, 0, width, height);
+
+  const columns = 2;
+  const gap = Math.max(3, width * 0.12);
+  const columnWidth = Math.max(4, (width - gap) / columns);
+  const segmentGap = 2;
+  const segmentCount = Math.max(18, Math.floor(height / 7));
+  const segmentHeight = Math.max(2, (height - segmentGap * (segmentCount - 1)) / segmentCount);
+  const activeSegments = Math.round(Math.max(0, Math.min(1, level)) * segmentCount);
+  const peakY = height - Math.max(0, Math.min(1, peak)) * height;
+
+  for (let column = 0; column < columns; column += 1) {
+    const x = column * (columnWidth + gap);
+    for (let segment = 0; segment < segmentCount; segment += 1) {
+      const active = segment < activeSegments;
+      const y = height - (segment + 1) * segmentHeight - segment * segmentGap;
+      const hotness = segment / Math.max(1, segmentCount - 1);
+      const color = hotness > 0.86
+        ? mixRgb(colors.accent, { r: 255, g: 190, b: 50 }, 0.72)
+        : hotness > 0.68
+          ? mixRgb(colors.accent, { r: 255, g: 226, b: 95 }, 0.36)
+          : colors.accent;
+      context.fillStyle = rgba(color, active ? 0.96 : 0.13);
+      context.fillRect(x, y, columnWidth, segmentHeight);
+    }
+    context.fillStyle = rgba(mixRgb(colors.accent, { r: 255, g: 236, b: 170 }, 0.5), 0.95);
+    context.fillRect(x, Math.max(0, peakY - 1), columnWidth, 2);
   }
 }
 
