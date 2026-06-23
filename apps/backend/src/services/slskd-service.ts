@@ -65,20 +65,24 @@ export class SlskdService {
 
   async search(query: string, responseLimit = 100): Promise<DiscoverySearchResponse> {
     const searchTimeout = slskdSearchTimeoutMs();
-    const payload = {
-      searchText: query,
-      fileLimit: 10000,
-      filterResponses: true,
-      responseLimit,
-      searchTimeout
-    };
-    const created = await this.fetchJson("/api/v0/searches", {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
-    const searchId = searchIdFromResponse(created);
-    const response = searchId ? await this.waitForSearch(searchId, searchTimeout, responseLimit) : created;
-    const results = extractResults(response);
+    const attempts = slskdSearchAttempts();
+    const searchTexts = searchTextVariants(query);
+    let results: DiscoveryResult[] = [];
+    let lastResponse: unknown = {};
+
+    for (let attempt = 0; attempt < attempts && results.length === 0; attempt += 1) {
+      const searchText = searchTexts[Math.min(attempt, searchTexts.length - 1)] ?? query;
+      const response = await this.runSearchAttempt(searchText, searchTimeout, responseLimit);
+      lastResponse = response;
+      results = extractResults(response);
+      if (results.length === 0 && attempt < attempts - 1) {
+        await delay(slskdSearchRetryDelayMs());
+      }
+    }
+
+    if (results.length === 0) {
+      results = extractResults(lastResponse);
+    }
     return {
       query,
       results,
@@ -154,6 +158,22 @@ export class SlskdService {
   async listTransferRecords(): Promise<Record<string, unknown>[]> {
     const response = await this.fetchJson("/api/v0/transfers/downloads", { method: "GET" });
     return collectTransferFiles(response);
+  }
+
+  private async runSearchAttempt(searchText: string, timeoutMs: number, responseLimit: number): Promise<unknown> {
+    const payload = {
+      searchText,
+      fileLimit: slskdSearchFileLimit(),
+      filterResponses: slskdSearchFilterResponses(),
+      responseLimit,
+      searchTimeout: timeoutMs
+    };
+    const created = await this.fetchJson("/api/v0/searches", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    const searchId = searchIdFromResponse(created);
+    return searchId ? await this.waitForSearch(searchId, timeoutMs, responseLimit) : created;
   }
 
   private async waitForSearch(searchId: string, timeoutMs: number, responseLimit: number): Promise<unknown> {
@@ -299,23 +319,40 @@ function delay(ms: number): Promise<void> {
 }
 
 function slskdSearchTimeoutMs(): number {
-  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_TIMEOUT_MS", 60_000);
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_TIMEOUT_MS", 30_000);
 }
 
 function slskdSearchGraceMs(): number {
-  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_GRACE_MS", 20_000);
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_GRACE_MS", 8_000);
 }
 
 function slskdSearchPartialAfterMs(): number {
-  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_PARTIAL_AFTER_MS", 1_500);
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_PARTIAL_AFTER_MS", 4_000);
 }
 
 function slskdSearchCompletedEmptyGraceMs(): number {
-  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_COMPLETED_EMPTY_GRACE_MS", 8_000);
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_COMPLETED_EMPTY_GRACE_MS", 5_000);
 }
 
 function slskdRequestTimeoutMs(): number {
   return readPositiveIntegerEnv("MUSIC_OS_SLSKD_REQUEST_TIMEOUT_MS", 45_000);
+}
+
+function slskdSearchAttempts(): number {
+  return Math.min(4, readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_ATTEMPTS", 2));
+}
+
+function slskdSearchRetryDelayMs(): number {
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_RETRY_DELAY_MS", 750);
+}
+
+function slskdSearchFileLimit(): number {
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_FILE_LIMIT", 10000);
+}
+
+function slskdSearchFilterResponses(): boolean {
+  const value = process.env.MUSIC_OS_SLSKD_SEARCH_FILTER_RESPONSES;
+  return value == null ? true : !/^(0|false|no)$/i.test(value.trim());
 }
 
 function searchPollDelayMs(attempt: number): number {
@@ -339,6 +376,29 @@ function readPositiveIntegerEnv(name: string, fallback: number): number {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function searchTextVariants(query: string): string[] {
+  const variants: string[] = [];
+  const trimmed = query.trim();
+  if (trimmed) {
+    variants.push(trimmed);
+  }
+  const cleaned = cleanSearchText(trimmed);
+  if (cleaned && !variants.includes(cleaned)) {
+    variants.push(cleaned);
+  }
+  return variants.length > 0 ? variants : [query];
+}
+
+function cleanSearchText(value: string): string {
+  return value
+    .replace(/\.[a-z0-9]{2,5}\b/gi, " ")
+    .replace(/\b(flac|mp3|m4a|aac|alac|ape|ogg|opus|wav|wma)\b/gi, " ")
+    .replace(/[()[\]{}"'`~!@#$%^&*_+=|\\/:;,.<>?]+/g, " ")
+    .replace(/\s+-\s+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function searchIdFromResponse(value: unknown): string | null {

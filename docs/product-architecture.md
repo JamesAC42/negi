@@ -282,6 +282,15 @@ MUSIC_OS_SLSKD_DOWNLOAD_DIR=/mnt/d/Downloads/slskd-downloads
 # Optional fallback if API key auth is not used:
 MUSIC_OS_SLSKD_USERNAME=<slskd web username>
 MUSIC_OS_SLSKD_PASSWORD=<slskd web password>
+
+# Optional search reliability tuning:
+MUSIC_OS_SLSKD_SEARCH_ATTEMPTS=2
+MUSIC_OS_SLSKD_SEARCH_TIMEOUT_MS=30000
+MUSIC_OS_SLSKD_SEARCH_GRACE_MS=8000
+MUSIC_OS_SLSKD_SEARCH_COMPLETED_EMPTY_GRACE_MS=5000
+MUSIC_OS_SLSKD_SEARCH_PARTIAL_AFTER_MS=4000
+MUSIC_OS_SLSKD_SEARCH_FILE_LIMIT=10000
+MUSIC_OS_SLSKD_SEARCH_FILTER_RESPONSES=1
 ```
 
 Connector behavior:
@@ -290,9 +299,16 @@ Connector behavior:
 - API key auth is preferred through `X-API-Key`; Basic auth is available as a fallback.
 - Discovery health reports both connection reachability and whether download staging has a configured `MUSIC_OS_SLSKD_DOWNLOAD_DIR`.
 - Search results are normalized into `DiscoveryResult` records with username, filename, remote path/folder, size, extension, audio hints, lock status, and raw source data.
+- Discovery searches retry empty slskd responses once by default, then retry with a cleaned search text when that differs from the original query. This handles transient 0-result responses from slskd without making every successful search wait for the full timeout.
 - Results also carry peer availability hints from the slskd response: `hasFreeUploadSlot`, `queueLength`, and `uploadSpeedBytesPerSecond`. Backend download source selection (agent download proposals and the transfer smoke scripts) ranks unlocked results by free slot, then shorter remote queue, then faster reported upload speed, so transfers prefer peers likely to start sending immediately.
 - The mapper is tolerant of response shape differences across slskd versions.
 - Selected unlocked results create database-backed `discovery_download` jobs. Jobs queue files through slskd, poll the configured download folder, and copy completed files into Music OS staging as a `slskd_download` import batch.
+
+slskd reliability notes:
+
+- Verify the slskd Soulseek listen port is reachable from the public internet. slskd documents poor search results as one symptom of a misconfigured listen port.
+- If searches intermittently return 0 results under load, inspect slskd logs or metrics for search throttling and circuit breaker drops. On capable hardware, tune slskd's `throttling.search.incoming.concurrency`, `circuit_breaker`, and `response_file_limit`.
+- If slskd logs repeated distributed parent connection churn or request timeouts, review the slskd connection timeout settings before increasing Music OS request timeouts.
 
 Renderer behavior:
 
