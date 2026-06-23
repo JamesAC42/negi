@@ -8827,7 +8827,7 @@ function NowPlayingModal({
                   <UiIcon name="album" />
                 </span>
               )}
-              <div className="artSignalGlow" aria-hidden="true" />
+              <BeatSyncedAlbumGlow frameRef={visualizerFrameRef} playing={playback.status === "playing"} />
             </div>
             <div className="nowPlayingRightColumn">
               <div className="nowPlayingModalInfo">
@@ -9027,6 +9027,56 @@ const NowPlayingQueue = memo(function NowPlayingQueue({
     </aside>
   );
 }, areNowPlayingQueuePropsEqual);
+
+function BeatSyncedAlbumGlow({
+  frameRef,
+  playing
+}: {
+  frameRef: MutableRefObject<VisualizerFrameResponse | null>;
+  playing: boolean;
+}): ReactElement {
+  const glowRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const node = glowRef.current;
+    if (!node) {
+      return;
+    }
+    let animationFrame = 0;
+    let averageEnergy = 0;
+    let pulse = 0;
+    const draw = () => {
+      const frame = frameRef.current;
+      const bands = frame?.bands ?? [];
+      const measuredBands = Math.max(1, Math.ceil(bands.length * 0.45));
+      let bandTotal = 0;
+      for (let index = 0; index < Math.min(bands.length, measuredBands); index += 1) {
+        bandTotal += bands[index] ?? 0;
+      }
+      const bandEnergy = bands.length > 0 ? bandTotal / measuredBands : 0;
+      const energy = playing
+        ? Math.min(1, Math.max(frame?.rms ?? 0, (frame?.peak ?? 0) * 0.72, bandEnergy))
+        : 0;
+      averageEnergy = averageEnergy * 0.92 + energy * 0.08;
+      const beat = Math.max(0, energy - averageEnergy);
+      pulse = Math.max(beat * 3.6, pulse * 0.86);
+      const clampedPulse = Math.min(1, pulse);
+      node.style.setProperty("--beat-glow-blur", `${0.5 + clampedPulse * 0.32}rem`);
+      node.style.setProperty("--beat-glow-opacity", (0.66 + clampedPulse * 0.26).toFixed(3));
+      node.style.setProperty("--beat-glow-scale", (1 + clampedPulse * 0.065).toFixed(3));
+      animationFrame = window.requestAnimationFrame(draw);
+    };
+    draw();
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      node.style.removeProperty("--beat-glow-blur");
+      node.style.removeProperty("--beat-glow-opacity");
+      node.style.removeProperty("--beat-glow-scale");
+    };
+  }, [frameRef, playing]);
+
+  return <div className="artSignalGlow" aria-hidden="true" ref={glowRef} />;
+}
 
 function areNowPlayingQueuePropsEqual(
   previous: {
@@ -11808,17 +11858,41 @@ function drawWaveform(canvas: HTMLCanvasElement, peaks: number[] | null, progres
   const clampedProgress = Math.max(0, Math.min(1, progress));
   const colors = getCanvasThemeColors(canvas);
   context.clearRect(0, 0, width, height);
-  context.fillStyle = rgba(colors.accent, variant === "hero" ? 0.12 : 0.18);
   const values = peaks && peaks.length > 0 ? peaks : fallbackPeaks(96);
   const step = Math.max(1, width / values.length);
-  for (let index = 0; index < values.length; index += 1) {
-    const value = Math.max(0.035, values[index] ?? 0);
-    const barHeight = Math.max(1, value * height * (variant === "hero" ? 0.82 : 0.9));
-    const x = index * step;
-    context.fillRect(x, (height - barHeight) / 2, Math.max(1, step * 0.72), barHeight);
+  const playedWidth = clampedProgress * width;
+  const drawBars = (played: boolean) => {
+    for (let index = 0; index < values.length; index += 1) {
+      const value = Math.max(0.035, values[index] ?? 0);
+      const barHeight = Math.max(1, value * height * (variant === "hero" ? 0.82 : 0.9));
+      const x = index * step;
+      const hueShift = index / Math.max(1, values.length - 1);
+      const characterColor = hueShift < 0.5
+        ? mixRgb(colors.accent, { r: 90, g: 210, b: 255 }, 0.16 + hueShift * 0.24)
+        : mixRgb(colors.accent, { r: 255, g: 226, b: 95 }, 0.18 + (hueShift - 0.5) * 0.28);
+      const unplayedColor = mixRgb(colors.bg, colors.accent, 0.16 + Math.sin(hueShift * Math.PI) * 0.08);
+      context.fillStyle = played
+        ? rgba(characterColor, variant === "hero" ? 0.92 : 0.64)
+        : rgba(unplayedColor, variant === "hero" ? 0.34 : 0.2);
+      context.fillRect(x, (height - barHeight) / 2, Math.max(1, step * 0.72), barHeight);
+    }
+  };
+
+  drawBars(false);
+  if (playedWidth > 0) {
+    context.save();
+    context.beginPath();
+    context.rect(0, 0, playedWidth, height);
+    context.clip();
+    drawBars(true);
+    context.restore();
   }
-  context.fillStyle = rgba(colors.accent, variant === "hero" ? 0.82 : 0.46);
-  context.fillRect(clampedProgress * width, 0, 1.5, height);
+  const cursor = context.createLinearGradient(playedWidth - 1, 0, playedWidth + 1, height);
+  cursor.addColorStop(0, rgba(mixRgb(colors.accent, { r: 255, g: 255, b: 255 }, 0.55), 0.25));
+  cursor.addColorStop(0.5, rgba(mixRgb(colors.accent, { r: 255, g: 255, b: 255 }, 0.42), variant === "hero" ? 0.95 : 0.66));
+  cursor.addColorStop(1, rgba(colors.accent, 0.18));
+  context.fillStyle = cursor;
+  context.fillRect(Math.max(0, playedWidth - 1), 0, variant === "hero" ? 2.25 : 1.5, height);
 }
 
 function drawSpectrum(canvas: HTMLCanvasElement, levels: number[], mode: "meter" | "spectrum"): void {

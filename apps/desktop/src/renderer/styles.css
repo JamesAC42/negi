@@ -7362,7 +7362,7 @@ img.playerArt {
 .nowPlayingCockpit {
   --visualizer-side-gutter: clamp(8rem, 11vw, 11rem);
   --spectrogram-height: clamp(7.5rem, 16vh, 10.5rem);
-  --spectrogram-clearance: calc(var(--spectrogram-height) + clamp(1.5rem, 3vh, 2.25rem));
+  --spectrogram-clearance: calc(var(--spectrogram-height) + clamp(2.5rem, 4vh, 3.5rem));
 
   position: relative;
   z-index: 2;
@@ -7425,16 +7425,23 @@ img.playerArt {
 }
 
 .artSignalGlow {
+  --beat-glow-blur: 0.5rem;
+  --beat-glow-opacity: 0.66;
+  --beat-glow-scale: 1;
+
   position: absolute;
-  inset: -0.75rem;
+  inset: -0.85rem;
   z-index: 1;
   border-radius: calc(var(--r-m) + 0.75rem);
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--acc) 34%, transparent), transparent 35%, color-mix(in srgb, var(--acc) 18%, #54ddca 20%) 72%, transparent),
-    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--acc) 18%, transparent), transparent 64%);
-  filter: blur(0.5rem);
-  opacity: 0.74;
+    linear-gradient(135deg, color-mix(in srgb, var(--acc) 40%, transparent), transparent 35%, color-mix(in srgb, var(--acc) 22%, #54ddca 20%) 72%, transparent),
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--acc) 26%, transparent), transparent 64%);
+  filter: blur(var(--beat-glow-blur));
+  opacity: var(--beat-glow-opacity);
   pointer-events: none;
+  transform: scale(var(--beat-glow-scale));
+  transform-origin: center;
+  will-change: filter, opacity, transform;
 }
 
 .nowPlayingModalArt.placeholder {
@@ -7578,7 +7585,7 @@ img.playerArt {
   border-radius: var(--r-s);
   opacity: 1;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--bg0) 18%, transparent), color-mix(in srgb, var(--bg0) 56%, transparent) 12%, color-mix(in srgb, var(--bg0) 56%, transparent) 88%, color-mix(in srgb, var(--bg0) 18%, transparent));
+    linear-gradient(90deg, color-mix(in srgb, var(--bg0) 8%, transparent), color-mix(in srgb, var(--bg0) 38%, transparent) 12%, color-mix(in srgb, var(--bg0) 38%, transparent) 88%, color-mix(in srgb, var(--bg0) 8%, transparent));
 }
 
 .spectrogramFloor {
@@ -7593,8 +7600,8 @@ img.playerArt {
 }
 
 .meterRail {
-  top: clamp(8.75rem, 14vh, 10rem);
-  bottom: calc(var(--spectrogram-clearance) + clamp(3.75rem, 7vh, 5rem));
+  top: clamp(9.4rem, 15vh, 10.75rem);
+  bottom: calc(var(--spectrogram-clearance) + clamp(3rem, 6vh, 4.25rem));
   width: clamp(5rem, 6vw, 6.25rem);
   border-radius: var(--r-s);
   background: linear-gradient(180deg, color-mix(in srgb, var(--bg1) 72%, transparent), color-mix(in srgb, var(--bg1) 28%, transparent));
@@ -7745,8 +7752,9 @@ img.playerArt {
 
 .heroWaveformCanvas {
   z-index: 1;
-  opacity: 0.95;
+  opacity: 1;
   mix-blend-mode: screen;
+  filter: drop-shadow(0 0 0.5rem color-mix(in srgb, var(--acc) 22%, transparent));
 }
 
 .spectrumCanvas {
