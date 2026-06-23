@@ -8937,12 +8937,31 @@ const NowPlayingQueue = memo(function NowPlayingQueue({
   queueFileIds: string[];
   onPlayFile(fileId: string): void;
 }): ReactElement {
+  const rowHeightPx = 58;
+  const overscanRows = 6;
+  const queueRowsRef = useRef<HTMLDivElement | null>(null);
+  const scrollFrameRef = useRef(0);
+  const [viewport, setViewport] = useState({ height: 0, scrollTop: 0 });
   const queueFiles = useMemo(
     () => queueFileIds.map((fileId) => filesById.get(fileId)).filter((file): file is LibraryFile => file != null),
     [filesById, queueFileIds]
   );
+  const visibleRange = useMemo(() => {
+    const start = Math.max(0, Math.floor(viewport.scrollTop / rowHeightPx) - overscanRows);
+    const count = Math.ceil(Math.max(viewport.height, rowHeightPx) / rowHeightPx) + overscanRows * 2;
+    return {
+      start,
+      end: Math.min(queueFiles.length, start + count)
+    };
+  }, [queueFiles.length, viewport.height, viewport.scrollTop]);
+  const visibleQueueFiles = useMemo(
+    () => queueFiles.slice(visibleRange.start, visibleRange.end),
+    [queueFiles, visibleRange.end, visibleRange.start]
+  );
   const queueRows = useMemo(
-    () => queueFiles.map((file, index) => (
+    () => visibleQueueFiles.map((file, offset) => {
+      const index = visibleRange.start + offset;
+      return (
       <NowPlayingQueueRow
         active={file.id === currentFileId}
         file={file}
@@ -8950,9 +8969,38 @@ const NowPlayingQueue = memo(function NowPlayingQueue({
         key={`${file.id}-${index}`}
         onPlayFile={onPlayFile}
       />
-    )),
-    [currentFileId, onPlayFile, queueFiles]
+      );
+    }),
+    [currentFileId, onPlayFile, visibleQueueFiles, visibleRange.start]
   );
+  const updateViewport = useMemo(
+    () => () => {
+      const node = queueRowsRef.current;
+      if (!node) {
+        return;
+      }
+      setViewport((current) => {
+        const next = { height: node.clientHeight, scrollTop: node.scrollTop };
+        return current.height === next.height && current.scrollTop === next.scrollTop ? current : next;
+      });
+    },
+    []
+  );
+  useEffect(() => {
+    updateViewport();
+    const node = queueRowsRef.current;
+    if (!node || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(updateViewport);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [updateViewport]);
+  useEffect(() => () => window.cancelAnimationFrame(scrollFrameRef.current), []);
+  const handleQueueScroll = () => {
+    window.cancelAnimationFrame(scrollFrameRef.current);
+    scrollFrameRef.current = window.requestAnimationFrame(updateViewport);
+  };
 
   return (
     <aside className="nowPlayingQueue" aria-label="Up next">
@@ -8962,8 +9010,19 @@ const NowPlayingQueue = memo(function NowPlayingQueue({
           <span>{queueFileIds.length.toLocaleString()} item{queueFileIds.length === 1 ? "" : "s"}</span>
         </div>
       </header>
-      <div className="queueRows">
-        {queueFiles.length === 0 ? <div className="emptyState">No queued songs.</div> : queueRows}
+      <div className="queueRows" ref={queueRowsRef} onScroll={handleQueueScroll}>
+        {queueFiles.length === 0 ? (
+          <div className="emptyState">No queued songs.</div>
+        ) : (
+          <div className="queueRowsSpacer" style={{ height: `${queueFiles.length * rowHeightPx}px` }}>
+            <div
+              className="queueRowsWindow"
+              style={{ transform: `translateY(${visibleRange.start * rowHeightPx}px)` }}
+            >
+              {queueRows}
+            </div>
+          </div>
+        )}
       </div>
     </aside>
   );
