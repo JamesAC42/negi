@@ -12,6 +12,9 @@ import { OperationService } from "./services/operation-service.js";
 import { PlaylistService } from "./services/playlist-service.js";
 import { AgentService } from "./services/agent-service.js";
 import { AgentThreadService } from "./services/agent-thread-service.js";
+import { AgentRunService } from "./services/agent-run-service.js";
+import { createAgentModelProvider } from "./services/agent-model-provider.js";
+import { MusicBrainzAgentMetadataTool } from "./services/agent-metadata-tool.js";
 import { SlskdService } from "./services/slskd-service.js";
 import { DiscoveryDownloadService } from "./services/discovery-download-service.js";
 import { SavedDiscoveryCandidateService } from "./services/saved-discovery-candidate-service.js";
@@ -34,6 +37,7 @@ export interface BackendApp {
   playlists: PlaylistService;
   agent: AgentService;
   agentThreads: AgentThreadService;
+  agentRuns: AgentRunService;
   discovery: SlskdService;
   discoveryDownloads: DiscoveryDownloadService;
   savedDiscoveryCandidates: SavedDiscoveryCandidateService;
@@ -65,6 +69,7 @@ export function createBackendApp(config: BackendConfig): BackendApp {
   const playlists = new PlaylistService(db, library);
   const agent = new AgentService(library, operations, playback, discovery, imports);
   const agentThreads = new AgentThreadService(db, agent);
+  const agentRuns = new AgentRunService(db, agent, createAgentModelProvider(config), new MusicBrainzAgentMetadataTool(config));
   const jobs = new JobService(db);
   const tasteProfile = new TasteProfileService(db);
   const artwork = new ArtworkService(library, config);
@@ -82,6 +87,7 @@ export function createBackendApp(config: BackendConfig): BackendApp {
     playlists,
     agent,
     agentThreads,
+    agentRuns,
     discovery,
     discoveryDownloads,
     savedDiscoveryCandidates,

@@ -6,6 +6,9 @@ import {
   albumMergeSuggestionsResponseSchema,
   agentMessageRequestSchema,
   agentMessageResponseSchema,
+  agentRunRequestSchema,
+  agentRunResponseSchema,
+  agentRunsResponseSchema,
   agentThreadResponseSchema,
   agentThreadsResponseSchema,
   createAgentThreadRequestSchema,
@@ -440,6 +443,25 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/operations/batches") {
       writeJson(response, 200, operationBatchesResponseSchema.parse({ batches: app.operations.listBatches() }));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/agent/runs") {
+      writeJson(response, 200, agentRunsResponseSchema.parse({ runs: app.agentRuns.listRuns() }));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/agent/runs") {
+      const body = agentRunRequestSchema.parse(await readJson(request));
+      const run = await app.agentRuns.run(body.message, body.threadId);
+      writeJson(response, 201, agentRunResponseSchema.parse({ run }));
+      return;
+    }
+
+    const agentRunMatch = url.pathname.match(/^\/agent\/runs\/([^/]+)$/);
+    if (request.method === "GET" && agentRunMatch) {
+      const run = app.agentRuns.getRun(decodeURIComponent(agentRunMatch[1]));
+      writeJson(response, 200, agentRunResponseSchema.parse({ run }));
       return;
     }
 

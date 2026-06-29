@@ -17,6 +17,22 @@ import type { ImportService } from "./import-service.js";
 
 type LibraryFile = LibraryFilesResponse["files"][number];
 type DiscoverySearchTool = Pick<SlskdService, "search">;
+type AgentStepType = "plan" | "tool" | "decision" | "approval" | "final";
+type AgentStepStatus = "running" | "completed" | "failed";
+export type AgentStepRecorder = (step: {
+  type: AgentStepType;
+  toolName?: string | null;
+  status?: AgentStepStatus;
+  summary: string;
+  input?: unknown;
+  output?: unknown;
+  error?: string | null;
+}) => void;
+
+export interface AgentHandleMessageOptions {
+  recordStep?: AgentStepRecorder;
+  discoveryQueryHints?: string[];
+}
 
 export class AgentService {
   constructor(
@@ -27,9 +43,16 @@ export class AgentService {
     private readonly imports?: ImportService
   ) {}
 
-  async handleMessage(message: string): Promise<AgentMessageResponse> {
+  async handleMessage(message: string, options: AgentHandleMessageOptions = {}): Promise<AgentMessageResponse> {
     const intent = detectIntent(message);
     const searchQuery = extractSearchQuery(message, intent);
+    options.recordStep?.({
+      type: "plan",
+      status: "completed",
+      summary: `Detected intent ${intent}`,
+      input: { message },
+      output: { intent, searchQuery }
+    });
     if (intent === "parse_pasted_list") {
       return this.handlePastedList(message);
     }
@@ -40,7 +63,7 @@ export class AgentService {
       return this.handleDuplicateCleanupProposal(searchQuery);
     }
     if (intent === "search_discovery") {
-      return this.handleDiscoverySearch(searchQuery, message);
+      return this.handleDiscoverySearch(searchQuery, message, options);
     }
 
     const results = this.library.listFiles(searchQuery).slice(0, intent === "propose_playlist" ? 50 : 20);
@@ -57,6 +80,22 @@ export class AgentService {
         operationBatch: null,
         playback: null
       };
+    }
+
+    if (
+      results.length === 0 &&
+      intent === "search_library" &&
+      this.discovery &&
+      shouldFallbackToDiscoveryForReleaseContext(message, options.discoveryQueryHints)
+    ) {
+      options.recordStep?.({
+        type: "decision",
+        status: "completed",
+        summary: "No local library matches; falling back to Discovery for release-context lookup",
+        input: { searchQuery, discoveryQueryHints: options.discoveryQueryHints ?? [] },
+        output: { intent: "search_discovery" }
+      });
+      return this.handleDiscoverySearch(searchQuery, message, options);
     }
 
     if (results.length === 0) {
@@ -247,7 +286,11 @@ export class AgentService {
     };
   }
 
-  private async handleDiscoverySearch(searchQuery: string, originalMessage: string): Promise<AgentMessageResponse> {
+  private async handleDiscoverySearch(
+    searchQuery: string,
+    originalMessage: string,
+    options: AgentHandleMessageOptions
+  ): Promise<AgentMessageResponse> {
     if (!searchQuery) {
       return {
         reply: "I need a Discovery search term.",
@@ -275,22 +318,87 @@ export class AgentService {
       };
     }
 
-    const discovery = await this.discovery.search(searchQuery, 50);
+    const queries = discoveryQueryVariants(searchQuery, options.discoveryQueryHints ?? [], wantsReleaseContext(originalMessage));
+    options.recordStep?.({
+      type: "decision",
+      status: "completed",
+      summary: `Prepared ${queries.length} Discovery search ${queries.length === 1 ? "query" : "queries"}`,
+      input: { searchQuery },
+      output: { queries }
+    });
+
+    let discovery = { query: searchQuery, results: [] as DiscoveryResult[], total: 0 };
+    const attemptedQueries: string[] = [];
+    for (const query of queries) {
+      attemptedQueries.push(query);
+      try {
+        discovery = await this.discovery.search(query, 50);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        options.recordStep?.({
+          type: "tool",
+          toolName: "search_soulseek",
+          status: "failed",
+          summary: `Soulseek search failed for "${query}"`,
+          input: { query, responseLimit: 50 },
+          error: message
+        });
+        throw error;
+      }
+      options.recordStep?.({
+        type: "tool",
+        toolName: "search_soulseek",
+        status: "completed",
+        summary: `Soulseek search returned ${discovery.results.length} result${discovery.results.length === 1 ? "" : "s"} for "${query}"`,
+        input: { query, responseLimit: 50 },
+        output: { query: discovery.query, total: discovery.total, resultCount: discovery.results.length }
+      });
+      if (discovery.results.length > 0) {
+        break;
+      }
+    }
+
     const discoveryResults = discovery.results.slice(0, 20).map((result) => mapAgentDiscoveryResult(result, this.library));
     const discoveryGroups = groupAgentDiscoveryResults(discovery.results, this.library).slice(0, 8);
     const ownedCount = discoveryResults.filter((result) => result.ownedMatchCount > 0).length;
     const unlockedCount = discoveryResults.filter((result) => !result.isLocked).length;
+    options.recordStep?.({
+      type: "tool",
+      toolName: "rank_discovery_results",
+      status: "completed",
+      summary: `Ranked ${discoveryGroups.length} Discovery release group${discoveryGroups.length === 1 ? "" : "s"}`,
+      input: { resultCount: discovery.results.length },
+      output: {
+        groupCount: discoveryGroups.length,
+        unlockedCount,
+        ownedCount,
+        selectedQuery: discovery.query,
+        attemptedQueries
+      }
+    });
     const operationBatch = wantsDownloadProposal(originalMessage)
       ? this.createDiscoveryDownloadProposal(discovery.results, searchQuery)
       : null;
+    if (wantsDownloadProposal(originalMessage)) {
+      options.recordStep?.({
+        type: "approval",
+        toolName: "propose_queue_download",
+        status: "completed",
+        summary: operationBatch
+          ? `Created reviewable queue_download batch with ${operationBatch.operations.length} operation${operationBatch.operations.length === 1 ? "" : "s"}`
+          : "No unlocked Discovery results were available for a queue_download proposal",
+        input: { searchQuery, selectedQuery: discovery.query },
+        output: operationBatch ? { operationBatchId: operationBatch.id, operationCount: operationBatch.operations.length } : null
+      });
+    }
 
     return {
       reply:
         discoveryResults.length === 0
-          ? `I searched Discovery for "${searchQuery}" and found no candidates.`
+          ? `I searched Discovery for "${searchQuery}"${attemptedQueries.length > 1 ? ` using ${attemptedQueries.length} query variants` : ""} and found no candidates.`
           : operationBatch
-            ? `I found ${discoveryResults.length} Discovery candidate${discoveryResults.length === 1 ? "" : "s"} for "${searchQuery}" and proposed a download batch with ${operationBatch.operations.length} reviewable operation. Review it in Operations before any staging work.`
-            : `I found ${discoveryResults.length} Discovery candidate${discoveryResults.length === 1 ? "" : "s"} for "${searchQuery}" (${unlockedCount} unlocked, ${ownedCount} with possible library matches). Review candidates in Discovery before staging downloads.`,
+            ? `I found ${discoveryResults.length} Discovery candidate${discoveryResults.length === 1 ? "" : "s"} for "${searchQuery}"${discovery.query !== searchQuery ? ` via fallback query "${discovery.query}"` : ""} and proposed a download batch with ${operationBatch.operations.length} reviewable operation. Review it in Operations before any staging work.`
+            : `I found ${discoveryResults.length} Discovery candidate${discoveryResults.length === 1 ? "" : "s"} for "${searchQuery}"${discovery.query !== searchQuery ? ` via fallback query "${discovery.query}"` : ""} (${unlockedCount} unlocked, ${ownedCount} with possible library matches). Review candidates in Discovery before staging downloads.`,
       intent: "search_discovery",
       searchQuery,
       results: [],
@@ -326,6 +434,9 @@ function detectIntent(message: string): AgentMessageResponse["intent"] {
   if (/\b(discover|discovery|soulseek|slsk|slskd|download|external|find online)\b/.test(text)) {
     return "search_discovery";
   }
+  if (wantsReleaseContext(message) && /\b(find|search|show|look|lookup|get|what|which)\b/.test(text)) {
+    return "search_discovery";
+  }
   if (/\b(playlist|mix)\b/.test(text) && /\b(make|create|build|propose|generate)\b/.test(text)) {
     return "propose_playlist";
   }
@@ -345,16 +456,27 @@ function extractSearchQuery(message: string, intent: AgentMessageResponse["inten
     "a",
     "an",
     "and",
+    "album",
+    "albums",
+    "appears",
+    "appeared",
     "by",
     "for",
     "from",
     "in",
+    "it",
+    "it's",
+    "its",
     "library",
     "me",
     "music",
     "my",
     "of",
+    "on",
     "please",
+    "record",
+    "release",
+    "single",
     "songs",
     "the",
     "tracks",
@@ -422,6 +544,123 @@ function extractSearchQuery(message: string, intent: AgentMessageResponse["inten
 function wantsDownloadProposal(message: string): boolean {
   const text = message.toLowerCase();
   return /\b(download|stage|queue|grab|propose)\b/.test(text);
+}
+
+function discoveryQueryVariants(searchQuery: string, hints: string[] = [], preferHints = false): string[] {
+  const variants: string[] = [];
+  const add = (value: string) => {
+    const normalized = cleanFallbackQuery(value);
+    if (normalized && !variants.some((existing) => normalizeFallbackKey(existing) === normalizeFallbackKey(normalized))) {
+      variants.push(normalized);
+    }
+  };
+
+  if (preferHints) {
+    for (const hint of hints) {
+      addUsefulExternalHint(searchQuery, hint, add, { allowLoose: true });
+    }
+  }
+  add(searchQuery);
+  add(removeSuppressedSearchTokens(searchQuery));
+
+  const tokens = cleanFallbackQuery(searchQuery).split(/\s+/).filter(Boolean);
+  if (tokens.length >= 3) {
+    add(tokens.slice(1).join(" "));
+  }
+  if (tokens.length >= 4) {
+    add(tokens.slice(2).join(" "));
+  }
+
+  if (!preferHints) {
+    for (const hint of hints) {
+      addUsefulExternalHint(searchQuery, hint, add);
+    }
+  }
+
+  return variants.slice(0, 6);
+}
+
+function addUsefulExternalHint(
+  searchQuery: string,
+  hint: string,
+  add: (value: string) => void,
+  options: { allowLoose?: boolean } = {}
+): void {
+  const cleanedHint = removeSuppressedSearchTokens(hint);
+  if (!cleanedHint) {
+    return;
+  }
+  const base = removeSuppressedSearchTokens(searchQuery) || cleanFallbackQuery(searchQuery);
+  const baseTokens = meaningfulQueryTokens(base);
+  const hintTokens = [...meaningfulQueryTokens(cleanedHint)];
+  if (hintTokens.length === 0) {
+    return;
+  }
+
+  const overlap = hintTokens.filter((token) => baseTokens.has(token)).length;
+  const maxUsefulLength = Math.max(4, baseTokens.size * 2 + 1);
+  if (!options.allowLoose && baseTokens.size > 0 && overlap === 0 && hintTokens.length > 3) {
+    return;
+  }
+  if (hintTokens.length > maxUsefulLength) {
+    return;
+  }
+  add(cleanedHint);
+}
+
+function removeSuppressedSearchTokens(searchQuery: string): string {
+  let value = ` ${cleanFallbackQuery(searchQuery)} `;
+  const suppressed = suppressedSearchTerms();
+  for (const term of suppressed) {
+    const escapedTerm = term.split(/\s+/).map(escapeRegExp).join("\\s+");
+    const pattern = new RegExp(`\\s+${escapedTerm}(?=\\s+)`, "gi");
+    value = value.replace(pattern, " ");
+  }
+  return cleanFallbackQuery(value);
+}
+
+function suppressedSearchTerms(): string[] {
+  const configured = process.env.MUSIC_OS_SLSKD_SUPPRESSED_SEARCH_TERMS;
+  const terms = configured
+    ? configured.split(",").map((term) => cleanFallbackQuery(term))
+    : ["the beatles", "beatles", "le sserafim", "sserafim"];
+  return [...new Set(terms.filter(Boolean).sort((a, b) => b.length - a.length))];
+}
+
+function wantsReleaseContext(message: string): boolean {
+  return /\b(album|release|record|single|ep)\b/i.test(message) && /\b(on|from|appears|appeared|came|comes|its|it's)\b/i.test(message);
+}
+
+function shouldFallbackToDiscoveryForReleaseContext(message: string, hints: string[] | undefined): boolean {
+  return wantsReleaseContext(message) && (hints?.some((hint) => cleanFallbackQuery(hint)) ?? false);
+}
+
+function cleanFallbackQuery(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s'-]+/gu, " ")
+    .replace(/\b(flac|mp3|m4a|aac|alac|ape|ogg|opus|wav|wma)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeFallbackKey(value: string): string {
+  return cleanFallbackQuery(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function meaningfulQueryTokens(value: string): Set<string> {
+  const stop = new Set(["a", "an", "and", "by", "for", "from", "in", "of", "the", "to", "with"]);
+  return new Set(
+    cleanFallbackQuery(value)
+      .split(/\s+/)
+      .filter((token) => token.length > 1 && !stop.has(token))
+  );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function playlistName(query: string): string {

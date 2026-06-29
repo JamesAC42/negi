@@ -1,0 +1,247 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import type { AgentStep, DiscoverySearchResponse } from "@music-os/core";
+import type { BackendApp } from "../app.js";
+import { createBackendApp } from "../app.js";
+import { AgentService } from "../services/agent-service.js";
+import { AgentRunService } from "../services/agent-run-service.js";
+
+const fixtureDir = await mkdtemp(join(tmpdir(), "music-os-agent-run-"));
+const databasePath = join(fixtureDir, "music-os.sqlite");
+let app: BackendApp | null = null;
+
+try {
+  app = createBackendApp({ host: "127.0.0.1", port: 0, databasePath, mpvPath: "mpv", musicBrainzEnabled: false });
+  const searchCalls: string[] = [];
+  const agent = new AgentService(app.library, app.operations, app.playback, {
+    async search(query: string): Promise<DiscoverySearchResponse> {
+      searchCalls.push(query);
+      if (query === "antifragile" || query === "impurities") {
+        return {
+          query,
+          total: query === "antifragile" ? 2 : 1,
+          results: [
+            {
+              id: `${query}-remote-one`,
+              source: "slskd",
+              username: "remote-user",
+              filename: query === "antifragile" ? "01 - ANTIFRAGILE.flac" : "02 - Impurities.flac",
+              path: query === "antifragile" ? "LE SSERAFIM/ANTIFRAGILE/01 - ANTIFRAGILE.flac" : "LE SSERAFIM/ANTIFRAGILE/02 - Impurities.flac",
+              folder: "LE SSERAFIM/ANTIFRAGILE",
+              sizeBytes: 42_000_000,
+              extension: "flac",
+              bitrate: 920_000,
+              sampleRate: 44_100,
+              lengthSeconds: 184,
+              isLocked: false,
+              hasFreeUploadSlot: true,
+              uploadSpeedBytesPerSecond: 2_000_000,
+              queueLength: 0,
+              raw: {}
+            },
+            ...(query === "antifragile"
+              ? [
+                  {
+                    id: "antifragile-remote-two",
+                    source: "slskd" as const,
+                    username: "remote-user",
+                    filename: "02 - Impurities.flac",
+                    path: "LE SSERAFIM/ANTIFRAGILE/02 - Impurities.flac",
+                    folder: "LE SSERAFIM/ANTIFRAGILE",
+                    sizeBytes: 39_000_000,
+                    extension: "flac",
+                    bitrate: 900_000,
+                    sampleRate: 44_100,
+                    lengthSeconds: 196,
+                    isLocked: false,
+                    hasFreeUploadSlot: true,
+                    uploadSpeedBytesPerSecond: 2_000_000,
+                    queueLength: 0,
+                    raw: {}
+                  }
+                ]
+              : [])
+          ]
+        };
+      }
+      return { query, total: 0, results: [] };
+    }
+  });
+  const runs = new AgentRunService(app.db, agent, undefined, {
+    name: "fixture_metadata",
+    async lookup(message) {
+      return message.includes("le sserafim")
+        ? {
+            summary: "Fixture metadata found title-only fallback",
+            queryHints: ["antifragile"]
+          }
+        : null;
+    }
+  });
+  const run = await runs.run("propose download le sserafim antifragile");
+
+  assert(run.status === "completed", `expected completed run, got ${run.status}`);
+  assert(run.response?.intent === "search_discovery", `expected search_discovery intent, got ${run.response?.intent}`);
+  assert(run.response.operationBatch != null, "expected reviewable download operation batch");
+  assert(run.response.operationBatch.status === "proposed", `expected proposed batch, got ${run.response.operationBatch.status}`);
+  assert(searchCalls.includes("le sserafim antifragile"), "expected original query attempt");
+  assert(searchCalls.includes("antifragile"), "expected title-only fallback query attempt");
+  assert(
+    run.steps.some((step: AgentStep) => step.toolName === "fixture_metadata" && step.output && (step.output as { queryHints?: string[] }).queryHints?.includes("antifragile")),
+    "expected traced metadata lookup hints"
+  );
+  assert(
+    run.steps.some((step: AgentStep) => step.toolName === "search_soulseek" && step.output && (step.output as { resultCount?: number }).resultCount === 0),
+    "expected traced empty search step"
+  );
+  assert(
+    run.steps.some((step: AgentStep) => step.toolName === "search_soulseek" && step.output && (step.output as { resultCount?: number }).resultCount === 2),
+    "expected traced successful fallback search step"
+  );
+  assert(
+    run.steps.some((step: AgentStep) => step.type === "approval" && step.toolName === "propose_queue_download"),
+    "expected approval-gated queue download proposal step"
+  );
+
+  const restored = runs.getRun(run.id);
+  assert(restored.steps.length === run.steps.length, "expected run steps to persist");
+  assert(restored.response?.operationBatch?.id === run.response.operationBatch.id, "expected response payload to persist");
+  assert(restored.threadId != null, "expected run to attach to an agent thread");
+  const threadMessages = app.agentThreads.getThread(restored.threadId).messages;
+  assert(threadMessages.length === 2, `expected user+agent thread messages, got ${threadMessages.length}`);
+  assert(threadMessages[1]?.response?.runId === run.id, "expected persisted agent message response to include run id");
+
+  const modelSearchCalls: string[] = [];
+  const modelAgent = new AgentService(app.library, app.operations, app.playback, {
+    async search(query: string): Promise<DiscoverySearchResponse> {
+      modelSearchCalls.push(query);
+      return query === "impurities"
+        ? {
+            query,
+            total: 1,
+            results: [
+              {
+                id: "model-hint-result",
+                source: "slskd",
+                username: "remote-user",
+                filename: "02 - Impurities.flac",
+                path: "LE SSERAFIM/ANTIFRAGILE/02 - Impurities.flac",
+                folder: "LE SSERAFIM/ANTIFRAGILE",
+                sizeBytes: 39_000_000,
+                extension: "flac",
+                bitrate: 900_000,
+                sampleRate: 44_100,
+                lengthSeconds: 196,
+                isLocked: false,
+                hasFreeUploadSlot: true,
+                uploadSpeedBytesPerSecond: 2_000_000,
+                queueLength: 0,
+                raw: {}
+              }
+            ]
+          }
+        : { query, total: 0, results: [] };
+    }
+  });
+  const modelRuns = new AgentRunService(
+    app.db,
+    modelAgent,
+    {
+      name: "fixture_model",
+      async plan() {
+        return {
+          summary: "Fixture model generated a track-title fallback",
+          searchQueryHints: ["impurities"]
+        };
+      }
+    },
+    undefined
+  );
+  const modelRun = await modelRuns.run("propose download blocked idol group hidden album");
+  assert(modelSearchCalls.includes("impurities"), "expected model-provided query hint to be searched");
+  assert(modelRun.response?.operationBatch != null, "expected model-hint run to create a reviewable download batch");
+  assert(
+    modelRun.steps.some((step: AgentStep) => step.toolName === "model:fixture_model" && step.output && (step.output as { searchQueryHints?: string[] }).searchQueryHints?.includes("impurities")),
+    "expected traced model planning hints"
+  );
+
+  const releaseContextSearchCalls: string[] = [];
+  const releaseContextAgent = new AgentService(app.library, app.operations, app.playback, {
+    async search(query: string): Promise<DiscoverySearchResponse> {
+      releaseContextSearchCalls.push(query);
+      return query === "green day dookie" || query === "dookie"
+        ? {
+            query,
+            total: 1,
+            results: [
+              {
+                id: "green-day-dookie-result",
+                source: "slskd",
+                username: "remote-user",
+                filename: "06 - When I Come Around.flac",
+                path: "Green Day/Dookie/06 - When I Come Around.flac",
+                folder: "Green Day/Dookie",
+                sizeBytes: 32_000_000,
+                extension: "flac",
+                bitrate: 900_000,
+                sampleRate: 44_100,
+                lengthSeconds: 178,
+                isLocked: false,
+                hasFreeUploadSlot: true,
+                uploadSpeedBytesPerSecond: 2_000_000,
+                queueLength: 0,
+                raw: {}
+              }
+            ]
+          }
+        : { query, total: 0, results: [] };
+    }
+  });
+  const releaseContextRuns = new AgentRunService(app.db, releaseContextAgent, undefined, {
+    name: "fixture_metadata",
+    async lookup() {
+      return {
+        summary: "Fixture metadata resolved the containing album",
+        queryHints: ["Green Day Dookie", "Dookie", "Green Day When I Come Around", "When I Come Around"]
+      };
+    }
+  });
+  const releaseContextRun = await releaseContextRuns.run("find the green day album with when i come around on it");
+  assert(
+    releaseContextSearchCalls[0] === "green day dookie",
+    `expected release metadata hint to be searched first, got ${releaseContextSearchCalls[0]}`
+  );
+  assert(
+    releaseContextRun.response?.intent === "search_discovery",
+    `expected release-context prompt to use Discovery, got ${releaseContextRun.response?.intent}`
+  );
+  assert(releaseContextRun.response?.discoveryResults.length === 1, "expected release-context search to find a Discovery result");
+
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        runId: run.id,
+        attemptedQueries: searchCalls,
+        stepCount: run.steps.length,
+        operationBatchId: run.response.operationBatch.id,
+        modelRunId: modelRun.id,
+        modelAttemptedQueries: modelSearchCalls,
+        releaseContextRunId: releaseContextRun.id,
+        releaseContextAttemptedQueries: releaseContextSearchCalls
+      },
+      null,
+      2
+    )
+  );
+} finally {
+  app?.close();
+  await rm(fixtureDir, { recursive: true, force: true });
+}
+
+function assert(condition: boolean, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message);
+  }
+}

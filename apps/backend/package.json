@@ -11,6 +11,7 @@
     "import:smoke": "tsx src/scripts/import-smoke.ts",
     "incomplete-albums:smoke": "tsx src/scripts/incomplete-albums-smoke.ts",
     "agent:smoke": "tsx src/scripts/agent-smoke.ts",
+    "agent-run:smoke": "tsx src/scripts/agent-run-smoke.ts",
     "agent-thread:smoke": "tsx src/scripts/agent-thread-smoke.ts",
     "album-playback:smoke": "tsx src/scripts/album-playback-smoke.ts",
     "artwork:smoke": "tsx src/scripts/artwork-smoke.ts",

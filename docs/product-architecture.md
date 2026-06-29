@@ -291,6 +291,7 @@ MUSIC_OS_SLSKD_SEARCH_COMPLETED_EMPTY_GRACE_MS=5000
 MUSIC_OS_SLSKD_SEARCH_PARTIAL_AFTER_MS=4000
 MUSIC_OS_SLSKD_SEARCH_FILE_LIMIT=10000
 MUSIC_OS_SLSKD_SEARCH_FILTER_RESPONSES=1
+MUSIC_OS_SLSKD_SUPPRESSED_SEARCH_TERMS=the beatles,beatles,le sserafim,sserafim
 ```
 
 Connector behavior:
@@ -300,6 +301,7 @@ Connector behavior:
 - Discovery health reports both connection reachability and whether download staging has a configured `MUSIC_OS_SLSKD_DOWNLOAD_DIR`.
 - Search results are normalized into `DiscoveryResult` records with username, filename, remote path/folder, size, extension, audio hints, lock status, and raw source data.
 - Discovery searches retry empty slskd responses once by default, then retry with a cleaned search text when that differs from the original query. This handles transient 0-result responses from slskd without making every successful search wait for the full timeout.
+- Agent Discovery runs also generate fallback search terms when an empty result may be caused by Soulseek-suppressed artist tokens. For example, a failed `le sserafim antifragile` search can fall back to `antifragile`, while every attempted query is stored in the agent run trace.
 - Results also carry peer availability hints from the slskd response: `hasFreeUploadSlot`, `queueLength`, and `uploadSpeedBytesPerSecond`. Backend download source selection (agent download proposals and the transfer smoke scripts) ranks unlocked results by free slot, then shorter remote queue, then faster reported upload speed, so transfers prefer peers likely to start sending immediately.
 - The mapper is tolerant of response shape differences across slskd versions.
 - Selected unlocked results create database-backed `discovery_download` jobs. Jobs queue files through slskd, poll the configured download folder, and copy completed files into Music OS staging as a `slskd_download` import batch.
@@ -355,6 +357,21 @@ Agent Discovery behavior:
 - Explicit agent prompts to propose/review/approve imports search reviewable Import Inbox items and create an agent-sourced import approval operation batch. The batch still requires normal Operations approval/apply before files enter the library.
 
 The `agent:smoke` script verifies the read-only Discovery search path, owned-match detection, pasted-list parsing, executable `queue_download` handoff for explicit download requests, and import approval proposals from staged inbox items. The `saved-discovery-lists:smoke` script verifies saved parsed-list persistence across backend app restarts.
+
+Agent run loop:
+
+- `agent_runs` and `agent_steps` persist an inspectable agent loop trace separately from chat transcript messages.
+- `POST /agent/runs` starts a durable local run and returns the final response plus ordered plan/tool/decision/approval/final steps. `GET /agent/runs` lists recent runs and `GET /agent/runs/:id` returns the full trace.
+- Mutating actions still flow through reviewable Operations batches. The run can propose `queue_download`, import approval, playlist, and cleanup operations, but applying them remains a separate approval step.
+- The first loop implementation uses deterministic local planning and typed tool calls so the harness is stable. Agent runs can call read-only internet metadata lookup through MusicBrainz before Soulseek search, recording release/title hints in the run trace. When `MUSIC_OS_AGENT_MODEL_PROVIDER=openai` and `OPENAI_API_KEY` are configured, the run also asks the hosted Responses API for compact planning notes and Soulseek fallback search hints, records that model step, then still executes all tools locally.
+
+Optional hosted planner configuration:
+
+```bash
+MUSIC_OS_AGENT_MODEL_PROVIDER=openai
+OPENAI_API_KEY=<OpenAI API key>
+MUSIC_OS_OPENAI_MODEL=gpt-5.5
+```
 
 ## Phase 9 Implementation
 

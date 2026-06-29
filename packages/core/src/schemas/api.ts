@@ -632,6 +632,7 @@ export const agentImportResultSchema = z.object({
 
 export const agentMessageResponseSchema = z.object({
   threadId: z.string().min(1).optional(),
+  runId: z.string().min(1).optional(),
   reply: z.string().min(1),
   intent: z.enum([
     "search_library",
@@ -651,6 +652,53 @@ export const agentMessageResponseSchema = z.object({
   importResults: z.array(agentImportResultSchema),
   operationBatch: operationBatchSchema.nullable(),
   playback: playbackStateSchema.nullable()
+});
+
+export const agentRunStatusSchema = z.enum(["running", "completed", "failed"]);
+
+export const agentStepStatusSchema = z.enum(["running", "completed", "failed"]);
+
+export const agentStepTypeSchema = z.enum(["plan", "tool", "decision", "approval", "final"]);
+
+export const agentStepSchema = z.object({
+  id: z.string().min(1),
+  runId: z.string().min(1),
+  stepIndex: z.number().int().nonnegative(),
+  type: agentStepTypeSchema,
+  toolName: z.string().nullable(),
+  status: agentStepStatusSchema,
+  summary: z.string().min(1),
+  input: z.unknown().nullable(),
+  output: z.unknown().nullable(),
+  error: z.string().nullable(),
+  createdAt: z.string(),
+  completedAt: z.string().nullable()
+});
+
+export const agentRunSchema = z.object({
+  id: z.string().min(1),
+  threadId: z.string().min(1).nullable(),
+  status: agentRunStatusSchema,
+  objective: z.string().min(1),
+  response: agentMessageResponseSchema.nullable(),
+  error: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  completedAt: z.string().nullable(),
+  steps: z.array(agentStepSchema)
+});
+
+export const agentRunRequestSchema = z.object({
+  message: z.string().min(1),
+  threadId: z.string().min(1).optional()
+});
+
+export const agentRunResponseSchema = z.object({
+  run: agentRunSchema
+});
+
+export const agentRunsResponseSchema = z.object({
+  runs: z.array(agentRunSchema.omit({ steps: true }))
 });
 
 export const agentThreadSchema = z.object({
@@ -1002,6 +1050,14 @@ export type AgentDiscoveryGroup = z.infer<typeof agentDiscoveryGroupSchema>;
 export type AgentParsedListItem = z.infer<typeof agentParsedListItemSchema>;
 export type AgentImportResult = z.infer<typeof agentImportResultSchema>;
 export type AgentMessageResponse = z.infer<typeof agentMessageResponseSchema>;
+export type AgentRunStatus = z.infer<typeof agentRunStatusSchema>;
+export type AgentStepStatus = z.infer<typeof agentStepStatusSchema>;
+export type AgentStepType = z.infer<typeof agentStepTypeSchema>;
+export type AgentStep = z.infer<typeof agentStepSchema>;
+export type AgentRun = z.infer<typeof agentRunSchema>;
+export type AgentRunRequest = z.infer<typeof agentRunRequestSchema>;
+export type AgentRunResponse = z.infer<typeof agentRunResponseSchema>;
+export type AgentRunsResponse = z.infer<typeof agentRunsResponseSchema>;
 export type AgentThread = z.infer<typeof agentThreadSchema>;
 export type AgentThreadMessage = z.infer<typeof agentThreadMessageSchema>;
 export type AgentThreadResponse = z.infer<typeof agentThreadResponseSchema>;

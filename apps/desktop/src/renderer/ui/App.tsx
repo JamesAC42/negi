@@ -32,6 +32,7 @@ import {
   albumGroupsResponseSchema,
   albumMergeSuggestionsResponseSchema,
   agentMessageResponseSchema,
+  agentRunResponseSchema,
   agentThreadResponseSchema,
   agentThreadsResponseSchema,
   alternateEditionGroupsResponseSchema,
@@ -68,6 +69,7 @@ import {
   qualityUpgradeSuggestionsResponseSchema,
   tasteProfileResponseSchema,
   watchedLibraryScanResultSchema,
+  type AgentRun,
   type AgentMessageResponse,
   type AgentParsedListItem,
   type AgentThreadResponse,
@@ -222,7 +224,7 @@ type AlbumGroupItem = AlbumGroupsResponse["albums"][number];
 
 type AgentMessage =
   | { id: string; role: "user"; text: string; response?: null }
-  | { id: string; role: "agent"; text: string; response: AgentMessageResponse | null };
+  | { id: string; role: "agent"; text: string; response: AgentMessageResponse | null; run?: AgentRun | null };
 
 type DiagnosticsState =
   | { status: "idle" }
@@ -2053,13 +2055,14 @@ export function App(): ReactElement {
     setAgentBusy(true);
     setAgentMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", text: message }]);
     try {
-      const response = await sendAgentMessage(message, agentThreadId ?? undefined);
+      const agentRun = await sendAgentMessage(message, agentThreadId ?? undefined);
+      const response = agentRun.response;
       if (response.threadId) {
         setAgentThreadId(response.threadId);
       }
       setAgentMessages((current) => [
         ...current,
-        { id: crypto.randomUUID(), role: "agent", text: response.reply, response }
+        { id: crypto.randomUUID(), role: "agent", text: response.reply, response, run: agentRun.run }
       ]);
       if (response.operationBatch) {
         replaceOperationBatch(response.operationBatch);
@@ -2139,13 +2142,14 @@ export function App(): ReactElement {
     setAgentBusy(true);
     setAgentMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", text: message }]);
     try {
-      const response = await sendAgentMessage(message, agentThreadId ?? undefined);
+      const agentRun = await sendAgentMessage(message, agentThreadId ?? undefined);
+      const response = agentRun.response;
       if (response.threadId) {
         setAgentThreadId(response.threadId);
       }
       setAgentMessages((current) => [
         ...current,
-        { id: crypto.randomUUID(), role: "agent", text: response.reply, response }
+        { id: crypto.randomUUID(), role: "agent", text: response.reply, response, run: agentRun.run }
       ]);
       setParsedDiscoveryList({
         status: "ready",
@@ -2303,13 +2307,14 @@ export function App(): ReactElement {
     setAgentMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", text: message }]);
     setActiveView("Agent");
     try {
-      const response = await sendAgentMessage(message, agentThreadId ?? undefined);
+      const agentRun = await sendAgentMessage(message, agentThreadId ?? undefined);
+      const response = agentRun.response;
       if (response.threadId) {
         setAgentThreadId(response.threadId);
       }
       setAgentMessages((current) => [
         ...current,
-        { id: crypto.randomUUID(), role: "agent", text: response.reply, response }
+        { id: crypto.randomUUID(), role: "agent", text: response.reply, response, run: agentRun.run }
       ]);
       if (response.operationBatch) {
         replaceOperationBatch(response.operationBatch);
@@ -2362,13 +2367,14 @@ export function App(): ReactElement {
     setAgentMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", text: message }]);
     setActiveView("Agent");
     try {
-      const response = await sendAgentMessage(message, agentThreadId ?? undefined);
+      const agentRun = await sendAgentMessage(message, agentThreadId ?? undefined);
+      const response = agentRun.response;
       if (response.threadId) {
         setAgentThreadId(response.threadId);
       }
       setAgentMessages((current) => [
         ...current,
-        { id: crypto.randomUUID(), role: "agent", text: response.reply, response }
+        { id: crypto.randomUUID(), role: "agent", text: response.reply, response, run: agentRun.run }
       ]);
       if (response.operationBatch) {
         replaceOperationBatch(response.operationBatch);
@@ -9895,7 +9901,9 @@ function AgentView({
           <div className={`agentMessage ${message.role}`} key={message.id}>
             <span>{message.role === "user" ? "You" : "Agent"}</span>
             <strong>{message.text}</strong>
-            {message.role === "agent" && message.response ? <AgentResultSummary response={message.response} /> : null}
+            {message.role === "agent" && message.response ? (
+              <AgentResultSummary response={message.response} run={message.run ?? null} />
+            ) : null}
           </div>
         ))}
         {agentBusy ? (
@@ -9909,7 +9917,7 @@ function AgentView({
   );
 }
 
-function AgentResultSummary({ response }: { response: AgentMessageResponse }): ReactElement {
+function AgentResultSummary({ response, run }: { response: AgentMessageResponse; run?: AgentRun | null }): ReactElement {
   const resultCount =
     response.intent === "search_discovery"
       ? response.discoveryResults.length
@@ -9928,6 +9936,7 @@ function AgentResultSummary({ response }: { response: AgentMessageResponse }): R
           Proposed batch: {response.operationBatch.summary} · {response.operationBatch.status}
         </span>
       ) : null}
+      {run && run.steps.length > 0 ? <AgentRunTrace run={run} /> : null}
       {response.results.length > 0 ? (
         <div className="agentResults">
           {response.results.slice(0, 8).map((result) => (
@@ -9982,6 +9991,26 @@ function AgentResultSummary({ response }: { response: AgentMessageResponse }): R
       ) : null}
     </div>
   );
+}
+
+function AgentRunTrace({ run }: { run: AgentRun }): ReactElement {
+  return (
+    <details className="agentResults">
+      <summary>
+        Run trace Â· {run.status} Â· {run.steps.length} step{run.steps.length === 1 ? "" : "s"}
+      </summary>
+      {run.steps.map((step) => (
+        <span key={step.id}>
+          {step.stepIndex + 1}. {stepLabel(step.type, step.toolName)} Â· {step.status} Â· {step.summary}
+          {step.error ? ` Â· ${step.error}` : ""}
+        </span>
+      ))}
+    </details>
+  );
+}
+
+function stepLabel(type: AgentRun["steps"][number]["type"], toolName: string | null): string {
+  return toolName ? `${type}:${toolName}` : type;
 }
 
 async function listRoots() {
@@ -10178,7 +10207,14 @@ async function createAgentThread() {
 }
 
 async function sendAgentMessage(message: string, threadId: string | undefined) {
-  return postJson("/agent/message", { message, threadId }, agentMessageResponseSchema);
+  const result = await postJson("/agent/runs", { message, threadId }, agentRunResponseSchema);
+  if (!result.run.response) {
+    throw new Error(result.run.error ?? "Agent run did not return a response");
+  }
+  return {
+    response: result.run.response,
+    run: result.run
+  };
 }
 
 async function proposeImportApproval(importItemId: string, libraryRootId: string) {
