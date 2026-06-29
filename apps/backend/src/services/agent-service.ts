@@ -32,6 +32,8 @@ export type AgentStepRecorder = (step: {
 export interface AgentHandleMessageOptions {
   recordStep?: AgentStepRecorder;
   discoveryQueryHints?: string[];
+  suggestedIntent?: AgentMessageResponse["intent"];
+  suggestedSearchQuery?: string;
 }
 
 export class AgentService {
@@ -44,14 +46,21 @@ export class AgentService {
   ) {}
 
   async handleMessage(message: string, options: AgentHandleMessageOptions = {}): Promise<AgentMessageResponse> {
-    const intent = detectIntent(message);
-    const searchQuery = extractSearchQuery(message, intent);
+    const detectedIntent = detectIntent(message);
+    const intent = applySuggestedIntent(detectedIntent, options.suggestedIntent);
+    const searchQuery = cleanSuggestedSearchQuery(options.suggestedSearchQuery) || extractSearchQuery(message, intent);
     options.recordStep?.({
       type: "plan",
       status: "completed",
-      summary: `Detected intent ${intent}`,
+      summary: intent === detectedIntent ? `Detected intent ${intent}` : `Detected intent ${detectedIntent}; using model intent ${intent}`,
       input: { message },
-      output: { intent, searchQuery }
+      output: {
+        detectedIntent,
+        suggestedIntent: options.suggestedIntent ?? null,
+        suggestedSearchQuery: options.suggestedSearchQuery ?? null,
+        intent,
+        searchQuery
+      }
     });
     if (intent === "parse_pasted_list") {
       return this.handlePastedList(message);
@@ -449,6 +458,19 @@ function detectIntent(message: string): AgentMessageResponse["intent"] {
   return "unknown";
 }
 
+function applySuggestedIntent(
+  detectedIntent: AgentMessageResponse["intent"],
+  suggestedIntent: AgentMessageResponse["intent"] | undefined
+): AgentMessageResponse["intent"] {
+  if (!suggestedIntent || suggestedIntent === "unknown" || suggestedIntent === detectedIntent) {
+    return detectedIntent;
+  }
+  if (detectedIntent === "search_library" || detectedIntent === "unknown") {
+    return suggestedIntent;
+  }
+  return detectedIntent;
+}
+
 function extractSearchQuery(message: string, intent: AgentMessageResponse["intent"]): string {
   let query = message.toLowerCase();
   query = query.replace(/[^\p{L}\p{N}\s'-]+/gu, " ");
@@ -537,6 +559,18 @@ function extractSearchQuery(message: string, intent: AgentMessageResponse["inten
     .split(/\s+/)
     .map((word) => word.trim())
     .filter((word) => word && !stopWords.has(word))
+    .join(" ")
+    .trim();
+}
+
+function cleanSuggestedSearchQuery(value: string | undefined): string {
+  if (!value) {
+    return "";
+  }
+  const filler = new Set(["a", "an", "album", "download", "find", "here", "me", "please", "search", "song", "songs", "the", "this", "track", "tracks"]);
+  return cleanFallbackQuery(value)
+    .split(/\s+/)
+    .filter((token) => token && !filler.has(token))
     .join(" ")
     .trim();
 }

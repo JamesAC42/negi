@@ -166,6 +166,60 @@ try {
     "expected traced model planning hints"
   );
 
+  const modelIntentSearchCalls: string[] = [];
+  const modelIntentAgent = new AgentService(app.library, app.operations, app.playback, {
+    async search(query: string): Promise<DiscoverySearchResponse> {
+      modelIntentSearchCalls.push(query);
+      return query === "daft punk"
+        ? {
+            query,
+            total: 1,
+            results: [
+              {
+                id: "daft-punk-result",
+                source: "slskd",
+                username: "remote-user",
+                filename: "01 - One More Time.flac",
+                path: "Daft Punk/Discovery/01 - One More Time.flac",
+                folder: "Daft Punk/Discovery",
+                sizeBytes: 45_000_000,
+                extension: "flac",
+                bitrate: 950_000,
+                sampleRate: 44_100,
+                lengthSeconds: 320,
+                isLocked: false,
+                hasFreeUploadSlot: true,
+                uploadSpeedBytesPerSecond: 2_000_000,
+                queueLength: 0,
+                raw: {}
+              }
+            ]
+          }
+        : { query, total: 0, results: [] };
+    }
+  });
+  const modelIntentRuns = new AgentRunService(
+    app.db,
+    modelIntentAgent,
+    {
+      name: "fixture_model",
+      async plan() {
+        return {
+          summary: "Fixture model recognized an external discovery request",
+          intent: "search_discovery",
+          searchQuery: "daft punk",
+          searchQueryHints: ["discovery", "random access memories"]
+        };
+      }
+    },
+    undefined
+  );
+  const modelIntentRun = await modelIntentRuns.run("find a daft punk song here");
+  assert(modelIntentRun.response?.intent === "search_discovery", `expected model intent to route Discovery, got ${modelIntentRun.response?.intent}`);
+  assert(modelIntentRun.response?.searchQuery === "daft punk", `expected cleaned model search query, got ${modelIntentRun.response?.searchQuery}`);
+  assert(modelIntentSearchCalls[0] === "daft punk", `expected cleaned model query first, got ${modelIntentSearchCalls[0]}`);
+  assert(!modelIntentSearchCalls.includes("daft punk song here"), "did not expect literal filler query to be searched");
+
   const releaseContextSearchCalls: string[] = [];
   const releaseContextAgent = new AgentService(app.library, app.operations, app.playback, {
     async search(query: string): Promise<DiscoverySearchResponse> {
@@ -228,6 +282,8 @@ try {
         operationBatchId: run.response.operationBatch.id,
         modelRunId: modelRun.id,
         modelAttemptedQueries: modelSearchCalls,
+        modelIntentRunId: modelIntentRun.id,
+        modelIntentAttemptedQueries: modelIntentSearchCalls,
         releaseContextRunId: releaseContextRun.id,
         releaseContextAttemptedQueries: releaseContextSearchCalls
       },

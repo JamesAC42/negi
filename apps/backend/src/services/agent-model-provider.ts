@@ -1,7 +1,10 @@
 import type { BackendConfig } from "../config.js";
+import type { AgentMessageResponse } from "@music-os/core";
 
 export interface AgentModelPlan {
   summary: string;
+  intent?: AgentMessageResponse["intent"];
+  searchQuery?: string;
   searchQueryHints: string[];
 }
 
@@ -54,7 +57,10 @@ class OpenAIResponsesAgentModelProvider implements AgentModelProvider {
                 type: "input_text",
                 text:
                   `User request: ${message}\n\n` +
-                  "Return JSON with shape {\"summary\": string, \"searchQueryHints\": string[]}.\n" +
+                  "Return JSON with shape {\"summary\": string, \"intent\": string, \"searchQuery\": string, \"searchQueryHints\": string[]}.\n" +
+                  "Allowed intents: search_library, search_discovery, parse_pasted_list, propose_import, propose_playlist, propose_duplicate_cleanup, playback, unknown.\n" +
+                  "Use search_library only when the user likely wants to search indexed local files. Use search_discovery when the user likely wants to find music not already known to be in the local library, asks broadly to find a song/album, or mentions Soulseek/downloads.\n" +
+                  "searchQuery should be the cleaned music target, not filler words like here, this, song, album, find, search, or download.\n" +
                   "searchQueryHints should be short Soulseek fallback searches, especially album/title/track names that avoid famous artist tokens likely to be suppressed."
               }
             ]
@@ -98,19 +104,42 @@ function parsePlan(text: string): AgentModelPlan | null {
   try {
     const parsed = JSON.parse(jsonText) as Record<string, unknown>;
     const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
+    const intent = parseIntent(parsed.intent);
+    const searchQuery = typeof parsed.searchQuery === "string" ? parsed.searchQuery.trim() : "";
     const searchQueryHints = Array.isArray(parsed.searchQueryHints)
       ? parsed.searchQueryHints.filter((hint): hint is string => typeof hint === "string").map((hint) => hint.trim()).filter(Boolean)
       : [];
-    if (!summary && searchQueryHints.length === 0) {
+    if (!summary && !intent && !searchQuery && searchQueryHints.length === 0) {
       return null;
     }
     return {
       summary: summary || "Model generated search hints.",
+      intent,
+      searchQuery: searchQuery || undefined,
       searchQueryHints: [...new Set(searchQueryHints)].slice(0, 8)
     };
   } catch {
     return null;
   }
+}
+
+function parseIntent(value: unknown): AgentMessageResponse["intent"] | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  if (
+    value === "search_library" ||
+    value === "search_discovery" ||
+    value === "parse_pasted_list" ||
+    value === "propose_import" ||
+    value === "propose_playlist" ||
+    value === "propose_duplicate_cleanup" ||
+    value === "playback" ||
+    value === "unknown"
+  ) {
+    return value;
+  }
+  return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

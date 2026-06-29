@@ -96,6 +96,8 @@ export class AgentRunService {
 
     try {
       const searchQueryHints: string[] = [];
+      let suggestedIntent: AgentMessageResponse["intent"] | undefined;
+      let suggestedSearchQuery: string | undefined;
       if (this.metadataTool) {
         try {
           const metadata = await this.metadataTool.lookup(objective);
@@ -125,6 +127,8 @@ export class AgentRunService {
         try {
           const modelPlan = await this.modelProvider.plan(objective);
           if (modelPlan) {
+            suggestedIntent = modelPlan.intent ?? suggestedIntent;
+            suggestedSearchQuery = modelPlan.searchQuery ?? suggestedSearchQuery;
             searchQueryHints.push(...modelPlan.searchQueryHints);
             recordStep({
               type: "plan",
@@ -132,7 +136,7 @@ export class AgentRunService {
               status: "completed",
               summary: modelPlan.summary,
               input: { objective },
-              output: { searchQueryHints }
+              output: { suggestedIntent, suggestedSearchQuery, searchQueryHints }
             });
           }
         } catch (error) {
@@ -147,7 +151,12 @@ export class AgentRunService {
         }
       }
       const response = {
-        ...(await this.agent.handleMessage(objective, { recordStep, discoveryQueryHints: searchQueryHints })),
+        ...(await this.agent.handleMessage(objective, {
+          recordStep,
+          discoveryQueryHints: searchQueryHints,
+          suggestedIntent,
+          suggestedSearchQuery
+        })),
         runId,
         threadId: thread.id
       };
