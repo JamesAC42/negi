@@ -709,6 +709,39 @@ export const agentRunsResponseSchema = z.object({
   runs: z.array(agentRunSchema.omit({ steps: true }))
 });
 
+export const agentPlaylistWorkflowStatusSchema = z.enum([
+  "waiting_for_batch",
+  "waiting_for_download",
+  "waiting_for_import",
+  "creating_playlist",
+  "completed",
+  "failed"
+]);
+
+export const agentPlaylistWorkflowSchema = z.object({
+  id: z.string().min(1),
+  runId: z.string().min(1).nullable(),
+  threadId: z.string().min(1).nullable(),
+  operationBatchId: z.string().min(1),
+  status: agentPlaylistWorkflowStatusSchema,
+  playlistName: z.string().min(1),
+  playlistDescription: z.string().nullable(),
+  ownedFileIds: z.array(z.string().min(1)),
+  downloadJobId: z.string().min(1).nullable(),
+  importId: z.string().min(1).nullable(),
+  importOperationBatchId: z.string().min(1).nullable(),
+  playlistOperationBatchId: z.string().min(1).nullable(),
+  playlistId: z.string().min(1).nullable(),
+  error: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  completedAt: z.string().nullable()
+});
+
+export const agentPlaylistWorkflowsResponseSchema = z.object({
+  workflows: z.array(agentPlaylistWorkflowSchema)
+});
+
 export const agentThreadSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -1067,6 +1100,9 @@ export type AgentRun = z.infer<typeof agentRunSchema>;
 export type AgentRunRequest = z.infer<typeof agentRunRequestSchema>;
 export type AgentRunResponse = z.infer<typeof agentRunResponseSchema>;
 export type AgentRunsResponse = z.infer<typeof agentRunsResponseSchema>;
+export type AgentPlaylistWorkflowStatus = z.infer<typeof agentPlaylistWorkflowStatusSchema>;
+export type AgentPlaylistWorkflow = z.infer<typeof agentPlaylistWorkflowSchema>;
+export type AgentPlaylistWorkflowsResponse = z.infer<typeof agentPlaylistWorkflowsResponseSchema>;
 export type AgentThread = z.infer<typeof agentThreadSchema>;
 export type AgentThreadMessage = z.infer<typeof agentThreadMessageSchema>;
 export type AgentThreadResponse = z.infer<typeof agentThreadResponseSchema>;

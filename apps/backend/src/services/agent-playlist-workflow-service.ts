@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
-import type { AgentMessageResponse, DiscoveryDownloadJob, Operation, OperationBatch } from "@music-os/core";
+import type { AgentMessageResponse, AgentPlaylistWorkflow, DiscoveryDownloadJob, Operation, OperationBatch } from "@music-os/core";
 import { LibraryRepository } from "./library-repository.js";
 import { OperationService } from "./operation-service.js";
 import { ImportService } from "./import-service.js";
@@ -44,6 +44,17 @@ export class AgentPlaylistWorkflowService {
     private readonly playlists: PlaylistService,
     private readonly downloads: DiscoveryDownloadService
   ) {}
+
+  listWorkflows(limit = 50): AgentPlaylistWorkflow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM agent_playlist_workflows
+         ORDER BY updated_at DESC, created_at DESC
+         LIMIT ?`
+      )
+      .all(limit) as WorkflowRow[];
+    return rows.map(mapWorkflow);
+  }
 
   registerAgentResponse(runId: string, threadId: string | null, response: AgentMessageResponse): void {
     if (response.intent !== "research_playlist" || !response.operationBatch) {
@@ -267,6 +278,28 @@ export class AgentPlaylistWorkflowService {
         workflowId
       );
   }
+}
+
+function mapWorkflow(row: WorkflowRow): AgentPlaylistWorkflow {
+  return {
+    id: row.id,
+    runId: row.run_id,
+    threadId: row.thread_id,
+    operationBatchId: row.operation_batch_id,
+    status: row.status,
+    playlistName: row.playlist_name,
+    playlistDescription: row.playlist_description,
+    ownedFileIds: parseStringArray(row.owned_file_ids_json),
+    downloadJobId: row.download_job_id,
+    importId: row.import_id,
+    importOperationBatchId: row.import_operation_batch_id,
+    playlistOperationBatchId: row.playlist_operation_batch_id,
+    playlistId: row.playlist_id,
+    error: row.error,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    completedAt: row.completed_at
+  };
 }
 
 function readDownloadJobId(batch: OperationBatch): string | null {

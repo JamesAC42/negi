@@ -9,6 +9,7 @@ import {
   agentRunRequestSchema,
   agentRunResponseSchema,
   agentRunsResponseSchema,
+  agentPlaylistWorkflowsResponseSchema,
   agentThreadResponseSchema,
   agentThreadsResponseSchema,
   createAgentThreadRequestSchema,
@@ -449,6 +450,12 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/agent/runs") {
       writeJson(response, 200, agentRunsResponseSchema.parse({ runs: app.agentRuns.listRuns() }));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/agent/playlist-workflows") {
+      await app.agentPlaylistWorkflows.advanceAll();
+      writeJson(response, 200, agentPlaylistWorkflowsResponseSchema.parse({ workflows: app.agentPlaylistWorkflows.listWorkflows() }));
       return;
     }
 

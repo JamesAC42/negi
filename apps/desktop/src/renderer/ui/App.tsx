@@ -32,6 +32,7 @@ import {
   albumGroupsResponseSchema,
   albumMergeSuggestionsResponseSchema,
   agentMessageResponseSchema,
+  agentPlaylistWorkflowsResponseSchema,
   agentRunResponseSchema,
   agentThreadResponseSchema,
   agentThreadsResponseSchema,
@@ -71,6 +72,7 @@ import {
   watchedLibraryScanResultSchema,
   type AgentRun,
   type AgentMessageResponse,
+  type AgentPlaylistWorkflow,
   type AgentParsedListItem,
   type AgentThreadResponse,
   type AgentThreadsResponse,
@@ -411,6 +413,7 @@ export function App(): ReactElement {
     message: null
   });
   const [discoveryDownloadJobs, setDiscoveryDownloadJobs] = useState<DiscoveryDownloadJob[]>([]);
+  const [agentPlaylistWorkflows, setAgentPlaylistWorkflows] = useState<AgentPlaylistWorkflow[]>([]);
   const [savedDiscoveryCandidates, setSavedDiscoveryCandidates] = useState<SavedDiscoveryCandidate[]>([]);
   const [savedDiscoveryLists, setSavedDiscoveryLists] = useState<SavedDiscoveryList[]>([]);
   const [agentInput, setAgentInput] = useState("");
@@ -794,10 +797,20 @@ export function App(): ReactElement {
     try {
       const result = await listDiscoveryDownloads();
       setDiscoveryDownloadJobs(result.jobs);
+      await refreshAgentPlaylistWorkflows();
       void refreshJobs();
       if (result.jobs.some((job) => job.imported)) {
         await refreshImports();
       }
+    } catch (error) {
+      setDiscoveryDownloadState((current) => ({ ...current, message: getErrorMessage(error) }));
+    }
+  }
+
+  async function refreshAgentPlaylistWorkflows(): Promise<void> {
+    try {
+      const result = await listAgentPlaylistWorkflows();
+      setAgentPlaylistWorkflows(result.workflows);
     } catch (error) {
       setDiscoveryDownloadState((current) => ({ ...current, message: getErrorMessage(error) }));
     }
@@ -2717,6 +2730,7 @@ export function App(): ReactElement {
             discoveryQuery={discoveryQuery}
             downloadState={discoveryDownloadState}
             downloadJobs={discoveryDownloadJobs}
+            playlistWorkflows={agentPlaylistWorkflows}
             discoveryState={discoveryState}
             discoverySource={discoverySource}
             formatFilter={discoveryFormatFilter}
@@ -6693,6 +6707,7 @@ function DiscoveryView({
   discoveryQuery,
   downloadState,
   downloadJobs,
+  playlistWorkflows,
   discoveryState,
   discoverySource,
   formatFilter,
@@ -6738,6 +6753,7 @@ function DiscoveryView({
   discoveryQuery: string;
   downloadState: { status: "idle" | "working"; message: string | null };
   downloadJobs: DiscoveryDownloadJob[];
+  playlistWorkflows: AgentPlaylistWorkflow[];
   discoveryState: DiscoveryState;
   discoverySource: DiscoverySource;
   formatFilter: DiscoveryFormatFilter;
@@ -6839,6 +6855,7 @@ function DiscoveryView({
   const firstMissingParsedItem = parsedListState.items.find((item) => item.ownedMatchCount === 0) ?? null;
   const missingParsedCount = parsedListState.items.filter((item) => item.ownedMatchCount === 0).length;
   const activeDownloadCount = downloadJobs.filter((job) => job.status === "queued" || job.status === "running").length;
+  const activeWorkflowCount = playlistWorkflows.filter((workflow) => workflow.status !== "completed" && workflow.status !== "failed").length;
   const discoveryStatusDetail = discoveryState.health?.message ?? discoveryState.health?.url ?? "Check slskd before searching.";
 
   useEffect(() => {
@@ -7230,6 +7247,31 @@ function DiscoveryView({
               <button type="button" onClick={onOpenJobs}>
                 View Jobs
               </button>
+            </section>
+          ) : null}
+
+          {playlistWorkflows.length > 0 ? (
+            <section className="downloadJobsCompact" aria-label="Agent playlist workflows">
+              <div className="discoveryPanelHeader">
+                <div>
+                  <span className="eyebrow">Agent</span>
+                  <strong>Playlist workflows</strong>
+                </div>
+                <span>{activeWorkflowCount.toLocaleString()} active</span>
+              </div>
+              <div className="savedDiscoveryList">
+                {playlistWorkflows.slice(0, 4).map((workflow) => (
+                  <div className="savedDiscoveryItem" key={workflow.id}>
+                    <div>
+                      <strong>{workflow.playlistName}</strong>
+                      <span>
+                        {formatAgentPlaylistWorkflowStatus(workflow)}
+                        {workflow.error ? ` · ${workflow.error}` : ""}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </section>
           ) : null}
 
@@ -10184,6 +10226,10 @@ async function listDiscoveryDownloads() {
   return getJson("/discovery/downloads", discoveryDownloadJobsResponseSchema);
 }
 
+async function listAgentPlaylistWorkflows() {
+  return getJson("/agent/playlist-workflows", agentPlaylistWorkflowsResponseSchema);
+}
+
 async function listJobs() {
   return getJson("/jobs", jobsResponseSchema);
 }
@@ -11380,6 +11426,28 @@ function cleanQuotedMessage(value: string): string {
 
 function titleCase(value: string): string {
   return value.replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function formatAgentPlaylistWorkflowStatus(workflow: AgentPlaylistWorkflow): string {
+  if (workflow.status === "completed") {
+    return workflow.playlistId ? `Completed · playlist ${workflow.playlistId}` : "Completed";
+  }
+  if (workflow.status === "failed") {
+    return "Failed";
+  }
+  if (workflow.status === "waiting_for_batch") {
+    return "Waiting for approval";
+  }
+  if (workflow.status === "waiting_for_download") {
+    return "Waiting for Soulseek downloads";
+  }
+  if (workflow.status === "waiting_for_import") {
+    return "Importing downloaded tracks";
+  }
+  if (workflow.status === "creating_playlist") {
+    return "Creating playlist";
+  }
+  return workflow.status;
 }
 
 function formatDiscoveryDownloadMessage(job: DiscoveryDownloadJob): string {

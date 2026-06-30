@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { AgentStep, DiscoverySearchResponse } from "@music-os/core";
+import { agentPlaylistWorkflowsResponseSchema, type AgentStep, type DiscoverySearchResponse } from "@music-os/core";
 import type { BackendApp } from "../app.js";
 import { createBackendApp } from "../app.js";
 import { AgentService } from "../services/agent-service.js";
@@ -296,6 +296,10 @@ try {
     .get(researchPlaylistRun.id) as { status: string; playlist_name: string } | undefined;
   assert(researchWorkflow?.status === "waiting_for_batch", `expected registered playlist workflow, got ${researchWorkflow?.status}`);
   assert(researchWorkflow.playlist_name === "Late Night Electronic", `expected workflow playlist name, got ${researchWorkflow.playlist_name}`);
+  const workflowResponse = agentPlaylistWorkflowsResponseSchema.parse({
+    workflows: app.agentPlaylistWorkflows.listWorkflows()
+  });
+  assert(workflowResponse.workflows.some((workflow) => workflow.runId === researchPlaylistRun.id), "expected workflow to parse through public schema");
 
   const releaseContextSearchCalls: string[] = [];
   const releaseContextAgent = new AgentService(app.library, app.operations, app.playback, {
