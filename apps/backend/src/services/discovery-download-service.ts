@@ -18,6 +18,7 @@ type DownloadJobResult = {
 
 export class DiscoveryDownloadService {
   private readonly activeJobs = new Set<string>();
+  private readonly successListeners: Array<(jobId: string) => void | Promise<void>> = [];
 
   constructor(
     private readonly db: Database.Database,
@@ -27,6 +28,10 @@ export class DiscoveryDownloadService {
     for (const job of this.listJobs().filter((job) => job.status === "queued" || job.status === "running")) {
       this.startJob(job.id);
     }
+  }
+
+  onJobSucceeded(listener: (jobId: string) => void | Promise<void>): void {
+    this.successListeners.push(listener);
   }
 
   listJobs(): DiscoveryDownloadJob[] {
@@ -227,6 +232,7 @@ export class DiscoveryDownloadService {
         )
         .run(JSON.stringify(result), jobId);
       this.addEvent(jobId, "info", `Staged ${completedPaths.length} completed file${completedPaths.length === 1 ? "" : "s"} into Imports`);
+      this.notifySucceeded(jobId);
     } catch (error) {
       this.db
         .prepare(
@@ -239,6 +245,14 @@ export class DiscoveryDownloadService {
         )
         .run(JSON.stringify({ message: getErrorMessage(error) }), jobId);
       this.addEvent(jobId, "error", getErrorMessage(error));
+    }
+  }
+
+  private notifySucceeded(jobId: string): void {
+    for (const listener of this.successListeners) {
+      void Promise.resolve(listener(jobId)).catch((error) => {
+        this.addEvent(jobId, "warning", `Post-download automation failed: ${getErrorMessage(error)}`);
+      });
     }
   }
 

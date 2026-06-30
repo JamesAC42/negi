@@ -156,7 +156,8 @@ try {
         };
       }
     },
-    undefined
+    undefined,
+    app.agentPlaylistWorkflows
   );
   const modelRun = await modelRuns.run("propose download blocked idol group hidden album");
   assert(modelSearchCalls.includes("impurities"), "expected model-provided query hint to be searched");
@@ -212,7 +213,8 @@ try {
         };
       }
     },
-    undefined
+    undefined,
+    app.agentPlaylistWorkflows
   );
   const modelIntentRun = await modelIntentRuns.run("find a daft punk song here");
   assert(modelIntentRun.response?.intent === "search_discovery", `expected model intent to route Discovery, got ${modelIntentRun.response?.intent}`);
@@ -281,6 +283,11 @@ try {
   assert(researchPlaylistRun.response?.operationBatch?.operations.some((operation) => operation.type === "queue_download") === true, "expected researched playlist to propose queue_download");
   assert(researchPlaylistSearchCalls.includes("air la femme d'argent"), "expected first candidate query");
   assert(researchPlaylistSearchCalls.includes("boards of canada roygbiv"), "expected second candidate query");
+  const researchWorkflow = app.db
+    .prepare("SELECT * FROM agent_playlist_workflows WHERE run_id = ?")
+    .get(researchPlaylistRun.id) as { status: string; playlist_name: string } | undefined;
+  assert(researchWorkflow?.status === "waiting_for_batch", `expected registered playlist workflow, got ${researchWorkflow?.status}`);
+  assert(researchWorkflow.playlist_name === "Late Night Electronic", `expected workflow playlist name, got ${researchWorkflow.playlist_name}`);
 
   const releaseContextSearchCalls: string[] = [];
   const releaseContextAgent = new AgentService(app.library, app.operations, app.playback, {

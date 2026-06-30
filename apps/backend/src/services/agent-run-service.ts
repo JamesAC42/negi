@@ -4,6 +4,7 @@ import type { AgentMessageResponse, AgentRunResponse } from "@music-os/core";
 import type { AgentService, AgentStepRecorder } from "./agent-service.js";
 import type { AgentModelProvider, AgentTrackCandidate } from "./agent-model-provider.js";
 import type { AgentMetadataTool } from "./agent-metadata-tool.js";
+import type { AgentPlaylistWorkflowService } from "./agent-playlist-workflow-service.js";
 
 interface AgentRunRow {
   id: string;
@@ -45,7 +46,8 @@ export class AgentRunService {
     private readonly db: Database.Database,
     private readonly agent: AgentService,
     private readonly modelProvider?: AgentModelProvider,
-    private readonly metadataTool?: AgentMetadataTool
+    private readonly metadataTool?: AgentMetadataTool,
+    private readonly playlistWorkflows?: AgentPlaylistWorkflowService
   ) {}
 
   listRuns(limit = 50): AgentRunResponse["run"][] {
@@ -189,6 +191,7 @@ export class AgentRunService {
            WHERE id = ?`
         )
         .run(JSON.stringify(response), runId);
+      this.playlistWorkflows?.registerAgentResponse(runId, thread.id, response);
       this.insertMessage(thread.id, "agent", response.reply, response);
       this.db.prepare("UPDATE agent_threads SET updated_at = datetime('now') WHERE id = ?").run(thread.id);
     } catch (error) {

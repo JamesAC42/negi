@@ -199,6 +199,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/discovery/downloads") {
+      await app.agentPlaylistWorkflows.advanceAll();
       writeJson(response, 200, discoveryDownloadJobsResponseSchema.parse({ jobs: app.discoveryDownloads.listJobs() }));
       return;
     }
@@ -686,6 +687,7 @@ const server = createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/operations/apply-batch") {
       const body = operationBatchIdRequestSchema.parse(await readJson(request));
       const batch = await app.operations.applyBatch(body.batchId);
+      await app.agentPlaylistWorkflows.advanceAll();
       writeJson(response, 200, operationBatchResponseSchema.parse({ batch }));
       return;
     }

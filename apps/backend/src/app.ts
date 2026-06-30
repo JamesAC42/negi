@@ -13,6 +13,7 @@ import { PlaylistService } from "./services/playlist-service.js";
 import { AgentService } from "./services/agent-service.js";
 import { AgentThreadService } from "./services/agent-thread-service.js";
 import { AgentRunService } from "./services/agent-run-service.js";
+import { AgentPlaylistWorkflowService } from "./services/agent-playlist-workflow-service.js";
 import { createAgentModelProvider } from "./services/agent-model-provider.js";
 import { MusicBrainzAgentMetadataTool } from "./services/agent-metadata-tool.js";
 import { SlskdService } from "./services/slskd-service.js";
@@ -38,6 +39,7 @@ export interface BackendApp {
   agent: AgentService;
   agentThreads: AgentThreadService;
   agentRuns: AgentRunService;
+  agentPlaylistWorkflows: AgentPlaylistWorkflowService;
   discovery: SlskdService;
   discoveryDownloads: DiscoveryDownloadService;
   savedDiscoveryCandidates: SavedDiscoveryCandidateService;
@@ -67,9 +69,11 @@ export function createBackendApp(config: BackendConfig): BackendApp {
   const savedDiscoveryLists = new SavedDiscoveryListService(db);
   const operations = new OperationService(db, imports, library, discoveryDownloads);
   const playlists = new PlaylistService(db, library);
+  const agentPlaylistWorkflows = new AgentPlaylistWorkflowService(db, library, operations, imports, playlists, discoveryDownloads);
+  discoveryDownloads.onJobSucceeded((jobId) => agentPlaylistWorkflows.advanceForDownloadJob(jobId));
   const agent = new AgentService(library, operations, playback, discovery, imports);
   const agentThreads = new AgentThreadService(db, agent);
-  const agentRuns = new AgentRunService(db, agent, createAgentModelProvider(config), new MusicBrainzAgentMetadataTool(config));
+  const agentRuns = new AgentRunService(db, agent, createAgentModelProvider(config), new MusicBrainzAgentMetadataTool(config), agentPlaylistWorkflows);
   const jobs = new JobService(db);
   const tasteProfile = new TasteProfileService(db);
   const artwork = new ArtworkService(library, config);
@@ -88,6 +92,7 @@ export function createBackendApp(config: BackendConfig): BackendApp {
     agent,
     agentThreads,
     agentRuns,
+    agentPlaylistWorkflows,
     discovery,
     discoveryDownloads,
     savedDiscoveryCandidates,

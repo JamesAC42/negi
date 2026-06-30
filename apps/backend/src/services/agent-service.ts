@@ -577,7 +577,15 @@ export class AgentService {
     if (discoveryResults.length > 0) {
       operations.push({
         type: "queue_download" as const,
-        payload: { query, results: discoveryResults }
+        payload: {
+          query,
+          results: discoveryResults,
+          researchPlaylist: {
+            name,
+            description,
+            ownedFileIds: [...new Set(ownedFileIds)]
+          }
+        }
       });
     }
     if (ownedFileIds.length > 0) {
