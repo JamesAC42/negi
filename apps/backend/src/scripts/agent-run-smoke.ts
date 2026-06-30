@@ -283,7 +283,8 @@ try {
         };
       }
     },
-    undefined
+    undefined,
+    app.agentPlaylistWorkflows
   );
   const researchPlaylistRun = await researchPlaylistRuns.run("make me a playlist of songs for a late night electronic mood");
   assert(researchPlaylistRun.response?.intent === "research_playlist", `expected research_playlist intent, got ${researchPlaylistRun.response?.intent}`);
