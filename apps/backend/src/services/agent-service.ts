@@ -1250,6 +1250,13 @@ function discoveryQualityScore(
     if (album && haystack.includes(album)) {
       score += 20;
     }
+    const title = normalizeFallbackKey(candidate.title);
+    if (title && normalizedDiscoveryFileTitle(result).includes(title)) {
+      score += 140;
+    }
+    if (hasUnrequestedVersionQualifier(candidate, result)) {
+      score -= 800;
+    }
   }
   const preferredIndex = qualityPreference.preferredFormats.indexOf(extension);
   if (preferredIndex >= 0) {
@@ -1271,6 +1278,24 @@ function discoveryQualityScore(
 }
 
 const losslessFormats = new Set(["flac", "alac", "wav", "aiff", "aif", "ape", "wv", "dsf"]);
+const versionQualifierPattern = /\b(remix|edit|live|demo|instrumental|karaoke|cover|bootleg|acoustic)\b/i;
+
+function hasUnrequestedVersionQualifier(candidate: AgentTrackCandidate, result: DiscoveryResult): boolean {
+  if (versionQualifierPattern.test(candidate.title)) {
+    return false;
+  }
+  return versionQualifierPattern.test([result.filename, result.path, result.folder].filter(Boolean).join(" "));
+}
+
+function normalizedDiscoveryFileTitle(result: DiscoveryResult): string {
+  return normalizeFallbackKey(
+    result.filename
+      .replace(/\.[^.]+$/, "")
+      .replace(/^\s*\d+\s*[-_.]\s*/, "")
+      .replace(/\s*\([^)]*\b(?:remix|mix|edit|version|live|demo|instrumental|karaoke|cover|bootleg|acoustic)\b[^)]*\)\s*/gi, " ")
+      .replace(/\s*\[[^\]]*\b(?:remix|mix|edit|version|live|demo|instrumental|karaoke|cover|bootleg|acoustic)\b[^\]]*\]\s*/gi, " ")
+  );
+}
 
 function mapAgentResult(file: LibraryFile): AgentMessageResponse["results"][number] {
   const tags = file.displayTags;

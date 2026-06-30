@@ -443,6 +443,77 @@ try {
   const qualityRun = await qualityRuns.run("make me a high quality test playlist");
   assert(qualityRun.response?.discoveryResults[0]?.discoveryId === "quality-flac", "expected quality-aware selection to prefer FLAC over more available MP3");
 
+  const versionRuns = new AgentRunService(
+    app.db,
+    new AgentService(app.library, app.operations, app.playback, {
+      async search(query: string): Promise<DiscoverySearchResponse> {
+        return query === "version artist plain song"
+          ? {
+              query,
+              total: 2,
+              results: [
+                {
+                  id: "version-exact-mp3",
+                  source: "slskd",
+                  username: "exact-user",
+                  filename: "01 - Plain Song.mp3",
+                  path: "Version Artist/Version Album/01 - Plain Song.mp3",
+                  folder: "Version Artist/Version Album",
+                  sizeBytes: 8_000_000,
+                  extension: "mp3",
+                  bitrate: 320_000,
+                  sampleRate: 44_100,
+                  lengthSeconds: 210,
+                  isLocked: false,
+                  hasFreeUploadSlot: true,
+                  uploadSpeedBytesPerSecond: 1_000_000,
+                  queueLength: 0,
+                  raw: {}
+                },
+                {
+                  id: "version-remix-flac",
+                  source: "slskd",
+                  username: "remix-user",
+                  filename: "01 - Plain Song (Club Remix).flac",
+                  path: "Version Artist/Version Album/01 - Plain Song (Club Remix).flac",
+                  folder: "Version Artist/Version Album",
+                  sizeBytes: 44_000_000,
+                  extension: "flac",
+                  bitrate: 920_000,
+                  sampleRate: 44_100,
+                  lengthSeconds: 230,
+                  isLocked: false,
+                  hasFreeUploadSlot: true,
+                  uploadSpeedBytesPerSecond: 5_000_000,
+                  queueLength: 0,
+                  raw: {}
+                }
+              ]
+            }
+          : { query, total: 0, results: [] };
+      }
+    }, undefined, app.tasteProfile),
+    {
+      name: "fixture_model",
+      async plan() {
+        return {
+          summary: "Fixture model supplied an exact-version candidate",
+          intent: "research_playlist",
+          playlistName: "Version Preference",
+          searchQueryHints: [],
+          trackCandidates: [{ artist: "Version Artist", title: "Plain Song", album: "Version Album" }]
+        };
+      }
+    },
+    undefined,
+    app.agentPlaylistWorkflows
+  );
+  const versionRun = await versionRuns.run("make me a version-sensitive playlist");
+  assert(
+    versionRun.response?.discoveryResults[0]?.discoveryId === "version-exact-mp3",
+    `expected exact song version to beat remix, got ${versionRun.response?.discoveryResults[0]?.discoveryId}`
+  );
+
   const localRecommendationRun = await new AgentRunService(
     app.db,
     new AgentService(app.library, app.operations, app.playback, {
