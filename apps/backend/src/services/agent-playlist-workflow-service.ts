@@ -231,7 +231,7 @@ export class AgentPlaylistWorkflowService {
       .run(playlistOperationBatchId, finalPlaylistId, row.id);
     this.insertWorkflowMessage(
       row,
-      `Here's your playlist: ${row.playlist_name}. ${playlist.items.length} track${playlist.items.length === 1 ? "" : "s"} are ready.`
+      `Here's your playlist: ${row.playlist_name}. ${playlist.items.length} track${playlist.items.length === 1 ? " is" : "s are"} ready.`
     );
   }
 
