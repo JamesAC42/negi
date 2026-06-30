@@ -299,6 +299,26 @@ try {
   });
   assert(workflowResponse.workflows.some((workflow) => workflow.runId === researchPlaylistRun.id), "expected workflow to parse through public schema");
 
+  const localRecommendationRun = await new AgentRunService(
+    app.db,
+    new AgentService(app.library, app.operations, app.playback, {
+      async search(query: string): Promise<DiscoverySearchResponse> {
+        return { query, total: 0, results: [] };
+      }
+    }),
+    undefined,
+    undefined,
+    app.agentPlaylistWorkflows
+  ).run("recommend songs like daft punk that you think i would like");
+  assert(
+    localRecommendationRun.response?.intent === "research_playlist",
+    `expected natural recommendation prompt to route research_playlist, got ${localRecommendationRun.response?.intent}`
+  );
+  assert(
+    localRecommendationRun.response.searchQuery === "daft punk",
+    `expected recommendation filler words to be stripped, got ${localRecommendationRun.response.searchQuery}`
+  );
+
   const ownedLibraryPath = join(fixtureDir, "owned-library");
   await mkdir(ownedLibraryPath, { recursive: true });
   await writeFile(join(ownedLibraryPath, "durable-one.mp3"), makeId3Fixture("Durable One", "Durable Artist", "Durable Album", "1981"));

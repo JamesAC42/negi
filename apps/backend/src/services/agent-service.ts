@@ -696,6 +696,9 @@ function detectIntent(message: string): AgentMessageResponse["intent"] {
   if (mentionsCurrentPlaybackContext(message) && /\b(like|similar|recommend|recommendation|playlist|mix|songs|tracks|find)\b/.test(text)) {
     return "research_playlist";
   }
+  if (wantsMusicRecommendation(message)) {
+    return "research_playlist";
+  }
   if (/\b(playlist|mix)\b/.test(text) && /\b(make|create|build|propose|generate)\b/.test(text)) {
     if (/\b(mood|vibe|like|similar|recommend|think i would like|for me|based on|research|download|find)\b/.test(text)) {
       return "research_playlist";
@@ -741,6 +744,7 @@ function extractSearchQuery(message: string, intent: AgentMessageResponse["inten
     "by",
     "for",
     "from",
+    "i",
     "in",
     "it",
     "it's",
@@ -758,6 +762,7 @@ function extractSearchQuery(message: string, intent: AgentMessageResponse["inten
     "single",
     "song",
     "songs",
+    "that",
     "track",
     "the",
     "tracks",
@@ -767,7 +772,36 @@ function extractSearchQuery(message: string, intent: AgentMessageResponse["inten
     intent === "propose_playlist"
       ? ["make", "create", "build", "propose", "generate", "playlist", "mix"]
       : intent === "research_playlist"
-        ? ["make", "create", "build", "propose", "generate", "playlist", "mix", "songs", "song", "mood", "vibe", "like", "similar", "recommend", "research"]
+        ? [
+            "make",
+            "create",
+            "build",
+            "propose",
+            "generate",
+            "playlist",
+            "mix",
+            "songs",
+            "song",
+            "tracks",
+            "track",
+            "music",
+            "mood",
+            "vibe",
+            "like",
+            "similar",
+            "recommend",
+            "recommendation",
+            "recommendations",
+            "suggest",
+            "suggestion",
+            "suggestions",
+            "research",
+            "something",
+            "stuff",
+            "think",
+            "would",
+            "you"
+          ]
       : intent === "playback"
         ? ["play", "queue", "listen"]
         : intent === "parse_pasted_list"
@@ -838,6 +872,20 @@ function cleanSuggestedSearchQuery(value: string | undefined): string {
 
 function mentionsCurrentPlaybackContext(message: string): boolean {
   return /\b(this|current|playing|now playing)\s+(song|track|artist|band)\b/i.test(message) || /\b(song|track|artist|band)\s+(playing|on now)\b/i.test(message);
+}
+
+function wantsMusicRecommendation(message: string): boolean {
+  const text = message.toLowerCase();
+  if (/\b(songs?|tracks?|music|artists?|albums?)\s+(like|similar to)\b/.test(text)) {
+    return true;
+  }
+  if (/\b(like|similar to)\s+(this|that|current)\s+(song|track|artist|band|album)\b/.test(text)) {
+    return true;
+  }
+  if (/\b(recommend|recommendation|suggest|suggestion|mood|vibe|think i(?:'|’)d like|think i would like|for me)\b/.test(text)) {
+    return /\b(song|songs|track|tracks|music|artist|artists|album|albums|playlist|mix|something|stuff)\b/.test(text);
+  }
+  return false;
 }
 
 function wantsDownloadProposal(message: string): boolean {

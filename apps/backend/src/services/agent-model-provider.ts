@@ -262,7 +262,11 @@ function dedupeResearchSources(sources: AgentResearchSource[]): AgentResearchSou
 }
 
 function shouldUseWebResearch(message: string): boolean {
-  return /\b(playlist|mix|mood|vibe|recommend|recommendation|similar|like this|like that|think i would like|research|reddit|last\.?fm|rate\s*your\s*music|rym|forum|forums)\b/i.test(message);
+  return (
+    /\b(playlist|mix|mood|vibe|recommend|recommendation|suggest|suggestion|similar|like this|like that|think i(?:'|’)d like|think i would like|research|reddit|last\.?fm|rate\s*your\s*music|rym|forum|forums)\b/i.test(
+      message
+    ) || /\b(songs?|tracks?|music|artists?|albums?)\s+(like|similar to)\b/i.test(message)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
