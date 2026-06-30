@@ -20,34 +20,36 @@ try {
   const empty = app.agentThreads.getActiveThread();
   assert(empty.messages.length === 0, `expected empty active thread, got ${empty.messages.length} messages`);
 
-  const first = await app.agentThreads.sendMessage("find thread artist");
-  assert(first.threadId === empty.thread.id, "first response should use active thread id");
-  assert(first.results.length === 1, `expected one search result, got ${first.results.length}`);
+  const first = await app.agentRuns.run("find thread artist");
+  assert(first.threadId === empty.thread.id, "first run should use active thread id");
+  assert(first.response?.results.length === 1, `expected one search result, got ${first.response?.results.length}`);
 
   const withFirstMessage = app.agentThreads.getThread(empty.thread.id);
   assert(withFirstMessage.thread.title === "find thread artist", `expected thread title from first message, got ${withFirstMessage.thread.title}`);
   assert(withFirstMessage.messages.length === 2, `expected user+agent messages, got ${withFirstMessage.messages.length}`);
   assert(withFirstMessage.messages[0].role === "user", `expected first message user, got ${withFirstMessage.messages[0].role}`);
   assert(withFirstMessage.messages[1].response?.results.length === 1, "expected persisted agent response payload");
+  assert(withFirstMessage.messages[1].response?.runId === first.id, "expected persisted agent response to link to the run");
 
-  const second = await app.agentThreads.sendMessage("make a thread artist playlist", empty.thread.id);
-  assert(second.threadId === empty.thread.id, "second response should stay in same thread");
-  assert(second.operationBatch != null, "second response should persist operation batch payload");
-  assert(second.operationBatch.agentThreadId === empty.thread.id, "agent operation batch should link to the source thread");
+  const second = await app.agentRuns.run("make a thread artist playlist", empty.thread.id);
+  const secondResponse = second.response;
+  assert(second.threadId === empty.thread.id, "second run should stay in same thread");
+  assert(secondResponse?.operationBatch != null, "second response should persist operation batch payload");
+  assert(secondResponse.operationBatch.agentThreadId === empty.thread.id, "agent operation batch should link to the source thread");
   assert(
-    app.operations.getBatch(second.operationBatch.id).agentThreadId === empty.thread.id,
+    app.operations.getBatch(secondResponse.operationBatch.id).agentThreadId === empty.thread.id,
     "reloaded operation batch should retain source thread link"
   );
   assert(
-    app.operations.listBatches().some((batch) => batch.id === second.operationBatch?.id && batch.agentThreadId === empty.thread.id),
+    app.operations.listBatches().some((batch) => batch.id === secondResponse.operationBatch?.id && batch.agentThreadId === empty.thread.id),
     "listed operation batches should expose source thread link"
   );
 
   const newThread = app.agentThreads.createThread("Second Thread");
   assert(newThread.thread.id !== empty.thread.id, "new thread should get a different id");
   assert(newThread.messages.length === 0, "new thread should start with no messages");
-  const secondThreadResponse = await app.agentThreads.sendMessage("find nothing here", newThread.thread.id);
-  assert(secondThreadResponse.threadId === newThread.thread.id, "response should target second thread");
+  const secondThreadRun = await app.agentRuns.run("find nothing here", newThread.thread.id);
+  assert(secondThreadRun.threadId === newThread.thread.id, "run should target second thread");
   assert(app.agentThreads.getThread(newThread.thread.id).messages.length === 2, "second thread should keep its own transcript");
   assert(app.agentThreads.getThread(empty.thread.id).messages.length === 4, "first thread transcript should remain unchanged");
   const listed = app.agentThreads.listThreads();

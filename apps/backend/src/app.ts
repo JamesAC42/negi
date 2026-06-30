@@ -73,7 +73,7 @@ export function createBackendApp(config: BackendConfig): BackendApp {
   const agentPlaylistWorkflows = new AgentPlaylistWorkflowService(db, library, operations, imports, playlists, discoveryDownloads);
   discoveryDownloads.onJobSucceeded((jobId) => agentPlaylistWorkflows.advanceForDownloadJob(jobId));
   const agent = new AgentService(library, operations, playback, discovery, imports, tasteProfile);
-  const agentThreads = new AgentThreadService(db, agent);
+  const agentThreads = new AgentThreadService(db);
   const agentRuns = new AgentRunService(
     db,
     agent,
