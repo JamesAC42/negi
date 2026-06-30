@@ -22,6 +22,12 @@ import type { TasteProfileService } from "./taste-profile-service.js";
 type LibraryFile = LibraryFilesResponse["files"][number];
 type DiscoverySearchTool = Pick<SlskdService, "search">;
 type TasteProfileReader = Pick<TasteProfileService, "getProfile">;
+type DiscoveryQualityPreference = {
+  preferredFormats: string[];
+  preferLossless: boolean;
+  allowMp3IfRare: boolean;
+  minimumBitrateKbps: number | null;
+};
 type AgentStepType = "plan" | "tool" | "decision" | "approval" | "final";
 type AgentStepStatus = "running" | "completed" | "failed";
 export type AgentStepRecorder = (step: {
@@ -94,6 +100,16 @@ export class AgentService {
     } catch {
       return undefined;
     }
+  }
+
+  private getDiscoveryQualityPreference(): DiscoveryQualityPreference {
+    const profile = this.getCompactTasteProfile();
+    return {
+      preferredFormats: profile?.preferredFormats?.map((format) => format.toLowerCase()).filter(Boolean) ?? [],
+      preferLossless: profile?.qualityPreferences?.preferLossless ?? true,
+      allowMp3IfRare: profile?.qualityPreferences?.allowMp3IfRare ?? true,
+      minimumBitrateKbps: profile?.qualityPreferences?.minimumBitrateKbps ?? null
+    };
   }
 
   async handleMessage(message: string, options: AgentHandleMessageOptions = {}): Promise<AgentMessageResponse> {
@@ -560,6 +576,7 @@ export class AgentService {
     });
 
     const selectedDiscoveryResults: DiscoveryResult[] = [];
+    const qualityPreference = this.getDiscoveryQualityPreference();
     if (this.discovery) {
       for (const candidate of missingCandidates.slice(0, 12)) {
         const queries = candidateDiscoveryQueries(candidate);
@@ -574,7 +591,7 @@ export class AgentService {
             input: { candidate, query, responseLimit: 30 },
             output: { query: discovery.query, total: discovery.total, resultCount: discovery.results.length }
           });
-          selected = selectDiscoveryTrackResult(discovery.results, candidate);
+          selected = selectDiscoveryTrackResult(discovery.results, candidate, qualityPreference);
           if (selected) {
             selectedDiscoveryResults.push(selected);
             break;
@@ -583,7 +600,10 @@ export class AgentService {
       }
     }
 
-    const rankedDiscoveryResults = rankDiscoveryResultsByAvailability(selectedDiscoveryResults.filter((result) => !result.isLocked)).slice(0, 12);
+    const rankedDiscoveryResults = rankDiscoveryResultsByQuality(
+      selectedDiscoveryResults.filter((result) => !result.isLocked),
+      qualityPreference
+    ).slice(0, 12);
     const operationBatch =
       ownedFiles.length > 0 || rankedDiscoveryResults.length > 0
         ? this.createResearchPlaylistBatch(
@@ -1135,7 +1155,11 @@ function candidateDiscoveryQueries(candidate: AgentTrackCandidate): string[] {
     .slice(0, 4);
 }
 
-function selectDiscoveryTrackResult(results: DiscoveryResult[], candidate: AgentTrackCandidate): DiscoveryResult | null {
+function selectDiscoveryTrackResult(
+  results: DiscoveryResult[],
+  candidate: AgentTrackCandidate,
+  qualityPreference: DiscoveryQualityPreference
+): DiscoveryResult | null {
   const normalizedArtist = normalizeFallbackKey(candidate.artist);
   const normalizedTitle = normalizeFallbackKey(candidate.title);
   const eligible = results.filter((result) => {
@@ -1145,8 +1169,45 @@ function selectDiscoveryTrackResult(results: DiscoveryResult[], candidate: Agent
     const haystack = normalizeFallbackKey([result.filename, result.path, result.folder].filter(Boolean).join(" "));
     return haystack.includes(normalizedTitle) && (!normalizedArtist || haystack.includes(normalizedArtist));
   });
-  return rankDiscoveryResultsByAvailability(eligible)[0] ?? null;
+  return rankDiscoveryResultsByQuality(eligible, qualityPreference)[0] ?? null;
 }
+
+function rankDiscoveryResultsByQuality(
+  results: DiscoveryResult[],
+  qualityPreference: DiscoveryQualityPreference
+): DiscoveryResult[] {
+  return rankDiscoveryResultsByAvailability(results).sort((left, right) => {
+    const qualityDelta = discoveryQualityScore(right, qualityPreference) - discoveryQualityScore(left, qualityPreference);
+    if (qualityDelta !== 0) {
+      return qualityDelta;
+    }
+    return 0;
+  });
+}
+
+function discoveryQualityScore(result: DiscoveryResult, qualityPreference: DiscoveryQualityPreference): number {
+  const extension = (result.extension ?? result.filename.split(".").pop() ?? "").toLowerCase();
+  let score = 0;
+  const preferredIndex = qualityPreference.preferredFormats.indexOf(extension);
+  if (preferredIndex >= 0) {
+    score += 200 - preferredIndex;
+  }
+  if (losslessFormats.has(extension)) {
+    score += qualityPreference.preferLossless ? 100 : 15;
+  } else if (extension === "mp3" && !qualityPreference.allowMp3IfRare) {
+    score -= 80;
+  }
+  const bitrateKbps = result.bitrate == null ? null : result.bitrate > 2000 ? Math.round(result.bitrate / 1000) : result.bitrate;
+  if (bitrateKbps != null) {
+    score += Math.min(50, bitrateKbps / 20);
+    if (qualityPreference.minimumBitrateKbps != null && bitrateKbps < qualityPreference.minimumBitrateKbps) {
+      score -= 120;
+    }
+  }
+  return score;
+}
+
+const losslessFormats = new Set(["flac", "alac", "wav", "aiff", "aif", "ape", "wv", "dsf"]);
 
 function mapAgentResult(file: LibraryFile): AgentMessageResponse["results"][number] {
   const tags = file.displayTags;

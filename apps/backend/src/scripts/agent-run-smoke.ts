@@ -299,6 +299,86 @@ try {
   });
   assert(workflowResponse.workflows.some((workflow) => workflow.runId === researchPlaylistRun.id), "expected workflow to parse through public schema");
 
+  app.tasteProfile.updateProfile(
+    {
+      ...app.tasteProfile.getProfile().profile,
+      preferredFormats: ["FLAC"],
+      qualityPreferences: {
+        preferLossless: true,
+        allowMp3IfRare: false,
+        minimumBitrateKbps: 900
+      }
+    },
+    "fixture"
+  );
+  const qualityRuns = new AgentRunService(
+    app.db,
+    new AgentService(app.library, app.operations, app.playback, {
+      async search(query: string): Promise<DiscoverySearchResponse> {
+        return query === "quality artist quality song"
+          ? {
+              query,
+              total: 2,
+              results: [
+                {
+                  id: "quality-mp3",
+                  source: "slskd",
+                  username: "fast-user",
+                  filename: "01 - Quality Song.mp3",
+                  path: "Quality Artist/Quality Album/01 - Quality Song.mp3",
+                  folder: "Quality Artist/Quality Album",
+                  sizeBytes: 8_000_000,
+                  extension: "mp3",
+                  bitrate: 320_000,
+                  sampleRate: 44_100,
+                  lengthSeconds: 210,
+                  isLocked: false,
+                  hasFreeUploadSlot: true,
+                  uploadSpeedBytesPerSecond: 5_000_000,
+                  queueLength: 0,
+                  raw: {}
+                },
+                {
+                  id: "quality-flac",
+                  source: "slskd",
+                  username: "lossless-user",
+                  filename: "01 - Quality Song.flac",
+                  path: "Quality Artist/Quality Album/01 - Quality Song.flac",
+                  folder: "Quality Artist/Quality Album",
+                  sizeBytes: 42_000_000,
+                  extension: "flac",
+                  bitrate: 920_000,
+                  sampleRate: 44_100,
+                  lengthSeconds: 210,
+                  isLocked: false,
+                  hasFreeUploadSlot: false,
+                  uploadSpeedBytesPerSecond: 400_000,
+                  queueLength: 8,
+                  raw: {}
+                }
+              ]
+            }
+          : { query, total: 0, results: [] };
+      }
+    }, undefined, app.tasteProfile),
+    {
+      name: "fixture_model",
+      async plan() {
+        return {
+          summary: "Fixture model supplied a quality-sensitive candidate",
+          intent: "research_playlist",
+          playlistName: "Quality Preference",
+          searchQueryHints: [],
+          trackCandidates: [{ artist: "Quality Artist", title: "Quality Song", album: "Quality Album" }]
+        };
+      }
+    },
+    undefined,
+    app.agentPlaylistWorkflows
+  );
+  const qualityRun = await qualityRuns.run("make me a high quality test playlist");
+  assert(qualityRun.response?.discoveryResults[0]?.discoveryId === "quality-flac", "expected quality-aware selection to prefer FLAC over more available MP3");
+
   const localRecommendationRun = await new AgentRunService(
     app.db,
     new AgentService(app.library, app.operations, app.playback, {
