@@ -627,17 +627,14 @@ export class AgentService {
       }
     }
 
-    const rankedDiscoveryResults = rankDiscoveryResultsByQuality(
-      selectedDiscoveryResults.filter((result) => !result.isLocked),
-      qualityPreference
-    ).slice(0, 12);
+    const orderedDiscoveryResults = selectedDiscoveryResults.filter((result) => !result.isLocked).slice(0, 12);
     const operationBatch =
-      ownedFiles.length > 0 || rankedDiscoveryResults.length > 0
+      ownedFiles.length > 0 || orderedDiscoveryResults.length > 0
         ? this.createResearchPlaylistBatch(
             options.playlistName ?? playlistName(searchQuery || originalMessage),
             options.playlistDescription ?? `Agent researched playlist from: ${originalMessage}`,
             ownedFiles.map((file) => file.id),
-            rankedDiscoveryResults,
+            orderedDiscoveryResults,
             searchQuery || originalMessage
           )
         : null;
@@ -648,19 +645,19 @@ export class AgentService {
       summary: operationBatch
         ? `Created reviewable research playlist batch with ${operationBatch.operations.length} operation${operationBatch.operations.length === 1 ? "" : "s"}`
         : "No owned tracks or unlocked Discovery candidates were available for a playlist batch",
-      input: { ownedCount: ownedFiles.length, selectedDiscoveryCount: rankedDiscoveryResults.length },
+      input: { ownedCount: ownedFiles.length, selectedDiscoveryCount: orderedDiscoveryResults.length },
       output: operationBatch ? { operationBatchId: operationBatch.id, operationCount: operationBatch.operations.length } : null
     });
 
     return {
       reply: operationBatch
-        ? `I built a researched playlist proposal with ${ownedFiles.length} library match${ownedFiles.length === 1 ? "" : "es"} and ${rankedDiscoveryResults.length} Soulseek download candidate${rankedDiscoveryResults.length === 1 ? "" : "s"}. Review the batch in Operations.`
+        ? `I built a researched playlist proposal with ${ownedFiles.length} library match${ownedFiles.length === 1 ? "" : "es"} and ${orderedDiscoveryResults.length} Soulseek download candidate${orderedDiscoveryResults.length === 1 ? "" : "s"}. Review the batch in Operations.`
         : "I researched candidate tracks, but I could not match any local files or unlocked Soulseek candidates.",
       intent: "research_playlist",
       searchQuery,
       results: ownedFiles.map(mapAgentResult),
-      discoveryResults: rankedDiscoveryResults.map((result) => mapAgentDiscoveryResult(result, this.library)),
-      discoveryGroups: groupAgentDiscoveryResults(rankedDiscoveryResults, this.library),
+      discoveryResults: orderedDiscoveryResults.map((result) => mapAgentDiscoveryResult(result, this.library)),
+      discoveryGroups: groupAgentDiscoveryResults(orderedDiscoveryResults, this.library),
       researchSources: options.researchSources ?? [],
       parsedListItems: [],
       importResults: [],

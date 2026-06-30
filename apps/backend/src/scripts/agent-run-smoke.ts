@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { agentPlaylistWorkflowsResponseSchema, type AgentStep, type DiscoverySearchResponse } from "@music-os/core";
+import { agentPlaylistWorkflowsResponseSchema, type AgentStep, type DiscoveryResult, type DiscoverySearchResponse } from "@music-os/core";
 import type { BackendApp } from "../app.js";
 import { createBackendApp } from "../app.js";
 import { AgentService } from "../services/agent-service.js";
@@ -373,6 +373,94 @@ try {
   assert(
     broadCandidateRun.response?.discoveryResults[0]?.discoveryId === "late-candidate-15-result",
     "expected late searched candidate to be selected for the playlist"
+  );
+
+  const orderedCandidateRun = await new AgentRunService(
+    app.db,
+    new AgentService(app.library, app.operations, app.playback, {
+      async search(query: string): Promise<DiscoverySearchResponse> {
+        if (query === "order artist first song") {
+          return {
+            query,
+            total: 1,
+            results: [
+              {
+                id: "ordered-first-mp3",
+                source: "slskd",
+                username: "order-user",
+                filename: "01 - First Song.mp3",
+                path: "Order Artist/Order Album/01 - First Song.mp3",
+                folder: "Order Artist/Order Album",
+                sizeBytes: 8_000_000,
+                extension: "mp3",
+                bitrate: 320_000,
+                sampleRate: 44_100,
+                lengthSeconds: 210,
+                isLocked: false,
+                hasFreeUploadSlot: true,
+                uploadSpeedBytesPerSecond: 1_000_000,
+                queueLength: 0,
+                raw: {}
+              }
+            ]
+          };
+        }
+        if (query === "order artist second song") {
+          return {
+            query,
+            total: 1,
+            results: [
+              {
+                id: "ordered-second-flac",
+                source: "slskd",
+                username: "order-user",
+                filename: "02 - Second Song.flac",
+                path: "Order Artist/Order Album/02 - Second Song.flac",
+                folder: "Order Artist/Order Album",
+                sizeBytes: 42_000_000,
+                extension: "flac",
+                bitrate: 920_000,
+                sampleRate: 44_100,
+                lengthSeconds: 240,
+                isLocked: false,
+                hasFreeUploadSlot: true,
+                uploadSpeedBytesPerSecond: 1_000_000,
+                queueLength: 0,
+                raw: {}
+              }
+            ]
+          };
+        }
+        return { query, total: 0, results: [] };
+      }
+    }),
+    {
+      name: "fixture_model",
+      async plan() {
+        return {
+          summary: "Fixture model returned a deliberately ordered playlist",
+          intent: "research_playlist",
+          playlistName: "Ordered Candidate Playlist",
+          searchQueryHints: [],
+          trackCandidates: [
+            { artist: "Order Artist", title: "First Song", album: "Order Album", query: "order artist first song" },
+            { artist: "Order Artist", title: "Second Song", album: "Order Album", query: "order artist second song" }
+          ]
+        };
+      }
+    },
+    undefined,
+    app.agentPlaylistWorkflows
+  ).run("make me an ordered researched playlist");
+  assert(
+    orderedCandidateRun.response?.discoveryResults.map((result) => result.discoveryId).join(",") === "ordered-first-mp3,ordered-second-flac",
+    `expected researched playlist to preserve model candidate order, got ${orderedCandidateRun.response?.discoveryResults.map((result) => result.discoveryId).join(",")}`
+  );
+  const orderedQueueOperation = orderedCandidateRun.response?.operationBatch?.operations.find((operation) => operation.type === "queue_download");
+  assert(orderedQueueOperation != null, "expected ordered candidate run to create a queue_download operation");
+  assert(
+    (orderedQueueOperation.payload as { results?: DiscoveryResult[] }).results?.map((result) => result.id).join(",") === "ordered-first-mp3,ordered-second-flac",
+    "expected queued downloads to preserve researched playlist order"
   );
 
   const titleOnlyFallbackCalls: string[] = [];
