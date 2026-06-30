@@ -840,7 +840,7 @@ export function App(): ReactElement {
     try {
       const result = await getActiveAgentThread();
       setAgentThreadId(result.thread.id);
-      setAgentMessages(messagesFromAgentThread(result));
+      setAgentMessages(await messagesFromAgentThread(result));
       await refreshAgentThreads();
     } catch (error) {
       setAgentMessages([
@@ -862,7 +862,7 @@ export function App(): ReactElement {
     try {
       const result = await getAgentThread(threadId);
       setAgentThreadId(result.thread.id);
-      setAgentMessages(messagesFromAgentThread(result));
+      setAgentMessages(await messagesFromAgentThread(result));
       await refreshAgentThreads();
     } catch (error) {
       setAgentMessages((current) => [
@@ -888,7 +888,7 @@ export function App(): ReactElement {
     }
     const result = await getAgentThread(threadId);
     setAgentThreadId(result.thread.id);
-    setAgentMessages(messagesFromAgentThread(result));
+    setAgentMessages(await messagesFromAgentThread(result));
     await refreshAgentThreads();
   }
 
@@ -896,7 +896,7 @@ export function App(): ReactElement {
     try {
       const result = await getAgentThread(threadId);
       setAgentThreadId(result.thread.id);
-      setAgentMessages(messagesFromAgentThread(result));
+      setAgentMessages(await messagesFromAgentThread(result));
       await refreshAgentThreads();
       setActiveView("Agent");
     } catch (error) {
@@ -914,7 +914,7 @@ export function App(): ReactElement {
     }
     const result = await createAgentThread();
     setAgentThreadId(result.thread.id);
-    setAgentMessages(messagesFromAgentThread(result));
+    setAgentMessages(await messagesFromAgentThread(result));
     await refreshAgentThreads();
   }
 
@@ -10326,6 +10326,10 @@ async function getAgentThread(threadId: string) {
   return getJson(`/agent/threads/${encodeURIComponent(threadId)}`, agentThreadResponseSchema);
 }
 
+async function getAgentRun(runId: string) {
+  return getJson(`/agent/runs/${encodeURIComponent(runId)}`, agentRunResponseSchema);
+}
+
 async function createAgentThread() {
   return postJson("/agent/threads", {}, agentThreadResponseSchema);
 }
@@ -12684,7 +12688,7 @@ function deriveParsedListName(items: AgentParsedListItem[]): string {
   return items.length === 1 ? prefix.slice(0, 160) : `${prefix} + ${items.length - 1} more`.slice(0, 160);
 }
 
-function messagesFromAgentThread(thread: AgentThreadResponse): AgentMessage[] {
+async function messagesFromAgentThread(thread: AgentThreadResponse): Promise<AgentMessage[]> {
   if (thread.messages.length === 0) {
     return [
       {
@@ -12696,11 +12700,36 @@ function messagesFromAgentThread(thread: AgentThreadResponse): AgentMessage[] {
     ];
   }
 
-  return thread.messages.map((message) =>
-    message.role === "user"
-      ? { id: message.id, role: "user", text: message.text, response: null }
-      : { id: message.id, role: "agent", text: message.text, response: message.response }
+  const runIds = [
+    ...new Set(
+      thread.messages
+        .map((message) => message.response?.runId)
+        .filter((runId): runId is string => Boolean(runId))
+    )
+  ];
+  const runsById = new Map<string, AgentRun>();
+  await Promise.all(
+    runIds.map(async (runId) => {
+      try {
+        runsById.set(runId, (await getAgentRun(runId)).run);
+      } catch {
+        // Keep transcript rendering even if an older run cannot be loaded.
+      }
+    })
   );
+
+  return thread.messages.map((message) => {
+    if (message.role === "user") {
+      return { id: message.id, role: "user", text: message.text, response: null };
+    }
+    return {
+      id: message.id,
+      role: "agent",
+      text: message.text,
+      response: message.response,
+      run: message.response?.runId ? runsById.get(message.response.runId) ?? null : null
+    };
+  });
 }
 
 function basenameFromPath(path: string): string {
