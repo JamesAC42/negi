@@ -1146,14 +1146,18 @@ export function App(): ReactElement {
   }, [discoveryDownloadJobs]);
 
   useEffect(() => {
-    if (!agentPlaylistWorkflows.some((workflow) => workflow.status !== "completed" && workflow.status !== "failed")) {
+    const openWorkflowIds = new Set(agentPlaylistWorkflows.filter(isOpenAgentPlaylistWorkflow).map((workflow) => workflow.id));
+    if (openWorkflowIds.size === 0) {
       return;
     }
 
     const interval = window.setInterval(() => {
       void (async () => {
-        await refreshAgentPlaylistWorkflows();
-        if (activeView === "Agent") {
+        const workflows = await refreshAgentPlaylistWorkflows();
+        const hasActiveThreadWorkflowUpdate =
+          activeView === "Agent" &&
+          workflows.some((workflow) => workflow.threadId === agentThreadId && (openWorkflowIds.has(workflow.id) || isOpenAgentPlaylistWorkflow(workflow)));
+        if (hasActiveThreadWorkflowUpdate) {
           await refreshSelectedAgentThread();
         }
       })();
@@ -11499,6 +11503,10 @@ function formatAgentPlaylistWorkflowCompactStatus(workflow: AgentPlaylistWorkflo
   return formatAgentPlaylistWorkflowStatus(workflow);
 }
 
+function isOpenAgentPlaylistWorkflow(workflow: AgentPlaylistWorkflow): boolean {
+  return workflow.status !== "completed" && workflow.status !== "failed";
+}
+
 function formatAgentPlaylistWorkflowDetail(workflow: AgentPlaylistWorkflow): string {
   const parts: string[] = [];
   if (workflow.ownedFileIds.length > 0) {
@@ -11518,7 +11526,7 @@ function formatAgentPlaylistWorkflowDetail(workflow: AgentPlaylistWorkflow): str
 
 function formatAgentPlaylistWorkflowStatus(workflow: AgentPlaylistWorkflow): string {
   if (workflow.status === "completed") {
-    return workflow.playlistId ? `Completed · playlist ${workflow.playlistId}` : "Completed";
+    return workflow.playlistId ? `Completed - playlist ${workflow.playlistId}` : "Completed";
   }
   if (workflow.status === "failed") {
     return "Failed";
