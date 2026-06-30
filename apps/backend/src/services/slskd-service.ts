@@ -293,24 +293,32 @@ export class SlskdService {
       throw new Error("slskd URL is not configured");
     }
 
-    const response = await fetch(new URL(path, ensureTrailingSlash(this.config.slskdUrl)), {
-      ...init,
-      headers: {
-        "accept": "application/json",
-        "content-type": "application/json",
-        ...authHeaders(this.config),
-        ...init.headers
-      },
-      signal: AbortSignal.timeout(slskdRequestTimeoutMs())
-    });
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(formatSlskdHttpError(response.status, text));
+    const attempts = slskdBusyRetryAttempts();
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const response = await fetch(new URL(path, ensureTrailingSlash(this.config.slskdUrl)), {
+        ...init,
+        headers: {
+          "accept": "application/json",
+          "content-type": "application/json",
+          ...authHeaders(this.config),
+          ...init.headers
+        },
+        signal: AbortSignal.timeout(slskdRequestTimeoutMs())
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        if (response.status === 429 && attempt < attempts - 1) {
+          await delay(slskdBusyRetryDelayMs(attempt));
+          continue;
+        }
+        throw new Error(formatSlskdHttpError(response.status, text));
+      }
+      if (!text.trim()) {
+        return {};
+      }
+      return JSON.parse(text) as unknown;
     }
-    if (!text.trim()) {
-      return {};
-    }
-    return JSON.parse(text) as unknown;
+    return {};
   }
 }
 
@@ -336,6 +344,14 @@ function slskdSearchCompletedEmptyGraceMs(): number {
 
 function slskdRequestTimeoutMs(): number {
   return readPositiveIntegerEnv("MUSIC_OS_SLSKD_REQUEST_TIMEOUT_MS", 45_000);
+}
+
+function slskdBusyRetryAttempts(): number {
+  return Math.min(8, readPositiveIntegerEnv("MUSIC_OS_SLSKD_BUSY_RETRY_ATTEMPTS", 4));
+}
+
+function slskdBusyRetryDelayMs(attempt: number): number {
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_BUSY_RETRY_DELAY_MS", 750) * (attempt + 1);
 }
 
 function slskdSearchAttempts(): number {
