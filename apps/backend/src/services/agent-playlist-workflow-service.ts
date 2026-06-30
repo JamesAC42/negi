@@ -201,16 +201,22 @@ export class AgentPlaylistWorkflowService {
     }
 
     this.mark(row.id, "creating_playlist");
-    const batch = playlistId
-      ? this.operations.createAddTracksToPlaylistBatch(playlistId, fileIds, "agent")
-      : this.operations.createPlaylistBatch(row.playlist_name, row.playlist_description ?? undefined, fileIds, "agent");
-    this.operations.approveBatch(batch.id);
-    const applied = await this.operations.applyBatch(batch.id);
-    const finalPlaylistId = playlistId ?? readPlaylistId(applied) ?? row.playlist_id;
+    const fileIdsToApply = playlistId ? this.filterMissingPlaylistFileIds(playlistId, fileIds) : fileIds;
+    let playlistOperationBatchId: string | null = row.playlist_operation_batch_id ?? (playlistId ? row.operation_batch_id : null);
+    let finalPlaylistId = playlistId ?? row.playlist_id;
+    if (fileIdsToApply.length > 0) {
+      const batch = playlistId
+        ? this.operations.createAddTracksToPlaylistBatch(playlistId, fileIdsToApply, "agent")
+        : this.operations.createPlaylistBatch(row.playlist_name, row.playlist_description ?? undefined, fileIdsToApply, "agent");
+      this.operations.approveBatch(batch.id);
+      const applied = await this.operations.applyBatch(batch.id);
+      playlistOperationBatchId = applied.id;
+      finalPlaylistId = playlistId ?? readPlaylistId(applied) ?? row.playlist_id;
+    }
     if (!finalPlaylistId) {
       throw new Error("Playlist operation completed without returning a playlist id.");
     }
-    this.playlists.getPlaylist(finalPlaylistId);
+    const playlist = this.playlists.getPlaylist(finalPlaylistId);
     this.db
       .prepare(
         `UPDATE agent_playlist_workflows
@@ -222,13 +228,16 @@ export class AgentPlaylistWorkflowService {
              completed_at = datetime('now')
          WHERE id = ?`
       )
-      .run(applied.id, finalPlaylistId, row.id);
+      .run(playlistOperationBatchId, finalPlaylistId, row.id);
     this.insertWorkflowMessage(
       row,
-      `Here's your playlist: ${row.playlist_name}. ${fileIds.length} track${fileIds.length === 1 ? "" : "s"} ${
-        playlistId ? "were added to it" : "are ready"
-      }.`
+      `Here's your playlist: ${row.playlist_name}. ${playlist.items.length} track${playlist.items.length === 1 ? "" : "s"} are ready.`
     );
+  }
+
+  private filterMissingPlaylistFileIds(playlistId: string, fileIds: string[]): string[] {
+    const existingFileIds = new Set(this.playlists.getPlaylist(playlistId).items.map((item) => item.file.id));
+    return fileIds.filter((fileId) => !existingFileIds.has(fileId));
   }
 
   private getRow(workflowId: string): WorkflowRow {

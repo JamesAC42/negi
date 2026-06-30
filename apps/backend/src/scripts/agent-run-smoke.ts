@@ -503,6 +503,10 @@ try {
   );
   const completedOwnedWorkflow = app.agentPlaylistWorkflows.listWorkflows().find((workflow) => workflow.runId === ownedPlaylistRun.id);
   assert(completedOwnedWorkflow?.status === "completed", `expected owned workflow completed, got ${completedOwnedWorkflow?.status}`);
+  assert(
+    completedOwnedWorkflow.playlistOperationBatchId === ownedPlaylistRun.response.operationBatch.id,
+    "expected owned-only workflow to reuse the initial playlist batch"
+  );
   const ownedThread = app.agentThreads.getThread(ownedPlaylistRun.threadId!);
   assert(
     ownedThread.messages.some((message) => message.role === "agent" && message.text.startsWith("Here's your playlist: Owned Durable.")),
