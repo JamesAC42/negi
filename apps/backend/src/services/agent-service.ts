@@ -1073,10 +1073,10 @@ function researchedPlaylistCandidateSearchLimit(candidateCount: number): number 
 function researchedPlaylistSearchConcurrency(): number {
   const configured = process.env.MUSIC_OS_AGENT_RESEARCH_PLAYLIST_SEARCH_CONCURRENCY;
   if (!configured) {
-    return 3;
+    return 1;
   }
   const parsed = Number(configured);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.min(8, Math.floor(parsed)) : 3;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(8, Math.floor(parsed)) : 1;
 }
 
 async function mapWithConcurrency<T, R>(items: T[], concurrency: number, map: (item: T) => Promise<R>): Promise<R[]> {

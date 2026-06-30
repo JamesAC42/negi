@@ -3,7 +3,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createBackendApp } from "../app.js";
 import { getBackendConfig } from "../config.js";
+import type { AgentModelPlan } from "../services/agent-model-provider.js";
 import { createAgentModelProvider } from "../services/agent-model-provider.js";
+import { AgentRunService } from "../services/agent-run-service.js";
 import { rankDiscoveryResultsByAvailability } from "../services/discovery-availability.js";
 
 if (process.env.MUSIC_OS_LIVE_OPENAI_AGENT_SMOKE !== "1" || process.env.MUSIC_OS_LIVE_SLSKD_PREFLIGHT !== "1") {
@@ -63,6 +65,7 @@ try {
       }
     });
     assert(plan?.intent === "research_playlist", `expected research_playlist plan, got ${plan?.intent}`);
+    const agentPlan: AgentModelPlan = plan;
     const candidates = (plan.trackCandidates ?? []).filter((candidate) => candidate.query).slice(0, Number(process.env.MUSIC_OS_LIVE_SLSKD_PREFLIGHT_CANDIDATES ?? 5));
     assert(candidates.length > 0, "expected hosted planner to return candidate queries");
 
@@ -92,6 +95,29 @@ try {
     }
 
     assert(unlockedMatches > 0, `expected at least one unlocked live slskd match, got ${unlockedMatches}/${candidates.length}`);
+    const runs = new AgentRunService(
+      app.db,
+      app.agent,
+      {
+        name: "fixture_live_openai_plan",
+        async plan() {
+          return agentPlan;
+        }
+      },
+      undefined,
+      app.agentPlaylistWorkflows,
+      false
+    );
+    const run = await runs.run("make me a playlist of songs for studying late at night that you think I would like");
+    assert(
+      run.response?.intent === "research_playlist",
+      `expected real agent path to keep research_playlist, got ${run.response?.intent}; run status ${run.status}; error ${run.error ?? "none"}`
+    );
+    assert(run.response.discoveryResults.length > 0, "expected real agent path to select live Discovery candidates");
+    assert(
+      run.response.operationBatch?.operations.some((operation) => operation.type === "queue_download") === true,
+      "expected real agent path to propose a queue_download batch"
+    );
     assert(app.discoveryDownloads.listJobs().length === 0, "preflight must not create download jobs");
     assert(app.imports.listInbox().length === 0, "preflight must not create imports");
     assert(app.library.countFiles() === 0, "preflight must not add library files");
@@ -105,6 +131,8 @@ try {
           plannedCandidates: plan.trackCandidates?.length ?? 0,
           searchedCandidates: candidates.length,
           unlockedMatches,
+          agentSelectedCandidates: run.response.discoveryResults.length,
+          operationBatchId: run.response.operationBatch?.id ?? null,
           searched,
           mutated: {
             downloadJobs: app.discoveryDownloads.listJobs().length,
