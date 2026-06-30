@@ -87,6 +87,7 @@ export function createBackendApp(config: BackendConfig): BackendApp {
   const waveforms = new WaveformService(config);
   const liveAnalyzer = new LiveAnalyzerService(config);
   const visualizer = new VisualizerService(playback, waveforms, liveAnalyzer);
+  const workflowAdvanceTimer = startAgentPlaylistWorkflowAdvancer(agentPlaylistWorkflows);
 
   return {
     db,
@@ -125,10 +126,43 @@ export function createBackendApp(config: BackendConfig): BackendApp {
       });
     },
     close() {
+      clearInterval(workflowAdvanceTimer);
       visualizer.close();
       waveforms.close();
       playback.close();
       db.close();
     }
   };
+}
+
+function startAgentPlaylistWorkflowAdvancer(agentPlaylistWorkflows: AgentPlaylistWorkflowService): NodeJS.Timeout {
+  let advancing = false;
+  const advance = async () => {
+    if (advancing) {
+      return;
+    }
+    advancing = true;
+    try {
+      await agentPlaylistWorkflows.advanceAll();
+    } catch (error) {
+      console.warn(`Agent playlist workflow advancement failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      advancing = false;
+    }
+  };
+  void advance();
+  const timer = setInterval(() => {
+    void advance();
+  }, agentPlaylistWorkflowAdvanceIntervalMs());
+  timer.unref?.();
+  return timer;
+}
+
+function agentPlaylistWorkflowAdvanceIntervalMs(): number {
+  const value = process.env.MUSIC_OS_AGENT_PLAYLIST_WORKFLOW_ADVANCE_MS;
+  if (!value) {
+    return 15_000;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 15_000;
 }
