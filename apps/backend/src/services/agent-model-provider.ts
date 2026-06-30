@@ -119,7 +119,7 @@ class OpenAIResponsesAgentModelProvider implements AgentModelProvider {
       throw new Error(`OpenAI Responses API returned ${response.status}: ${await response.text()}`);
     }
     const body = (await response.json()) as Record<string, unknown>;
-    return parsePlan(extractOutputText(body));
+    return parseAgentModelPlan(extractOutputText(body));
   }
 }
 
@@ -145,8 +145,8 @@ function extractOutputText(body: Record<string, unknown>): string {
   return chunks.join("\n").trim();
 }
 
-function parsePlan(text: string): AgentModelPlan | null {
-  const jsonText = text.match(/\{[\s\S]*\}/)?.[0] ?? text;
+export function parseAgentModelPlan(text: string): AgentModelPlan | null {
+  const jsonText = extractFirstJsonObject(text) ?? text.trim();
   try {
     const parsed = JSON.parse(jsonText) as Record<string, unknown>;
     const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
@@ -175,6 +175,49 @@ function parsePlan(text: string): AgentModelPlan | null {
   } catch {
     return null;
   }
+}
+
+function extractFirstJsonObject(text: string): string | null {
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (start === -1) {
+      if (char === "{") {
+        start = index;
+        depth = 1;
+      }
+      continue;
+    }
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = inString;
+      continue;
+    }
+    if (char === "\"") {
+      inString = !inString;
+      continue;
+    }
+    if (inString) {
+      continue;
+    }
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, index + 1);
+      }
+    }
+  }
+  return null;
 }
 
 function parseIntent(value: unknown): AgentMessageResponse["intent"] | undefined {
