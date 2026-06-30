@@ -822,8 +822,11 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/agent/message") {
       const body = agentMessageRequestSchema.parse(await readJson(request));
-      const result = await app.agentThreads.sendMessage(body.message, body.threadId);
-      writeJson(response, 200, agentMessageResponseSchema.parse(result));
+      const run = await app.agentRuns.run(body.message, body.threadId);
+      if (!run.response) {
+        throw new Error(run.error ?? "Agent run completed without a response");
+      }
+      writeJson(response, 200, agentMessageResponseSchema.parse(run.response));
       return;
     }
 
