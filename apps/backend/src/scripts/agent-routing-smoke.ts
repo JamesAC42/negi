@@ -24,6 +24,9 @@ assert(
   `expected taste/current-context playlist prompt to use research_playlist, got ${recommendationIntent}`
 );
 
+const currentArtistIntent = detectAgentIntent("make me a playlist like this artist");
+assert(currentArtistIntent === "research_playlist", `expected current-artist playlist prompt to use research_playlist, got ${currentArtistIntent}`);
+
 const moodPlaylistIntent = detectAgentIntent("make me a playlist for studying late at night");
 assert(moodPlaylistIntent === "research_playlist", `expected playlist-for-mood prompt to use research_playlist, got ${moodPlaylistIntent}`);
 

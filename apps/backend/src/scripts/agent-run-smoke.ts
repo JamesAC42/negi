@@ -658,6 +658,12 @@ try {
     currentContextRun.response.searchQuery.includes("durable artist") && currentContextRun.response.searchQuery.includes("durable one"),
     `expected current-song contextual search query, got ${currentContextRun.response.searchQuery}`
   );
+  const currentArtistRun = await currentContextRuns.run("make me a playlist like this artist");
+  assert(currentArtistRun.response?.intent === "research_playlist", `expected current-artist prompt to route research_playlist, got ${currentArtistRun.response?.intent}`);
+  assert(
+    currentArtistRun.response.searchQuery === "durable artist",
+    `expected current-artist contextual search query, got ${currentArtistRun.response.searchQuery}`
+  );
 
   const releaseContextSearchCalls: string[] = [];
   const releaseContextAgent = new AgentService(app.library, app.operations, app.playback, {
