@@ -421,7 +421,7 @@ export function App(): ReactElement {
     {
       id: "agent-welcome",
       role: "agent",
-      text: "Ask me to find tracks, play matching tracks, or propose a playlist from the indexed library.",
+      text: "Ask me to research music, build playlists from your taste, find tracks on Soulseek, or play matching songs.",
       response: null
     }
   ]);
@@ -807,12 +807,14 @@ export function App(): ReactElement {
     }
   }
 
-  async function refreshAgentPlaylistWorkflows(): Promise<void> {
+  async function refreshAgentPlaylistWorkflows(): Promise<AgentPlaylistWorkflow[]> {
     try {
       const result = await listAgentPlaylistWorkflows();
       setAgentPlaylistWorkflows(result.workflows);
+      return result.workflows;
     } catch (error) {
       setDiscoveryDownloadState((current) => ({ ...current, message: getErrorMessage(error) }));
+      return agentPlaylistWorkflows;
     }
   }
 
@@ -9958,7 +9960,12 @@ function AgentView({
   onSelectThread(threadId: string): Promise<void>;
   onSubmit(event: FormEvent<HTMLFormElement>): Promise<void>;
 }): ReactElement {
-  const promptExamples = ["find steely dan", "make a van halen playlist", "play traveling wilburys", "search soulseek city pop"];
+  const promptExamples = [
+    "make me a playlist for late night focus",
+    "make me a playlist like this song",
+    "find the album with green day when i come around",
+    "search soulseek city pop"
+  ];
 
   return (
     <section className="agentView" aria-label="Agent">
@@ -9980,7 +9987,7 @@ function AgentView({
       <form className="agentComposer" onSubmit={(event) => void onSubmit(event)}>
         <input
           aria-label="Agent message"
-          placeholder="Ask the agent to find tracks, make a playlist, or play matching songs"
+          placeholder="Ask for a researched playlist, similar music, Soulseek finds, or playback"
           value={agentInput}
           onChange={(event) => setAgentInput(event.target.value)}
         />
@@ -10008,7 +10015,7 @@ function AgentView({
         {agentBusy ? (
           <div className="agentMessage agent">
             <span>Agent</span>
-            <strong>Searching library.</strong>
+            <strong>Planning request.</strong>
           </div>
         ) : null}
       </div>
@@ -10106,12 +10113,12 @@ function AgentRunTrace({ run }: { run: AgentRun }): ReactElement {
   return (
     <details className="agentResults">
       <summary>
-        Run trace Â· {run.status} Â· {run.steps.length} step{run.steps.length === 1 ? "" : "s"}
+        Run trace - {run.status} - {run.steps.length} step{run.steps.length === 1 ? "" : "s"}
       </summary>
       {run.steps.map((step) => (
         <span key={step.id}>
-          {step.stepIndex + 1}. {stepLabel(step.type, step.toolName)} Â· {step.status} Â· {step.summary}
-          {step.error ? ` Â· ${step.error}` : ""}
+          {step.stepIndex + 1}. {stepLabel(step.type, step.toolName)} - {step.status} - {step.summary}
+          {step.error ? ` - ${step.error}` : ""}
         </span>
       ))}
     </details>
@@ -12675,7 +12682,7 @@ function messagesFromAgentThread(thread: AgentThreadResponse): AgentMessage[] {
       {
         id: "agent-welcome",
         role: "agent",
-        text: "Ask me to find tracks, play matching tracks, or propose a playlist from the indexed library.",
+        text: "Ask me to research music, build playlists from your taste, find tracks on Soulseek, or play matching songs.",
         response: null
       }
     ];
