@@ -726,6 +726,9 @@ function detectIntent(message: string): AgentMessageResponse["intent"] {
   if (wantsReleaseContext(message) && /\b(find|search|show|look|lookup|get|what|which)\b/.test(text)) {
     return "search_discovery";
   }
+  if (wantsMusicLookup(message) && !explicitlyLocalLibrarySearch(message)) {
+    return "search_discovery";
+  }
   if (mentionsCurrentPlaybackContext(message) && /\b(like|similar|recommend|recommendation|playlist|mix|songs|tracks|find)\b/.test(text)) {
     return "research_playlist";
   }
@@ -921,6 +924,14 @@ function wantsMusicRecommendation(message: string): boolean {
   return false;
 }
 
+function wantsMusicLookup(message: string): boolean {
+  return /\b(find|search|show|look|lookup|get)\b/i.test(message) && /\b(song|songs|track|tracks|album|albums|release|record|single|ep)\b/i.test(message);
+}
+
+function explicitlyLocalLibrarySearch(message: string): boolean {
+  return /\b(my|local|indexed)\s+(library|files?|tracks?|songs?|music)\b/i.test(message) || /\b(in|from|inside)\s+(my\s+)?(library|local files?|indexed files?)\b/i.test(message);
+}
+
 function wantsDownloadProposal(message: string): boolean {
   const text = message.toLowerCase();
   return /\b(download|stage|queue|grab|propose)\b/.test(text);
@@ -1008,7 +1019,7 @@ function suppressedSearchTerms(): string[] {
 }
 
 function wantsReleaseContext(message: string): boolean {
-  return /\b(album|release|record|single|ep)\b/i.test(message) && /\b(on|from|appears|appeared|came|comes|its|it's)\b/i.test(message);
+  return /\b(album|release|record|single|ep)\b/i.test(message) && /\b(on|from|with|has|contains|include|includes|appears|appeared|came|comes|its|it's)\b/i.test(message);
 }
 
 function shouldFallbackToDiscoveryForReleaseContext(message: string, hints: string[] | undefined): boolean {

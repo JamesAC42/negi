@@ -73,13 +73,13 @@ class OpenAIResponsesAgentModelProvider implements AgentModelProvider {
   ) {}
 
   async plan(message: string, context: AgentPlanningContext = {}): Promise<AgentModelPlan | null> {
-    const useWebResearch = this.webResearchEnabled && shouldUseWebResearch(message);
+    const useWebResearch = this.webResearchEnabled && shouldUseAgentWebResearch(message);
     const requestBody: Record<string, unknown> = {
       model: this.model,
       reasoning: { effort: "low" },
       max_output_tokens: useWebResearch ? 1400 : 800,
       instructions:
-        "You plan music-library agent work for Music OS. Return compact JSON only. Never claim actions were taken. Mutating actions require local approval outside the model.",
+        "You plan music-library agent work for Music OS. Return compact JSON only. Do not use markdown. Never claim actions were taken. Mutating actions require local approval outside the model.",
       input: [
         {
           role: "user",
@@ -91,8 +91,10 @@ class OpenAIResponsesAgentModelProvider implements AgentModelProvider {
                 `Taste/library context: ${JSON.stringify(context)}\n\n` +
                 "Return JSON with shape {\"summary\": string, \"intent\": string, \"searchQuery\": string, \"searchQueryHints\": string[], \"playlistName\": string, \"playlistDescription\": string, \"researchSources\": [{\"title\": string, \"url\": string, \"summary\": string}], \"trackCandidates\": [{\"artist\": string, \"title\": string, \"album\": string, \"reason\": string, \"query\": string}]}.\n" +
                 "Allowed intents: search_library, search_discovery, research_playlist, parse_pasted_list, propose_import, propose_playlist, propose_duplicate_cleanup, playback, unknown.\n" +
-                "Use search_library only when the user likely wants to search indexed local files. Use search_discovery when the user likely wants to find music not already known to be in the local library, asks broadly to find a song/album, or mentions Soulseek/downloads.\n" +
-                "Use research_playlist when the user asks for a playlist, mood/occasion recommendations, music like an artist/song, or music they might like. For research_playlist, return 8-15 concrete trackCandidates.\n" +
+                "Always set intent. Use search_library only when the user clearly asks to search indexed local files. Use search_discovery when the user wants to find music not already known to be local, asks to identify/find a song/album/release, or mentions Soulseek/downloads. Do not use search_library for general 'find' wording if the request is really a music lookup.\n" +
+                "Use research_playlist when the user asks for a playlist, mood/occasion recommendations, music like an artist/song, a song here/for this situation, or music they might like. For research_playlist, ALWAYS return playlistName, playlistDescription, and 8-15 concrete trackCandidates.\n" +
+                "Each trackCandidates item must include artist, title, reason, and query. Include album when you know it. The query must be a short Soulseek-ready search for that candidate, not the user's full sentence.\n" +
+                "If the user asks to find the album/release a song is on, use search_discovery and set searchQuery to the resolved artist + album or artist + title + album. Example: 'find the Green Day album with When I Come Around on it' should not become 'green day when i come around album its on'; it should target Green Day Dookie.\n" +
                 "For requests about music the user might like, strongly use tasteProfile plus favoriteTracks, highRotationTracks, recentTracks, and liked/rated library context. Avoid blockedArtists, blockedGenres, and overplayedTracks.\n" +
                 "When the user says this song, this track, current song, or current artist, resolve that using currentTrack/currentArtist/currentAlbum from the Taste/library context.\n" +
                 "For research_playlist, use current web research when available. Prefer sources from music discussion and recommendation contexts such as Reddit, Last.fm, Rate Your Music, Album of the Year, Bandcamp, Discogs, AllMusic, Pitchfork, Stereogum, Resident Advisor, forums, and label/artist pages. Include only sources you actually used in researchSources.\n" +
@@ -304,11 +306,13 @@ function dedupeResearchSources(sources: AgentResearchSource[]): AgentResearchSou
   return deduped;
 }
 
-function shouldUseWebResearch(message: string): boolean {
+export function shouldUseAgentWebResearch(message: string): boolean {
   return (
     /\b(playlist|mix|mood|vibe|recommend|recommendation|suggest|suggestion|similar|like this|like that|think i(?:'|’)d like|think i would like|research|reddit|last\.?fm|rate\s*your\s*music|rym|forum|forums)\b/i.test(
       message
-    ) || /\b(songs?|tracks?|music|artists?|albums?)\s+(like|similar to)\b/i.test(message)
+    ) ||
+    /\b(songs?|tracks?)\s+here\b/i.test(message) ||
+    /\b(songs?|tracks?|music|artists?|albums?)\s+(like|similar to)\b/i.test(message)
   );
 }
 
