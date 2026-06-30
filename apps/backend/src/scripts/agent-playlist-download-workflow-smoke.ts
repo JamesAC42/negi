@@ -11,31 +11,38 @@ import { OperationService } from "../services/operation-service.js";
 import type { SlskdDownloadInspection, SlskdService } from "../services/slskd-service.js";
 
 class FakeSlskd {
-  constructor(private readonly completedPath: string) {}
+  constructor(private readonly completedPaths: { first: string; second: string }) {}
 
   async search(query: string): Promise<DiscoverySearchResponse> {
-    return query === "remote artist remote title" ? { query, total: 1, results: [makeDiscoveryResult()] } : { query, total: 0, results: [] };
+    if (query === "remote artist remote title") {
+      return { query, total: 1, results: [makeDiscoveryResult("remote-first", "Remote Artist", "Remote Title", this.completedPaths.first, 8_000_000)] };
+    }
+    if (query === "second remote second title") {
+      return { query, total: 1, results: [makeDiscoveryResult("remote-second", "Second Remote", "Second Title", this.completedPaths.second, 9_000_000)] };
+    }
+    return { query, total: 0, results: [] };
   }
 
   async queueDownloadResults(results: DiscoveryResult[]): Promise<DiscoveryResult[]> {
-    await writeFile(this.completedPath, makeId3Fixture("Remote Title", "Remote Artist", "Remote Album", "1985"));
+    await writeFile(this.completedPaths.first, makeId3Fixture("Remote Title", "Remote Artist", "Remote Album", "1985"));
+    await writeFile(this.completedPaths.second, makeId3Fixture("Second Title", "Second Remote", "Second Album", "1986"));
     return results;
   }
 
   async findCompletedDownloadPaths(): Promise<string[]> {
-    return [this.completedPath];
+    return [this.completedPaths.second, this.completedPaths.first];
   }
 
   async inspectDownloadResults(): Promise<SlskdDownloadInspection> {
     return {
-      downloadDirectory: this.completedPath,
+      downloadDirectory: this.completedPaths.first,
       directoryError: null,
-      filesSeen: 1,
-      completedPaths: [this.completedPath],
+      filesSeen: 2,
+      completedPaths: [this.completedPaths.second, this.completedPaths.first],
       transfers: {
-        total: 1,
-        matched: 1,
-        completed: 1,
+        total: 2,
+        matched: 2,
+        completed: 2,
         active: 0,
         queued: 0,
         failed: 0,
@@ -52,6 +59,7 @@ const databasePath = join(fixtureDir, "music-os.sqlite");
 const libraryPath = join(fixtureDir, "library");
 const downloadsPath = join(fixtureDir, "downloads");
 const completedPath = join(downloadsPath, "Remote Artist - Remote Title.mp3");
+const secondCompletedPath = join(downloadsPath, "Second Remote - Second Title.mp3");
 let app: BackendApp | null = null;
 
 try {
@@ -72,7 +80,7 @@ try {
   const root = app.library.addRoot(libraryPath, "agent-playlist-download");
   const scan = await app.scanner.scanRoot(root);
   assert(scan.inserted === 1, `expected one owned fixture file, got ${scan.inserted}`);
-  const fakeSlskd = new FakeSlskd(completedPath);
+  const fakeSlskd = new FakeSlskd({ first: completedPath, second: secondCompletedPath });
   const downloads = new DiscoveryDownloadService(app.db, fakeSlskd as unknown as SlskdService, app.imports);
   const operations = new OperationService(app.db, app.imports, app.library, downloads);
   const workflows = new AgentPlaylistWorkflowService(app.db, app.library, operations, app.imports, app.playlists, downloads);
@@ -100,7 +108,8 @@ try {
           ],
           trackCandidates: [
             { artist: "Remote Artist", title: "Remote Title", album: "Remote Album", query: "remote artist remote title" },
-            { artist: "Owned Artist", title: "Owned Title", album: "Owned Album", query: "owned artist owned title" }
+            { artist: "Owned Artist", title: "Owned Title", album: "Owned Album", query: "owned artist owned title" },
+            { artist: "Second Remote", title: "Second Title", album: "Second Album", query: "second remote second title" }
           ]
         };
       }
@@ -122,14 +131,15 @@ try {
 
   const playlist = app.playlists.getPlaylist(workflow.playlistId);
   assert(playlist.name === "Downloaded Agent Playlist", `expected playlist name, got ${playlist.name}`);
-  assert(playlist.items.length === 2, `expected two playlist items, got ${playlist.items.length}`);
+  assert(playlist.items.length === 3, `expected three playlist items, got ${playlist.items.length}`);
   assert(playlist.items[0].file.displayTags.artist === "Remote Artist", `expected imported artist first, got ${playlist.items[0].file.displayTags.artist}`);
   assert(playlist.items[1].file.displayTags.artist === "Owned Artist", `expected owned artist second, got ${playlist.items[1].file.displayTags.artist}`);
-  assert(app.library.countPlayableFiles() === 2, `expected owned plus imported playable files, got ${app.library.countPlayableFiles()}`);
+  assert(playlist.items[2].file.displayTags.artist === "Second Remote", `expected second imported artist third, got ${playlist.items[2].file.displayTags.artist}`);
+  assert(app.library.countPlayableFiles() === 3, `expected owned plus imported playable files, got ${app.library.countPlayableFiles()}`);
   const thread = app.agentThreads.getThread(run.threadId!);
   const threadMessageTexts = thread.messages.map((message) => `${message.role}: ${message.text}`);
   assert(
-    thread.messages.some((message) => message.role === "agent" && message.text === "Here's your playlist: Downloaded Agent Playlist. 2 tracks are ready."),
+    thread.messages.some((message) => message.role === "agent" && message.text === "Here's your playlist: Downloaded Agent Playlist. 3 tracks are ready."),
     `expected final playlist-ready message in the agent thread, got ${JSON.stringify(threadMessageTexts)}`
   );
 
@@ -157,15 +167,16 @@ async function waitForWorkflow(
   throw new Error(`Timed out waiting for agent playlist workflow ${runId} to reach ${status}`);
 }
 
-function makeDiscoveryResult(): DiscoveryResult {
+function makeDiscoveryResult(idSuffix: string, artist: string, title: string, completedFilePath: string, sizeBytes: number): DiscoveryResult {
+  const filename = completedFilePath.split(/[\\/]/).filter(Boolean).at(-1) ?? `${artist} - ${title}.mp3`;
   return {
-    id: Buffer.from(["remote-user", "Remote Folder\\Remote Artist - Remote Title.mp3", "0"].join("\0")).toString("base64url"),
+    id: idSuffix,
     source: "slskd",
     username: "remote-user",
-    filename: "Remote Artist - Remote Title.mp3",
-    path: "Remote Folder\\Remote Artist - Remote Title.mp3",
+    filename,
+    path: `Remote Folder\\${filename}`,
     folder: "Remote Folder",
-    sizeBytes: 8_000_000,
+    sizeBytes,
     extension: "mp3",
     bitrate: 320_000,
     sampleRate: 44_100,
@@ -175,7 +186,7 @@ function makeDiscoveryResult(): DiscoveryResult {
     uploadSpeedBytesPerSecond: 2_000_000,
     queueLength: 0,
     raw: {
-      filename: "Remote Folder\\Remote Artist - Remote Title.mp3"
+      filename: `Remote Folder\\${filename}`
     }
   };
 }

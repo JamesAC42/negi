@@ -285,10 +285,21 @@ export class AgentPlaylistWorkflowService {
     }
     const context = this.importSourceContext(importId);
     const selectedResults = Array.isArray(context?.selectedResults) ? context.selectedResults : [];
+    const expandedPaths = Array.isArray(context?.expandedPaths) ? context.expandedPaths : [];
+    const selectedIdByBasename = new Map<string, string>();
+    for (const selected of selectedResults) {
+      const record = asRecord(selected);
+      const discoveryId = stringValue(record?.id);
+      const resultPath = stringValue(record?.path);
+      if (discoveryId && resultPath) {
+        selectedIdByBasename.set(normalizePathBasename(resultPath), discoveryId);
+      }
+    }
     for (let index = 0; index < importBatch.items.length; index += 1) {
       const fileId = importBatch.items[index]?.fileId;
-      const selected = asRecord(selectedResults[index]);
-      const discoveryId = stringValue(selected?.id);
+      const originalPath = typeof expandedPaths[index] === "string" ? expandedPaths[index] : null;
+      const itemPath = originalPath ?? importBatch.items[index]?.stagingPath;
+      const discoveryId = itemPath ? selectedIdByBasename.get(normalizePathBasename(itemPath)) : null;
       if (fileId && discoveryId) {
         byDiscoveryId.set(discoveryId, fileId);
       }
@@ -495,4 +506,8 @@ function parsePlaylistItemRefs(value: string): PlaylistItemRef[] {
   } catch {
     return [];
   }
+}
+
+function normalizePathBasename(value: string): string {
+  return value.split(/[\\/]/).filter(Boolean).at(-1)?.toLowerCase() ?? value.toLowerCase();
 }
