@@ -852,13 +852,14 @@ export function App(): ReactElement {
     }
   }
 
-  async function refreshSelectedAgentThread(): Promise<void> {
-    if (!agentThreadId) {
+  async function refreshSelectedAgentThread(threadId = agentThreadId): Promise<void> {
+    if (!threadId) {
       await refreshAgentThread();
       return;
     }
     try {
-      const result = await getAgentThread(agentThreadId);
+      const result = await getAgentThread(threadId);
+      setAgentThreadId(result.thread.id);
       setAgentMessages(messagesFromAgentThread(result));
       await refreshAgentThreads();
     } catch (error) {
@@ -2118,7 +2119,8 @@ export function App(): ReactElement {
       ]);
       if (response.operationBatch) {
         replaceOperationBatch(response.operationBatch);
-        void refreshAgentPlaylistWorkflows();
+        await refreshAgentPlaylistWorkflows();
+        await refreshSelectedAgentThread(response.threadId);
       }
       if (response.playback) {
         setPlayback(response.playback);
@@ -2371,6 +2373,8 @@ export function App(): ReactElement {
       ]);
       if (response.operationBatch) {
         replaceOperationBatch(response.operationBatch);
+        await refreshAgentPlaylistWorkflows();
+        await refreshSelectedAgentThread(response.threadId);
       }
       if (response.playback) {
         setPlayback(response.playback);
@@ -2431,6 +2435,8 @@ export function App(): ReactElement {
       ]);
       if (response.operationBatch) {
         replaceOperationBatch(response.operationBatch);
+        await refreshAgentPlaylistWorkflows();
+        await refreshSelectedAgentThread(response.threadId);
       }
       if (response.playback) {
         setPlayback(response.playback);
