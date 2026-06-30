@@ -348,7 +348,18 @@ try {
 
   const currentFile = app.library.listFiles("durable one", 1)[0];
   assert(currentFile != null, "expected current playback fixture file");
+  app.tasteProfile.updateProfile(
+    {
+      ...app.tasteProfile.getProfile().profile,
+      favoriteArtists: ["Durable Artist"],
+      preferredGenres: ["sophisti-pop", "downtempo"],
+      blockedArtists: ["Blocked Fixture Artist"],
+      playlistStylePreferences: "Prefer deep cuts over obvious singles."
+    },
+    "fixture"
+  );
   let sawCurrentTrackContext = false;
+  let sawTasteProfileContext = false;
   const currentContextRuns = new AgentRunService(
     app.db,
     new AgentService(
@@ -375,12 +386,18 @@ try {
         async search(query: string): Promise<DiscoverySearchResponse> {
           return { query, total: 0, results: [] };
         }
-      }
+      },
+      undefined,
+      app.tasteProfile
     ),
     {
       name: "fixture_model",
       async plan(_message, context) {
         sawCurrentTrackContext = context?.currentTrack?.includes("Durable One") === true && context.currentArtist === "Durable Artist";
+        sawTasteProfileContext =
+          context?.tasteProfile?.preferredGenres?.includes("sophisti-pop") === true &&
+          context.tasteProfile.blockedArtists?.includes("Blocked Fixture Artist") === true &&
+          context.tasteProfile.playlistStylePreferences === "Prefer deep cuts over obvious singles.";
         return {
           summary: "Fixture model used the current song context",
           intent: "research_playlist",
@@ -396,6 +413,7 @@ try {
   );
   const currentContextRun = await currentContextRuns.run("make me a playlist like this song");
   assert(sawCurrentTrackContext, "expected model planning context to include current track metadata");
+  assert(sawTasteProfileContext, "expected model planning context to include explicit taste profile");
   assert(currentContextRun.response?.intent === "research_playlist", `expected current-song prompt to route research_playlist, got ${currentContextRun.response?.intent}`);
   assert(
     currentContextRun.response.searchQuery.includes("durable artist") && currentContextRun.response.searchQuery.includes("durable one"),

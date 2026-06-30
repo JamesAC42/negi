@@ -69,9 +69,10 @@ export function createBackendApp(config: BackendConfig): BackendApp {
   const savedDiscoveryLists = new SavedDiscoveryListService(db);
   const operations = new OperationService(db, imports, library, discoveryDownloads);
   const playlists = new PlaylistService(db, library);
+  const tasteProfile = new TasteProfileService(db);
   const agentPlaylistWorkflows = new AgentPlaylistWorkflowService(db, library, operations, imports, playlists, discoveryDownloads);
   discoveryDownloads.onJobSucceeded((jobId) => agentPlaylistWorkflows.advanceForDownloadJob(jobId));
-  const agent = new AgentService(library, operations, playback, discovery, imports);
+  const agent = new AgentService(library, operations, playback, discovery, imports, tasteProfile);
   const agentThreads = new AgentThreadService(db, agent);
   const agentRuns = new AgentRunService(
     db,
@@ -82,7 +83,6 @@ export function createBackendApp(config: BackendConfig): BackendApp {
     config.agentAutoStartResearchPlaylists === true
   );
   const jobs = new JobService(db);
-  const tasteProfile = new TasteProfileService(db);
   const artwork = new ArtworkService(library, config);
   const waveforms = new WaveformService(config);
   const liveAnalyzer = new LiveAnalyzerService(config);

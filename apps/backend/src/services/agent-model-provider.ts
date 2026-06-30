@@ -1,5 +1,5 @@
 import type { BackendConfig } from "../config.js";
-import type { AgentMessageResponse } from "@music-os/core";
+import type { AgentMessageResponse, TasteProfile } from "@music-os/core";
 
 export interface AgentTrackCandidate {
   artist: string;
@@ -20,6 +20,7 @@ export interface AgentPlanningContext {
   currentTrack?: string;
   currentArtist?: string;
   currentAlbum?: string;
+  tasteProfile?: Partial<TasteProfile>;
   favoriteArtists?: string[];
   favoriteAlbums?: string[];
   favoriteTracks?: string[];
@@ -92,6 +93,7 @@ class OpenAIResponsesAgentModelProvider implements AgentModelProvider {
                 "Allowed intents: search_library, search_discovery, research_playlist, parse_pasted_list, propose_import, propose_playlist, propose_duplicate_cleanup, playback, unknown.\n" +
                 "Use search_library only when the user likely wants to search indexed local files. Use search_discovery when the user likely wants to find music not already known to be in the local library, asks broadly to find a song/album, or mentions Soulseek/downloads.\n" +
                 "Use research_playlist when the user asks for a playlist, mood/occasion recommendations, music like an artist/song, or music they might like. For research_playlist, return 8-15 concrete trackCandidates.\n" +
+                "For requests about music the user might like, strongly use tasteProfile plus favoriteTracks, highRotationTracks, recentTracks, and liked/rated library context. Avoid blockedArtists, blockedGenres, and overplayedTracks.\n" +
                 "When the user says this song, this track, current song, or current artist, resolve that using currentTrack/currentArtist/currentAlbum from the Taste/library context.\n" +
                 "For research_playlist, use current web research when available. Prefer sources from music discussion and recommendation contexts such as Reddit, Last.fm, Rate Your Music, Album of the Year, Bandcamp, Discogs, AllMusic, Pitchfork, Stereogum, Resident Advisor, forums, and label/artist pages. Include only sources you actually used in researchSources.\n" +
                 "searchQuery should be the cleaned music target, not filler words like here, this, song, album, find, search, or download.\n" +

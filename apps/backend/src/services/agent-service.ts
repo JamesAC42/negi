@@ -7,7 +7,8 @@ import type {
   AgentResearchSource,
   DiscoveryResult,
   ImportItem,
-  LibraryFilesResponse
+  LibraryFilesResponse,
+  TasteProfile
 } from "@music-os/core";
 import type { AgentPlanningContext, AgentTrackCandidate } from "./agent-model-provider.js";
 import { rankDiscoveryResultsByAvailability } from "./discovery-availability.js";
@@ -16,9 +17,11 @@ import { OperationService } from "./operation-service.js";
 import { PlaybackService } from "./playback-service.js";
 import type { SlskdService } from "./slskd-service.js";
 import type { ImportService } from "./import-service.js";
+import type { TasteProfileService } from "./taste-profile-service.js";
 
 type LibraryFile = LibraryFilesResponse["files"][number];
 type DiscoverySearchTool = Pick<SlskdService, "search">;
+type TasteProfileReader = Pick<TasteProfileService, "getProfile">;
 type AgentStepType = "plan" | "tool" | "decision" | "approval" | "final";
 type AgentStepStatus = "running" | "completed" | "failed";
 export type AgentStepRecorder = (step: {
@@ -48,7 +51,8 @@ export class AgentService {
     private readonly operations: OperationService,
     private readonly playback: PlaybackService,
     private readonly discovery?: DiscoverySearchTool,
-    private readonly imports?: ImportService
+    private readonly imports?: ImportService,
+    private readonly tasteProfile?: TasteProfileReader
   ) {}
 
   async startOperationBatch(batchId: string): Promise<NonNullable<AgentMessageResponse["operationBatch"]>> {
@@ -66,17 +70,30 @@ export class AgentService {
       .sort((left, right) => (right.lastPlayedAt ?? "").localeCompare(left.lastPlayedAt ?? ""))
       .slice(0, 20);
     const current = this.getCurrentPlaybackFile();
+    const tasteProfile = this.getCompactTasteProfile();
     return {
       librarySummary: `${playable.length} indexed playable files`,
       currentTrack: current ? formatPlanningTrack(current) : undefined,
       currentArtist: current?.displayTags.artist ?? current?.displayTags.albumartist,
       currentAlbum: current?.displayTags.album,
+      tasteProfile,
       favoriteArtists: topValues(liked, (file) => file.displayTags.artist ?? file.displayTags.albumartist).slice(0, 12),
       favoriteAlbums: topValues(liked, (file) => file.displayTags.album).slice(0, 12),
       favoriteTracks: liked.map(formatPlanningTrack).filter(Boolean).slice(0, 20),
       highRotationTracks: highRotation.map(formatPlanningTrack).filter(Boolean).slice(0, 20),
       recentTracks: recent.map(formatPlanningTrack).filter(Boolean).slice(0, 20)
     };
+  }
+
+  private getCompactTasteProfile(): Partial<TasteProfile> | undefined {
+    if (!this.tasteProfile) {
+      return undefined;
+    }
+    try {
+      return compactTasteProfile(this.tasteProfile.getProfile().profile);
+    } catch {
+      return undefined;
+    }
   }
 
   async handleMessage(message: string, options: AgentHandleMessageOptions = {}): Promise<AgentMessageResponse> {
@@ -962,6 +979,40 @@ function formatPlanningTrack(file: LibraryFile): string {
   const title = tags.title ?? file.filename.replace(/\.[^.]+$/, "");
   const album = tags.album;
   return [artist, title].filter(Boolean).join(" - ") + (album ? ` (${album})` : "");
+}
+
+function compactTasteProfile(profile: TasteProfile): Partial<TasteProfile> | undefined {
+  const compact: Partial<TasteProfile> = {};
+  const arrayKeys = [
+    "favoriteArtists",
+    "favoriteAlbums",
+    "favoriteTracks",
+    "preferredGenres",
+    "preferredEras",
+    "preferredCountries",
+    "preferredLabels",
+    "blockedArtists",
+    "blockedGenres",
+    "overplayedTracks",
+    "preferredFormats"
+  ] as const;
+  for (const key of arrayKeys) {
+    if (profile[key].length > 0) {
+      compact[key] = profile[key].slice(0, 20) as never;
+    }
+  }
+
+  if (profile.qualityPreferences.minimumBitrateKbps != null || !profile.qualityPreferences.preferLossless || !profile.qualityPreferences.allowMp3IfRare) {
+    compact.qualityPreferences = profile.qualityPreferences;
+  }
+  for (const key of ["playlistStylePreferences", "notes"] as const) {
+    const value = profile[key].trim();
+    if (value) {
+      compact[key] = value;
+    }
+  }
+
+  return Object.keys(compact).length > 0 ? compact : undefined;
 }
 
 function topValues(files: LibraryFile[], getValue: (file: LibraryFile) => string | undefined | null): string[] {
