@@ -1219,16 +1219,30 @@ function findOwnedCandidate(library: LibraryRepository, candidate: AgentTrackCan
 }
 
 function candidateDiscoveryQueries(candidate: AgentTrackCandidate): CandidateDiscoveryQuery[] {
-  return [
-    { query: candidate.query, requireArtist: true },
-    { query: `${candidate.artist} ${candidate.title}`, requireArtist: true },
-    { query: candidate.album ? `${candidate.artist} ${candidate.album} ${candidate.title}` : null, requireArtist: true },
-    { query: candidate.title, requireArtist: false }
-  ]
-    .map((value) => ({ ...value, query: value.query ? cleanFallbackQuery(value.query) : "" }))
+  const queries: Array<{ query?: string | null; requireArtist: boolean }> = [];
+  const add = (query: string | null | undefined, requireArtist: boolean) => {
+    const cleaned = query ? cleanFallbackQuery(query) : "";
+    if (!cleaned) {
+      return;
+    }
+    queries.push({ query: cleaned, requireArtist });
+    const unsuppressed = removeSuppressedSearchTokens(cleaned);
+    if (unsuppressed && normalizeFallbackKey(unsuppressed) !== normalizeFallbackKey(cleaned)) {
+      queries.push({ query: unsuppressed, requireArtist: false });
+    }
+  };
+
+  add(candidate.query, true);
+  add(`${candidate.artist} ${candidate.title}`, true);
+  add(candidate.album ? `${candidate.artist} ${candidate.album} ${candidate.title}` : null, true);
+  add(candidate.album ? `${candidate.album} ${candidate.title}` : null, false);
+  add(candidate.title, false);
+
+  return queries
     .filter((value) => Boolean(value.query))
-    .filter((value, index, values) => values.findIndex((other) => normalizeFallbackKey(other.query) === normalizeFallbackKey(value.query)) === index)
-    .slice(0, 4);
+    .filter((value, index, values) => values.findIndex((other) => normalizeFallbackKey(other.query ?? "") === normalizeFallbackKey(value.query ?? "")) === index)
+    .map((value) => ({ query: value.query ?? "", requireArtist: value.requireArtist }))
+    .slice(0, 7);
 }
 
 function selectDiscoveryTrackResult(

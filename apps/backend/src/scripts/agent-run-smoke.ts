@@ -518,6 +518,64 @@ try {
     "expected title-only fallback result to be accepted when artist is absent from the path"
   );
 
+  const albumTitleFallbackCalls: string[] = [];
+  const albumTitleFallbackRun = await new AgentRunService(
+    app.db,
+    new AgentService(app.library, app.operations, app.playback, {
+      async search(query: string): Promise<DiscoverySearchResponse> {
+        albumTitleFallbackCalls.push(query);
+        return query === "dookie when i come around"
+          ? {
+              query,
+              total: 1,
+              results: [
+                {
+                  id: "album-title-fallback-result",
+                  source: "slskd",
+                  username: "album-fallback-user",
+                  filename: "07 - When I Come Around.flac",
+                  path: "Green Day/Dookie/07 - When I Come Around.flac",
+                  folder: "Green Day/Dookie",
+                  sizeBytes: 31_000_000,
+                  extension: "flac",
+                  bitrate: 890_000,
+                  sampleRate: 44_100,
+                  lengthSeconds: 178,
+                  isLocked: false,
+                  hasFreeUploadSlot: true,
+                  uploadSpeedBytesPerSecond: 1_700_000,
+                  queueLength: 0,
+                  raw: {}
+                }
+              ]
+            }
+          : { query, total: 0, results: [] };
+      }
+    }),
+    {
+      name: "fixture_model",
+      async plan() {
+        return {
+          summary: "Fixture model supplied a candidate whose artist-title query needs album-title fallback",
+          intent: "research_playlist",
+          playlistName: "Album Fallback",
+          searchQueryHints: [],
+          trackCandidates: [{ artist: "Green Day", title: "When I Come Around", album: "Dookie", query: "green day when i come around" }]
+        };
+      }
+    },
+    undefined,
+    app.agentPlaylistWorkflows
+  ).run("make me a playlist with the green day song from dookie");
+  assert(
+    albumTitleFallbackCalls.includes("dookie when i come around"),
+    `expected album-title fallback query to be attempted, got ${JSON.stringify(albumTitleFallbackCalls)}`
+  );
+  assert(
+    albumTitleFallbackRun.response?.discoveryResults[0]?.discoveryId === "album-title-fallback-result",
+    "expected album-title fallback result to be selected"
+  );
+
   app.tasteProfile.updateProfile(
     {
       ...app.tasteProfile.getProfile().profile,
