@@ -206,9 +206,7 @@ try {
       name: "fixture_model",
       async plan() {
         return {
-          summary: "Fixture model recognized an external discovery request",
-          intent: "search_discovery",
-          searchQuery: "daft punk",
+          summary: "Fixture model recognized an external Discovery request",
           searchQueryHints: ["discovery", "random access memories"]
         };
       }
@@ -329,15 +327,17 @@ try {
       }
     },
     undefined,
-    app.agentPlaylistWorkflows
+    app.agentPlaylistWorkflows,
+    true
   );
   const ownedPlaylistRun = await ownedPlaylistRuns.run("make me an owned durable playlist");
   const ownedWorkflow = app.agentPlaylistWorkflows.listWorkflows().find((workflow) => workflow.runId === ownedPlaylistRun.id);
   assert(ownedWorkflow != null, "expected owned workflow to be registered");
   assert(ownedPlaylistRun.response?.operationBatch != null, "expected owned playlist proposal batch");
-  app.operations.approveBatch(ownedPlaylistRun.response.operationBatch.id);
-  await app.operations.applyBatch(ownedPlaylistRun.response.operationBatch.id);
-  await app.agentPlaylistWorkflows.advanceAll();
+  assert(
+    ownedPlaylistRun.response.operationBatch.status === "applied",
+    `expected owned playlist batch to auto-apply, got ${ownedPlaylistRun.response.operationBatch.status}`
+  );
   const completedOwnedWorkflow = app.agentPlaylistWorkflows.listWorkflows().find((workflow) => workflow.runId === ownedPlaylistRun.id);
   assert(completedOwnedWorkflow?.status === "completed", `expected owned workflow completed, got ${completedOwnedWorkflow?.status}`);
   const ownedThread = app.agentThreads.getThread(ownedPlaylistRun.threadId!);

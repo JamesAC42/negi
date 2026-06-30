@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
 import type { AgentMessageResponse, AgentResearchSource, AgentRunResponse } from "@music-os/core";
 import type { AgentService, AgentStepRecorder } from "./agent-service.js";
-import type { AgentModelProvider, AgentTrackCandidate } from "./agent-model-provider.js";
+import type { AgentModelPlan, AgentModelProvider, AgentTrackCandidate } from "./agent-model-provider.js";
 import type { AgentMetadataTool } from "./agent-metadata-tool.js";
 import type { AgentPlaylistWorkflowService } from "./agent-playlist-workflow-service.js";
 
@@ -47,7 +47,8 @@ export class AgentRunService {
     private readonly agent: AgentService,
     private readonly modelProvider?: AgentModelProvider,
     private readonly metadataTool?: AgentMetadataTool,
-    private readonly playlistWorkflows?: AgentPlaylistWorkflowService
+    private readonly playlistWorkflows?: AgentPlaylistWorkflowService,
+    private readonly autoStartResearchPlaylists = false
   ) {}
 
   listRuns(limit = 50): AgentRunResponse["run"][] {
@@ -134,7 +135,7 @@ export class AgentRunService {
           const planningContext = this.agent.getPlanningContext();
           const modelPlan = await this.modelProvider.plan(objective, planningContext);
           if (modelPlan) {
-            suggestedIntent = modelPlan.intent ?? suggestedIntent;
+            suggestedIntent = modelPlan.intent ?? inferIntentFromModelPlan(modelPlan) ?? suggestedIntent;
             suggestedSearchQuery = modelPlan.searchQuery ?? suggestedSearchQuery;
             playlistName = modelPlan.playlistName ?? playlistName;
             playlistDescription = modelPlan.playlistDescription ?? playlistDescription;
@@ -176,6 +177,36 @@ export class AgentRunService {
         threadId: thread.id
       };
       this.attachOperationBatch(response, thread.id);
+      this.playlistWorkflows?.registerAgentResponse(runId, thread.id, response);
+      if (this.autoStartResearchPlaylists && response.intent === "research_playlist" && response.operationBatch) {
+        try {
+          const appliedBatch = await this.agent.startOperationBatch(response.operationBatch.id);
+          response.operationBatch = {
+            ...appliedBatch,
+            agentThreadId: thread.id
+          };
+          response.reply = startedResearchPlaylistReply(response);
+          recordStep({
+            type: "approval",
+            toolName: "auto_start_research_playlist",
+            status: "completed",
+            summary: "Auto-started researched playlist workflow",
+            input: { operationBatchId: appliedBatch.id },
+            output: { operationBatchId: appliedBatch.id, status: appliedBatch.status }
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          response.reply = `${response.reply} I could not start it automatically: ${message}`;
+          recordStep({
+            type: "approval",
+            toolName: "auto_start_research_playlist",
+            status: "failed",
+            summary: "Could not auto-start researched playlist workflow",
+            input: { operationBatchId: response.operationBatch.id },
+            error: message
+          });
+        }
+      }
       recordStep({
         type: "final",
         status: "completed",
@@ -194,9 +225,9 @@ export class AgentRunService {
            WHERE id = ?`
         )
         .run(JSON.stringify(response), runId);
-      this.playlistWorkflows?.registerAgentResponse(runId, thread.id, response);
       this.insertMessage(thread.id, "agent", response.reply, response);
       this.db.prepare("UPDATE agent_threads SET updated_at = datetime('now') WHERE id = ?").run(thread.id);
+      await this.playlistWorkflows?.advanceAll();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.insertStep(runId, stepIndex, {
@@ -327,4 +358,25 @@ function mapStep(row: AgentStepRow): AgentRunResponse["run"]["steps"][number] {
 function titleFromMessage(message: string): string {
   const compact = message.replace(/\s+/g, " ").trim();
   return compact.length > 48 ? `${compact.slice(0, 45).trim()}...` : compact || "Agent Thread";
+}
+
+function inferIntentFromModelPlan(modelPlan: AgentModelPlan): AgentMessageResponse["intent"] | undefined {
+  if ((modelPlan.trackCandidates?.length ?? 0) > 0 || modelPlan.playlistName || modelPlan.playlistDescription) {
+    return "research_playlist";
+  }
+  const planText = [modelPlan.summary, modelPlan.searchQuery, ...(modelPlan.searchQueryHints ?? [])].join(" ").toLowerCase();
+  if (/\b(soulseek|slsk|slskd|discovery|download|online|external)\b/.test(planText)) {
+    return "search_discovery";
+  }
+  return undefined;
+}
+
+function startedResearchPlaylistReply(response: AgentMessageResponse): string {
+  const ownedCount = response.results.length;
+  const downloadCount = response.discoveryResults.length;
+  return `I built a researched playlist workflow with ${ownedCount} library match${
+    ownedCount === 1 ? "" : "es"
+  } and ${downloadCount} Soulseek download candidate${
+    downloadCount === 1 ? "" : "s"
+  }. I started the download/import workflow and will post here when the playlist is ready.`;
 }

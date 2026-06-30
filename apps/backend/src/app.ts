@@ -73,7 +73,14 @@ export function createBackendApp(config: BackendConfig): BackendApp {
   discoveryDownloads.onJobSucceeded((jobId) => agentPlaylistWorkflows.advanceForDownloadJob(jobId));
   const agent = new AgentService(library, operations, playback, discovery, imports);
   const agentThreads = new AgentThreadService(db, agent);
-  const agentRuns = new AgentRunService(db, agent, createAgentModelProvider(config), new MusicBrainzAgentMetadataTool(config), agentPlaylistWorkflows);
+  const agentRuns = new AgentRunService(
+    db,
+    agent,
+    createAgentModelProvider(config),
+    new MusicBrainzAgentMetadataTool(config),
+    agentPlaylistWorkflows,
+    config.agentAutoStartResearchPlaylists === true
+  );
   const jobs = new JobService(db);
   const tasteProfile = new TasteProfileService(db);
   const artwork = new ArtworkService(library, config);

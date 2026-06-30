@@ -51,6 +51,11 @@ export class AgentService {
     private readonly imports?: ImportService
   ) {}
 
+  async startOperationBatch(batchId: string): Promise<NonNullable<AgentMessageResponse["operationBatch"]>> {
+    this.operations.approveBatch(batchId);
+    return this.operations.applyBatch(batchId);
+  }
+
   getPlanningContext(): AgentPlanningContext {
     const files = this.library.listFiles("", 500);
     const playable = files.filter((file) => !file.missing && !file.staged);
@@ -723,6 +728,7 @@ function extractSearchQuery(message: string, intent: AgentMessageResponse["inten
     "it",
     "it's",
     "its",
+    "here",
     "library",
     "me",
     "music",
@@ -733,7 +739,9 @@ function extractSearchQuery(message: string, intent: AgentMessageResponse["inten
     "record",
     "release",
     "single",
+    "song",
     "songs",
+    "track",
     "the",
     "tracks",
     "with"
