@@ -24,6 +24,12 @@ assert(
   `expected taste/current-context playlist prompt to use research_playlist, got ${recommendationIntent}`
 );
 
+const moodPlaylistIntent = detectAgentIntent("make me a playlist for studying late at night");
+assert(moodPlaylistIntent === "research_playlist", `expected playlist-for-mood prompt to use research_playlist, got ${moodPlaylistIntent}`);
+
+const localPlaylistIntent = detectAgentIntent("make a playlist from my library for gaucho");
+assert(localPlaylistIntent === "propose_playlist", `expected explicit local playlist prompt to stay local, got ${localPlaylistIntent}`);
+
 console.log(JSON.stringify({ ok: true }, null, 2));
 
 function assert(condition: boolean, message: string): asserts condition {

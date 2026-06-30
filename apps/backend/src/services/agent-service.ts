@@ -736,7 +736,10 @@ export function detectAgentIntent(message: string): AgentMessageResponse["intent
     return "research_playlist";
   }
   if (/\b(playlist|mix)\b/.test(text) && /\b(make|create|build|propose|generate)\b/.test(text)) {
-    if (/\b(mood|vibe|like|similar|recommend|think i would like|for me|based on|research|download|find)\b/.test(text)) {
+    if (
+      !explicitlyLocalLibrarySearch(message) &&
+      /\b(mood|vibe|like|similar|recommend|think i would like|for me|for\s+(a\s+|an\s+|the\s+)?[\p{L}\p{N}'-]+|based on|research|download|find)\b/u.test(text)
+    ) {
       return "research_playlist";
     }
     return "propose_playlist";
