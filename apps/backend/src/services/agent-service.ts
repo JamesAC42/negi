@@ -4,6 +4,7 @@ import type {
   AgentImportResult,
   AgentMessageResponse,
   AgentParsedListItem,
+  AgentResearchSource,
   DiscoveryResult,
   ImportItem,
   LibraryFilesResponse
@@ -38,6 +39,7 @@ export interface AgentHandleMessageOptions {
   playlistName?: string;
   playlistDescription?: string;
   trackCandidates?: AgentTrackCandidate[];
+  researchSources?: AgentResearchSource[];
 }
 
 export class AgentService {
@@ -551,6 +553,7 @@ export class AgentService {
       results: ownedFiles.map(mapAgentResult),
       discoveryResults: rankedDiscoveryResults.map((result) => mapAgentDiscoveryResult(result, this.library)),
       discoveryGroups: groupAgentDiscoveryResults(rankedDiscoveryResults, this.library),
+      researchSources: options.researchSources ?? [],
       parsedListItems: [],
       importResults: [],
       operationBatch,

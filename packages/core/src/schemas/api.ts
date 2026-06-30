@@ -578,6 +578,12 @@ export const agentDiscoveryGroupSchema = z.object({
   results: z.array(agentDiscoveryResultSchema)
 });
 
+export const agentResearchSourceSchema = z.object({
+  title: z.string().min(1),
+  url: z.string().url(),
+  summary: z.string().optional()
+});
+
 export const agentParsedListItemSchema = z.object({
   rank: z.number().int().positive().nullable(),
   artist: z.string().nullable(),
@@ -649,6 +655,7 @@ export const agentMessageResponseSchema = z.object({
   results: z.array(agentSearchResultSchema),
   discoveryResults: z.array(agentDiscoveryResultSchema),
   discoveryGroups: z.array(agentDiscoveryGroupSchema).optional(),
+  researchSources: z.array(agentResearchSourceSchema).optional(),
   parsedListItems: z.array(agentParsedListItemSchema),
   importResults: z.array(agentImportResultSchema),
   operationBatch: operationBatchSchema.nullable(),
@@ -1048,6 +1055,7 @@ export type AgentMessageRequest = z.infer<typeof agentMessageRequestSchema>;
 export type AgentSearchResult = z.infer<typeof agentSearchResultSchema>;
 export type AgentDiscoveryResult = z.infer<typeof agentDiscoveryResultSchema>;
 export type AgentDiscoveryGroup = z.infer<typeof agentDiscoveryGroupSchema>;
+export type AgentResearchSource = z.infer<typeof agentResearchSourceSchema>;
 export type AgentParsedListItem = z.infer<typeof agentParsedListItemSchema>;
 export type AgentImportResult = z.infer<typeof agentImportResultSchema>;
 export type AgentMessageResponse = z.infer<typeof agentMessageResponseSchema>;

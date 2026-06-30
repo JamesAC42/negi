@@ -25,6 +25,7 @@ export interface BackendConfig {
   slskdPassword?: string | null;
   slskdDownloadDirectory?: string | null;
   agentModelProvider?: "local" | "openai";
+  agentWebResearchEnabled?: boolean;
   openaiApiKey?: string | null;
   openaiModel?: string;
 }
@@ -49,6 +50,7 @@ export function getBackendConfig(): BackendConfig {
       ? normalizeClientPath(process.env.MUSIC_OS_SLSKD_DOWNLOAD_DIR)
       : null,
     agentModelProvider: process.env.MUSIC_OS_AGENT_MODEL_PROVIDER === "openai" ? "openai" : "local",
+    agentWebResearchEnabled: process.env.MUSIC_OS_AGENT_WEB_RESEARCH !== "0",
     openaiApiKey: process.env.OPENAI_API_KEY ?? process.env.MUSIC_OS_OPENAI_API_KEY ?? null,
     openaiModel: process.env.MUSIC_OS_OPENAI_MODEL ?? "gpt-5.5"
   };

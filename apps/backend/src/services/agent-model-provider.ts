@@ -9,6 +9,12 @@ export interface AgentTrackCandidate {
   query?: string;
 }
 
+export interface AgentResearchSource {
+  title: string;
+  url: string;
+  summary?: string;
+}
+
 export interface AgentPlanningContext {
   librarySummary?: string;
   favoriteArtists?: string[];
@@ -26,6 +32,7 @@ export interface AgentModelPlan {
   playlistName?: string;
   playlistDescription?: string;
   trackCandidates?: AgentTrackCandidate[];
+  researchSources?: AgentResearchSource[];
 }
 
 export interface AgentModelProvider {
@@ -35,7 +42,11 @@ export interface AgentModelProvider {
 
 export function createAgentModelProvider(config: BackendConfig): AgentModelProvider {
   if (config.agentModelProvider === "openai" && config.openaiApiKey) {
-    return new OpenAIResponsesAgentModelProvider(config.openaiApiKey, config.openaiModel ?? "gpt-5.5");
+    return new OpenAIResponsesAgentModelProvider(
+      config.openaiApiKey,
+      config.openaiModel ?? "gpt-5.5",
+      config.agentWebResearchEnabled !== false
+    );
   }
   return new LocalAgentModelProvider();
 }
@@ -53,42 +64,49 @@ class OpenAIResponsesAgentModelProvider implements AgentModelProvider {
 
   constructor(
     private readonly apiKey: string,
-    private readonly model: string
+    private readonly model: string,
+    private readonly webResearchEnabled: boolean
   ) {}
 
   async plan(message: string, context: AgentPlanningContext = {}): Promise<AgentModelPlan | null> {
+    const useWebResearch = this.webResearchEnabled && shouldUseWebResearch(message);
+    const requestBody: Record<string, unknown> = {
+      model: this.model,
+      reasoning: { effort: "low" },
+      max_output_tokens: useWebResearch ? 1400 : 800,
+      instructions:
+        "You plan music-library agent work for Music OS. Return compact JSON only. Never claim actions were taken. Mutating actions require local approval outside the model.",
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text:
+                `User request: ${message}\n\n` +
+                `Taste/library context: ${JSON.stringify(context)}\n\n` +
+                "Return JSON with shape {\"summary\": string, \"intent\": string, \"searchQuery\": string, \"searchQueryHints\": string[], \"playlistName\": string, \"playlistDescription\": string, \"researchSources\": [{\"title\": string, \"url\": string, \"summary\": string}], \"trackCandidates\": [{\"artist\": string, \"title\": string, \"album\": string, \"reason\": string, \"query\": string}]}.\n" +
+                "Allowed intents: search_library, search_discovery, research_playlist, parse_pasted_list, propose_import, propose_playlist, propose_duplicate_cleanup, playback, unknown.\n" +
+                "Use search_library only when the user likely wants to search indexed local files. Use search_discovery when the user likely wants to find music not already known to be in the local library, asks broadly to find a song/album, or mentions Soulseek/downloads.\n" +
+                "Use research_playlist when the user asks for a playlist, mood/occasion recommendations, music like an artist/song, or music they might like. For research_playlist, return 8-15 concrete trackCandidates.\n" +
+                "For research_playlist, use current web research when available. Prefer sources from music discussion and recommendation contexts such as Reddit, Last.fm, Rate Your Music, Album of the Year, Bandcamp, Discogs, AllMusic, Pitchfork, Stereogum, Resident Advisor, forums, and label/artist pages. Include only sources you actually used in researchSources.\n" +
+                "searchQuery should be the cleaned music target, not filler words like here, this, song, album, find, search, or download.\n" +
+                "searchQueryHints should be short Soulseek fallback searches, especially album/title/track names that avoid famous artist tokens likely to be suppressed."
+            }
+          ]
+        }
+      ]
+    };
+    if (useWebResearch) {
+      requestBody.tools = [{ type: "web_search" }];
+    }
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         authorization: `Bearer ${this.apiKey}`,
         "content-type": "application/json"
       },
-      body: JSON.stringify({
-        model: this.model,
-        reasoning: { effort: "low" },
-        max_output_tokens: 800,
-        instructions:
-          "You plan music-library agent work for Music OS. Return compact JSON only. Never claim actions were taken. Mutating actions require local approval outside the model.",
-        input: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "input_text",
-                text:
-                  `User request: ${message}\n\n` +
-                  `Taste/library context: ${JSON.stringify(context)}\n\n` +
-                  "Return JSON with shape {\"summary\": string, \"intent\": string, \"searchQuery\": string, \"searchQueryHints\": string[], \"playlistName\": string, \"playlistDescription\": string, \"trackCandidates\": [{\"artist\": string, \"title\": string, \"album\": string, \"reason\": string, \"query\": string}]}.\n" +
-                  "Allowed intents: search_library, search_discovery, research_playlist, parse_pasted_list, propose_import, propose_playlist, propose_duplicate_cleanup, playback, unknown.\n" +
-                  "Use search_library only when the user likely wants to search indexed local files. Use search_discovery when the user likely wants to find music not already known to be in the local library, asks broadly to find a song/album, or mentions Soulseek/downloads.\n" +
-                  "Use research_playlist when the user asks for a playlist, mood/occasion recommendations, music like an artist/song, or music they might like. For research_playlist, return 8-15 concrete trackCandidates.\n" +
-                  "searchQuery should be the cleaned music target, not filler words like here, this, song, album, find, search, or download.\n" +
-                  "searchQueryHints should be short Soulseek fallback searches, especially album/title/track names that avoid famous artist tokens likely to be suppressed."
-              }
-            ]
-          }
-        ]
-      })
+      body: JSON.stringify(requestBody)
     });
 
     if (!response.ok) {
@@ -131,6 +149,7 @@ function parsePlan(text: string): AgentModelPlan | null {
     const playlistName = typeof parsed.playlistName === "string" ? parsed.playlistName.trim() : "";
     const playlistDescription = typeof parsed.playlistDescription === "string" ? parsed.playlistDescription.trim() : "";
     const trackCandidates = parseTrackCandidates(parsed.trackCandidates);
+    const researchSources = parseResearchSources(parsed.researchSources);
     const searchQueryHints = Array.isArray(parsed.searchQueryHints)
       ? parsed.searchQueryHints.filter((hint): hint is string => typeof hint === "string").map((hint) => hint.trim()).filter(Boolean)
       : [];
@@ -144,7 +163,8 @@ function parsePlan(text: string): AgentModelPlan | null {
       searchQueryHints: [...new Set(searchQueryHints)].slice(0, 8),
       playlistName: playlistName || undefined,
       playlistDescription: playlistDescription || undefined,
-      trackCandidates
+      trackCandidates,
+      researchSources
     };
   } catch {
     return null;
@@ -202,6 +222,41 @@ function dedupeTrackCandidates(candidates: AgentTrackCandidate[]): AgentTrackCan
     }
   }
   return deduped;
+}
+
+function parseResearchSources(value: unknown): AgentResearchSource[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const sources: AgentResearchSource[] = [];
+  for (const item of value) {
+    const record = isRecord(item) ? item : null;
+    const title = typeof record?.title === "string" ? record.title.trim() : "";
+    const url = typeof record?.url === "string" ? record.url.trim() : "";
+    if (!title || !/^https?:\/\//i.test(url)) {
+      continue;
+    }
+    const summary = typeof record?.summary === "string" && record.summary.trim() ? record.summary.trim() : undefined;
+    sources.push({ title, url, summary });
+  }
+  return dedupeResearchSources(sources).slice(0, 12);
+}
+
+function dedupeResearchSources(sources: AgentResearchSource[]): AgentResearchSource[] {
+  const seen = new Set<string>();
+  const deduped: AgentResearchSource[] = [];
+  for (const source of sources) {
+    const key = source.url.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(source);
+    }
+  }
+  return deduped;
+}
+
+function shouldUseWebResearch(message: string): boolean {
+  return /\b(playlist|mix|mood|vibe|recommend|recommendation|similar|like this|like that|think i would like|research|reddit|last\.?fm|rate\s*your\s*music|rym|forum|forums)\b/i.test(message);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

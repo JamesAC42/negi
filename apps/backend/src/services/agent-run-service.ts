@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
-import type { AgentMessageResponse, AgentRunResponse } from "@music-os/core";
+import type { AgentMessageResponse, AgentResearchSource, AgentRunResponse } from "@music-os/core";
 import type { AgentService, AgentStepRecorder } from "./agent-service.js";
 import type { AgentModelProvider, AgentTrackCandidate } from "./agent-model-provider.js";
 import type { AgentMetadataTool } from "./agent-metadata-tool.js";
@@ -101,6 +101,7 @@ export class AgentRunService {
       let playlistName: string | undefined;
       let playlistDescription: string | undefined;
       let trackCandidates: AgentTrackCandidate[] = [];
+      let researchSources: AgentResearchSource[] = [];
       let suggestedIntent: AgentMessageResponse["intent"] | undefined;
       let suggestedSearchQuery: string | undefined;
       if (this.metadataTool) {
@@ -138,6 +139,7 @@ export class AgentRunService {
             playlistName = modelPlan.playlistName ?? playlistName;
             playlistDescription = modelPlan.playlistDescription ?? playlistDescription;
             trackCandidates = modelPlan.trackCandidates ?? trackCandidates;
+            researchSources = modelPlan.researchSources ?? researchSources;
             searchQueryHints.push(...modelPlan.searchQueryHints);
             recordStep({
               type: "plan",
@@ -145,7 +147,7 @@ export class AgentRunService {
               status: "completed",
               summary: modelPlan.summary,
               input: { objective, planningContext },
-              output: { suggestedIntent, suggestedSearchQuery, searchQueryHints, playlistName, playlistDescription, trackCandidates }
+              output: { suggestedIntent, suggestedSearchQuery, searchQueryHints, playlistName, playlistDescription, trackCandidates, researchSources }
             });
           }
         } catch (error) {
@@ -167,7 +169,8 @@ export class AgentRunService {
           suggestedSearchQuery,
           playlistName,
           playlistDescription,
-          trackCandidates
+          trackCandidates,
+          researchSources
         })),
         runId,
         threadId: thread.id

@@ -9937,6 +9937,16 @@ function AgentResultSummary({ response, run }: { response: AgentMessageResponse;
         </span>
       ) : null}
       {run && run.steps.length > 0 ? <AgentRunTrace run={run} /> : null}
+      {response.researchSources && response.researchSources.length > 0 ? (
+        <div className="agentResults">
+          {response.researchSources.slice(0, 6).map((source) => (
+            <a href={source.url} key={source.url} rel="noreferrer" target="_blank">
+              {source.title}
+              {source.summary ? ` · ${source.summary}` : ""}
+            </a>
+          ))}
+        </div>
+      ) : null}
       {response.results.length > 0 ? (
         <div className="agentResults">
           {response.results.slice(0, 8).map((result) => (

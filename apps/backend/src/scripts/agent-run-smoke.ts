@@ -267,6 +267,13 @@ try {
           searchQuery: "late night electronic",
           playlistName: "Late Night Electronic",
           playlistDescription: "Downtempo electronic recommendations from the fixture model.",
+          researchSources: [
+            {
+              title: "Fixture Reddit downtempo thread",
+              url: "https://www.reddit.com/r/ifyoulikeblank/example",
+              summary: "Fixture discussion source for late-night electronic recommendations."
+            }
+          ],
           searchQueryHints: [],
           trackCandidates: [
             { artist: "Air", title: "La femme d'argent", album: "Moon Safari", query: "air la femme d'argent" },
@@ -280,6 +287,7 @@ try {
   const researchPlaylistRun = await researchPlaylistRuns.run("make me a playlist of songs for a late night electronic mood");
   assert(researchPlaylistRun.response?.intent === "research_playlist", `expected research_playlist intent, got ${researchPlaylistRun.response?.intent}`);
   assert(researchPlaylistRun.response?.discoveryResults.length === 2, "expected researched playlist to find two Discovery candidates");
+  assert(researchPlaylistRun.response?.researchSources?.[0]?.url === "https://www.reddit.com/r/ifyoulikeblank/example", "expected research source to be preserved");
   assert(researchPlaylistRun.response?.operationBatch?.operations.some((operation) => operation.type === "queue_download") === true, "expected researched playlist to propose queue_download");
   assert(researchPlaylistSearchCalls.includes("air la femme d'argent"), "expected first candidate query");
   assert(researchPlaylistSearchCalls.includes("boards of canada roygbiv"), "expected second candidate query");
