@@ -77,7 +77,7 @@ class OpenAIResponsesAgentModelProvider implements AgentModelProvider {
     const requestBody: Record<string, unknown> = {
       model: this.model,
       reasoning: { effort: "low" },
-      max_output_tokens: useWebResearch ? 1400 : 800,
+      max_output_tokens: useWebResearch ? 4000 : 1200,
       instructions:
         "You plan music-library agent work for Music OS. Return compact JSON only. Do not use markdown. Never claim actions were taken. Mutating actions require local approval outside the model.",
       input: [
@@ -121,7 +121,18 @@ class OpenAIResponsesAgentModelProvider implements AgentModelProvider {
       throw new Error(`OpenAI Responses API returned ${response.status}: ${await response.text()}`);
     }
     const body = (await response.json()) as Record<string, unknown>;
-    return parseAgentModelPlan(extractOutputText(body));
+    const outputText = extractOutputText(body);
+    const plan = parseAgentModelPlan(outputText);
+    if (!plan && process.env.MUSIC_OS_AGENT_MODEL_DEBUG === "1") {
+      throw new Error(
+        `OpenAI planner returned an unparseable response: ${JSON.stringify({
+          status: body.status,
+          incompleteDetails: body.incomplete_details,
+          outputText: outputText.slice(0, 1000)
+        })}`
+      );
+    }
+    return plan;
   }
 }
 

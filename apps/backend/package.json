@@ -14,6 +14,7 @@
     "agent-run:smoke": "tsx src/scripts/agent-run-smoke.ts",
     "agent-routing:smoke": "tsx src/scripts/agent-routing-smoke.ts",
     "agent-playlist-download-workflow:smoke": "tsx src/scripts/agent-playlist-download-workflow-smoke.ts",
+    "agent-openai-live:smoke": "tsx src/scripts/agent-openai-live-smoke.ts",
     "agent-model-provider:smoke": "tsx src/scripts/agent-model-provider-smoke.ts",
     "agent-thread:smoke": "tsx src/scripts/agent-thread-smoke.ts",
     "album-playback:smoke": "tsx src/scripts/album-playback-smoke.ts",
