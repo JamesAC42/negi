@@ -13,6 +13,9 @@ let app: BackendApp | null = null;
 
 try {
   app = createBackendApp({ host: "127.0.0.1", port: 0, databasePath, mpvPath: "mpv", musicBrainzEnabled: false });
+  const agentImportRootPath = join(fixtureDir, "agent-import-root");
+  await mkdir(agentImportRootPath, { recursive: true });
+  const agentImportRoot = app.library.addRoot(agentImportRootPath, "agent-import-root");
   const searchCalls: string[] = [];
   const agent = new AgentService(app.library, app.operations, app.playback, {
     async search(query: string): Promise<DiscoverySearchResponse> {
@@ -287,6 +290,11 @@ try {
   assert(researchPlaylistRun.response?.discoveryResults.length === 2, "expected researched playlist to find two Discovery candidates");
   assert(researchPlaylistRun.response?.researchSources?.[0]?.url === "https://www.reddit.com/r/ifyoulikeblank/example", "expected research source to be preserved");
   assert(researchPlaylistRun.response?.operationBatch?.operations.some((operation) => operation.type === "queue_download") === true, "expected researched playlist to propose queue_download");
+  const researchQueueOperation = researchPlaylistRun.response?.operationBatch?.operations.find((operation) => operation.type === "queue_download");
+  assert(
+    (researchQueueOperation?.payload as { libraryRootId?: string } | undefined)?.libraryRootId === agentImportRoot.id,
+    "expected researched playlist queue_download to carry the default library root"
+  );
   assert(researchPlaylistSearchCalls.includes("air la femme d'argent"), "expected first candidate query");
   assert(researchPlaylistSearchCalls.includes("boards of canada roygbiv"), "expected second candidate query");
   const researchWorkflow = app.db

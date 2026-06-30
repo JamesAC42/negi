@@ -651,7 +651,7 @@ export class AgentService {
     if (selected.length === 0) {
       return null;
     }
-    return this.operations.createQueueDownloadBatch(selected, searchQuery, "agent");
+    return this.operations.createQueueDownloadBatch(selected, searchQuery, "agent", this.library.listRoots()[0]?.id);
   }
 
   private createResearchPlaylistBatch(
@@ -668,6 +668,7 @@ export class AgentService {
         payload: {
           query,
           results: discoveryResults,
+          libraryRootId: this.library.listRoots()[0]?.id,
           researchPlaylist: {
             name,
             description,
