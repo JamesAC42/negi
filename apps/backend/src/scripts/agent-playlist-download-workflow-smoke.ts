@@ -99,8 +99,8 @@ try {
             }
           ],
           trackCandidates: [
-            { artist: "Owned Artist", title: "Owned Title", album: "Owned Album", query: "owned artist owned title" },
-            { artist: "Remote Artist", title: "Remote Title", album: "Remote Album", query: "remote artist remote title" }
+            { artist: "Remote Artist", title: "Remote Title", album: "Remote Album", query: "remote artist remote title" },
+            { artist: "Owned Artist", title: "Owned Title", album: "Owned Album", query: "owned artist owned title" }
           ]
         };
       }
@@ -123,8 +123,8 @@ try {
   const playlist = app.playlists.getPlaylist(workflow.playlistId);
   assert(playlist.name === "Downloaded Agent Playlist", `expected playlist name, got ${playlist.name}`);
   assert(playlist.items.length === 2, `expected two playlist items, got ${playlist.items.length}`);
-  assert(playlist.items[0].file.displayTags.artist === "Owned Artist", `expected owned artist first, got ${playlist.items[0].file.displayTags.artist}`);
-  assert(playlist.items[1].file.displayTags.artist === "Remote Artist", `expected imported artist second, got ${playlist.items[1].file.displayTags.artist}`);
+  assert(playlist.items[0].file.displayTags.artist === "Remote Artist", `expected imported artist first, got ${playlist.items[0].file.displayTags.artist}`);
+  assert(playlist.items[1].file.displayTags.artist === "Owned Artist", `expected owned artist second, got ${playlist.items[1].file.displayTags.artist}`);
   assert(app.library.countPlayableFiles() === 2, `expected owned plus imported playable files, got ${app.library.countPlayableFiles()}`);
   const thread = app.agentThreads.getThread(run.threadId!);
   const threadMessageTexts = thread.messages.map((message) => `${message.role}: ${message.text}`);

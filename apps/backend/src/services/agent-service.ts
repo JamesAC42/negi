@@ -712,7 +712,7 @@ export class AgentService {
         }
       });
     }
-    if (ownedFileIds.length > 0) {
+    if (ownedFileIds.length > 0 && discoveryResults.length === 0) {
       operations.push({
         type: "create_playlist" as const,
         payload: {
