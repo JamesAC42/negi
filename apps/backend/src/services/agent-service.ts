@@ -60,8 +60,12 @@ export class AgentService {
       .filter((file) => file.lastPlayedAt)
       .sort((left, right) => (right.lastPlayedAt ?? "").localeCompare(left.lastPlayedAt ?? ""))
       .slice(0, 20);
+    const current = this.getCurrentPlaybackFile();
     return {
       librarySummary: `${playable.length} indexed playable files`,
+      currentTrack: current ? formatPlanningTrack(current) : undefined,
+      currentArtist: current?.displayTags.artist ?? current?.displayTags.albumartist,
+      currentAlbum: current?.displayTags.album,
       favoriteArtists: topValues(liked, (file) => file.displayTags.artist ?? file.displayTags.albumartist).slice(0, 12),
       favoriteAlbums: topValues(liked, (file) => file.displayTags.album).slice(0, 12),
       favoriteTracks: liked.map(formatPlanningTrack).filter(Boolean).slice(0, 20),
@@ -73,7 +77,10 @@ export class AgentService {
   async handleMessage(message: string, options: AgentHandleMessageOptions = {}): Promise<AgentMessageResponse> {
     const detectedIntent = detectIntent(message);
     const intent = applySuggestedIntent(detectedIntent, options.suggestedIntent);
-    const searchQuery = cleanSuggestedSearchQuery(options.suggestedSearchQuery) || extractSearchQuery(message, intent);
+    const searchQuery =
+      cleanSuggestedSearchQuery(options.suggestedSearchQuery) ||
+      this.resolveContextualSearchQuery(message, intent) ||
+      extractSearchQuery(message, intent);
     options.recordStep?.({
       type: "plan",
       status: "completed",
@@ -196,6 +203,38 @@ export class AgentService {
       operationBatch: null,
       playback: null
     };
+  }
+
+  private getCurrentPlaybackFile(): LibraryFile | null {
+    const currentFileId = this.playback.getSnapshot().currentFileId;
+    if (!currentFileId) {
+      return null;
+    }
+    try {
+      return this.library.getFile(currentFileId);
+    } catch {
+      return null;
+    }
+  }
+
+  private resolveContextualSearchQuery(message: string, intent: AgentMessageResponse["intent"]): string {
+    if (intent !== "research_playlist" && intent !== "search_discovery" && intent !== "search_library") {
+      return "";
+    }
+    if (!mentionsCurrentPlaybackContext(message)) {
+      return "";
+    }
+    const current = this.getCurrentPlaybackFile();
+    if (!current) {
+      return "";
+    }
+    const tags = current.displayTags;
+    const artist = tags.artist ?? tags.albumartist ?? "";
+    const title = tags.title ?? current.filename.replace(/\.[^.]+$/, "");
+    if (/\b(this|current)\s+(artist|band)\b/i.test(message)) {
+      return cleanFallbackQuery(artist || title);
+    }
+    return cleanFallbackQuery([artist, title].filter(Boolean).join(" "));
   }
 
   private handlePastedList(message: string): AgentMessageResponse {
@@ -632,6 +671,9 @@ function detectIntent(message: string): AgentMessageResponse["intent"] {
   if (wantsReleaseContext(message) && /\b(find|search|show|look|lookup|get|what|which)\b/.test(text)) {
     return "search_discovery";
   }
+  if (mentionsCurrentPlaybackContext(message) && /\b(like|similar|recommend|recommendation|playlist|mix|songs|tracks|find)\b/.test(text)) {
+    return "research_playlist";
+  }
   if (/\b(playlist|mix)\b/.test(text) && /\b(make|create|build|propose|generate)\b/.test(text)) {
     if (/\b(mood|vibe|like|similar|recommend|think i would like|for me|based on|research|download|find)\b/.test(text)) {
       return "research_playlist";
@@ -767,6 +809,10 @@ function cleanSuggestedSearchQuery(value: string | undefined): string {
     .filter((token) => token && !filler.has(token))
     .join(" ")
     .trim();
+}
+
+function mentionsCurrentPlaybackContext(message: string): boolean {
+  return /\b(this|current|playing|now playing)\s+(song|track|artist|band)\b/i.test(message) || /\b(song|track|artist|band)\s+(playing|on now)\b/i.test(message);
 }
 
 function wantsDownloadProposal(message: string): boolean {

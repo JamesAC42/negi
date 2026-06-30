@@ -346,6 +346,62 @@ try {
     "expected completed workflow to add a final agent playlist message"
   );
 
+  const currentFile = app.library.listFiles("durable one", 1)[0];
+  assert(currentFile != null, "expected current playback fixture file");
+  let sawCurrentTrackContext = false;
+  const currentContextRuns = new AgentRunService(
+    app.db,
+    new AgentService(
+      app.library,
+      app.operations,
+      {
+        getSnapshot() {
+          return {
+            status: "playing",
+            currentFileId: currentFile.id,
+            currentPath: currentFile.path,
+            currentDisplayName: "Durable Artist - Durable One",
+            positionMs: 0,
+            durationMs: currentFile.durationMs,
+            queue: [currentFile.id],
+            queueIndex: 0,
+            repeatMode: "none",
+            volumePercent: 100,
+            error: null
+          };
+        }
+      } as never,
+      {
+        async search(query: string): Promise<DiscoverySearchResponse> {
+          return { query, total: 0, results: [] };
+        }
+      }
+    ),
+    {
+      name: "fixture_model",
+      async plan(_message, context) {
+        sawCurrentTrackContext = context?.currentTrack?.includes("Durable One") === true && context.currentArtist === "Durable Artist";
+        return {
+          summary: "Fixture model used the current song context",
+          intent: "research_playlist",
+          playlistName: "Like Durable One",
+          playlistDescription: "Current-song context fixture.",
+          searchQueryHints: [],
+          trackCandidates: [{ artist: "Durable Artist", title: "Durable One", album: "Durable Album" }]
+        };
+      }
+    },
+    undefined,
+    app.agentPlaylistWorkflows
+  );
+  const currentContextRun = await currentContextRuns.run("make me a playlist like this song");
+  assert(sawCurrentTrackContext, "expected model planning context to include current track metadata");
+  assert(currentContextRun.response?.intent === "research_playlist", `expected current-song prompt to route research_playlist, got ${currentContextRun.response?.intent}`);
+  assert(
+    currentContextRun.response.searchQuery.includes("durable artist") && currentContextRun.response.searchQuery.includes("durable one"),
+    `expected current-song contextual search query, got ${currentContextRun.response.searchQuery}`
+  );
+
   const releaseContextSearchCalls: string[] = [];
   const releaseContextAgent = new AgentService(app.library, app.operations, app.playback, {
     async search(query: string): Promise<DiscoverySearchResponse> {
