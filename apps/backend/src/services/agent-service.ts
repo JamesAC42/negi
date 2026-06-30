@@ -604,7 +604,8 @@ export class AgentService {
     const selectedDiscoveryResults: DiscoveryResult[] = [];
     const qualityPreference = this.getDiscoveryQualityPreference();
     if (this.discovery) {
-      for (const candidate of missingCandidates.slice(0, 12)) {
+      const candidateSearchLimit = researchedPlaylistCandidateSearchLimit(candidates.length);
+      for (const candidate of missingCandidates.slice(0, candidateSearchLimit)) {
         const queries = candidateDiscoveryQueries(candidate);
         let selected: DiscoveryResult | null = null;
         for (const query of queries) {
@@ -1033,6 +1034,15 @@ function suppressedSearchTerms(): string[] {
     ? configured.split(",").map((term) => cleanFallbackQuery(term))
     : ["the beatles", "beatles", "le sserafim", "sserafim"];
   return [...new Set(terms.filter(Boolean).sort((a, b) => b.length - a.length))];
+}
+
+function researchedPlaylistCandidateSearchLimit(candidateCount: number): number {
+  const configured = process.env.MUSIC_OS_AGENT_RESEARCH_PLAYLIST_CANDIDATE_SEARCH_LIMIT;
+  if (!configured) {
+    return candidateCount;
+  }
+  const parsed = Number(configured);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(candidateCount, Math.floor(parsed)) : candidateCount;
 }
 
 function wantsReleaseContext(message: string): boolean {

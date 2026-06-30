@@ -308,6 +308,73 @@ try {
   });
   assert(workflowResponse.workflows.some((workflow) => workflow.runId === researchPlaylistRun.id), "expected workflow to parse through public schema");
 
+  const broadCandidateSearchCalls: string[] = [];
+  const broadCandidateRun = await new AgentRunService(
+    app.db,
+    new AgentService(app.library, app.operations, app.playback, {
+      async search(query: string): Promise<DiscoverySearchResponse> {
+        broadCandidateSearchCalls.push(query);
+        return query === "deep artist 15 late candidate 15"
+          ? {
+              query,
+              total: 1,
+              results: [
+                {
+                  id: "late-candidate-15-result",
+                  source: "slskd",
+                  username: "deep-user",
+                  filename: "15 - Late Candidate 15.flac",
+                  path: "Deep Artist 15/Deep Album/15 - Late Candidate 15.flac",
+                  folder: "Deep Artist 15/Deep Album",
+                  sizeBytes: 44_000_000,
+                  extension: "flac",
+                  bitrate: 920_000,
+                  sampleRate: 44_100,
+                  lengthSeconds: 245,
+                  isLocked: false,
+                  hasFreeUploadSlot: true,
+                  uploadSpeedBytesPerSecond: 1_500_000,
+                  queueLength: 0,
+                  raw: {}
+                }
+              ]
+            }
+          : { query, total: 0, results: [] };
+      }
+    }),
+    {
+      name: "fixture_model",
+      async plan() {
+        return {
+          summary: "Fixture model returned a full slate of researched candidates",
+          intent: "research_playlist",
+          playlistName: "Broad Candidate Search",
+          playlistDescription: "Verifies late researched candidates are still searched.",
+          searchQueryHints: [],
+          trackCandidates: Array.from({ length: 15 }, (_, index) => {
+            const number = index + 1;
+            return {
+              artist: `Deep Artist ${number}`,
+              title: `Late Candidate ${number}`,
+              album: "Deep Album",
+              query: `deep artist ${number} late candidate ${number}`
+            };
+          })
+        };
+      }
+    },
+    undefined,
+    app.agentPlaylistWorkflows
+  ).run("make me a playlist for late candidate coverage");
+  assert(
+    broadCandidateSearchCalls.includes("deep artist 15 late candidate 15"),
+    `expected researched playlist search to continue through the full model candidate set, got ${JSON.stringify(broadCandidateSearchCalls)}`
+  );
+  assert(
+    broadCandidateRun.response?.discoveryResults[0]?.discoveryId === "late-candidate-15-result",
+    "expected late searched candidate to be selected for the playlist"
+  );
+
   const titleOnlyFallbackCalls: string[] = [];
   const titleOnlyFallbackRun = await new AgentRunService(
     app.db,
