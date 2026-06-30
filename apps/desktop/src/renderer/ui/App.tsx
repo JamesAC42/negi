@@ -852,6 +852,28 @@ export function App(): ReactElement {
     }
   }
 
+  async function refreshSelectedAgentThread(): Promise<void> {
+    if (!agentThreadId) {
+      await refreshAgentThread();
+      return;
+    }
+    try {
+      const result = await getAgentThread(agentThreadId);
+      setAgentMessages(messagesFromAgentThread(result));
+      await refreshAgentThreads();
+    } catch (error) {
+      setAgentMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: "agent",
+          text: getErrorMessage(error),
+          response: null
+        }
+      ]);
+    }
+  }
+
   async function refreshAgentThreads(): Promise<void> {
     const result = await listAgentThreads();
     setAgentThreads(result.threads);
@@ -1119,6 +1141,23 @@ export function App(): ReactElement {
 
     return () => window.clearInterval(interval);
   }, [discoveryDownloadJobs]);
+
+  useEffect(() => {
+    if (!agentPlaylistWorkflows.some((workflow) => workflow.status !== "completed" && workflow.status !== "failed")) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void (async () => {
+        await refreshAgentPlaylistWorkflows();
+        if (activeView === "Agent") {
+          await refreshSelectedAgentThread();
+        }
+      })();
+    }, 5000);
+
+    return () => window.clearInterval(interval);
+  }, [agentPlaylistWorkflows, activeView, agentThreadId]);
 
   useEffect(() => {
     if (!jobsState.jobs.some((job) => job.status === "queued" || job.status === "running")) {
@@ -2079,6 +2118,7 @@ export function App(): ReactElement {
       ]);
       if (response.operationBatch) {
         replaceOperationBatch(response.operationBatch);
+        void refreshAgentPlaylistWorkflows();
       }
       if (response.playback) {
         setPlayback(response.playback);
