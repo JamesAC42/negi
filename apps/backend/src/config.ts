@@ -83,11 +83,20 @@ function detectFfmpegPath(): string | null {
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
-function normalizeClientPath(path: string): string {
+export function normalizeClientPath(path: string): string {
   const trimmed = path.trim();
+  const wslMount = trimmed.match(/^\/mnt\/([a-zA-Z])\/(.*)$/);
+  if (process.platform === "win32" && wslMount) {
+    return `${wslMount[1].toUpperCase()}:/${wslMount[2]}`.replaceAll("\\", "/");
+  }
+
   const windowsDrive = trimmed.match(/^([a-zA-Z]):[\\/](.*)$/);
   if (!windowsDrive) {
     return trimmed.replaceAll("\\", "/");
+  }
+
+  if (process.platform === "win32") {
+    return `${windowsDrive[1].toUpperCase()}:/${windowsDrive[2].replaceAll("\\", "/")}`;
   }
 
   return `/mnt/${windowsDrive[1].toLowerCase()}/${windowsDrive[2].replaceAll("\\", "/")}`;
