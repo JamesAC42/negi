@@ -142,6 +142,10 @@ try {
     thread.messages.some((message) => message.role === "agent" && message.text === "Here's your playlist: Downloaded Agent Playlist. 3 tracks are ready."),
     `expected final playlist-ready message in the agent thread, got ${JSON.stringify(threadMessageTexts)}`
   );
+  const finalThreadMessage = thread.messages.find(
+    (message) => message.role === "agent" && message.text === "Here's your playlist: Downloaded Agent Playlist. 3 tracks are ready."
+  );
+  assert(finalThreadMessage?.response?.playlistId === playlist.id, "expected final playlist-ready message to link to the created playlist");
 
   console.log(JSON.stringify({ ok: true, runId: run.id, workflow, playlistId: playlist.id }, null, 2));
 } finally {

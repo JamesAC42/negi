@@ -392,7 +392,17 @@ export class AgentPlaylistWorkflowService {
   }
 
   private insertWorkflowMessage(row: WorkflowRow, text: string, response: AgentMessageResponse | null = null): void {
-    if (!row.thread_id || this.hasWorkflowMessage(row.thread_id, text)) {
+    if (!row.thread_id) {
+      return;
+    }
+    const existing = this.getWorkflowMessage(row.thread_id, text);
+    if (existing) {
+      if (response != null && existing.response_json == null) {
+        this.db
+          .prepare("UPDATE agent_messages SET response_json = ? WHERE id = ?")
+          .run(JSON.stringify(response), existing.id);
+        this.db.prepare("UPDATE agent_threads SET updated_at = datetime('now') WHERE id = ?").run(row.thread_id);
+      }
       return;
     }
     this.db
@@ -404,11 +414,11 @@ export class AgentPlaylistWorkflowService {
     this.db.prepare("UPDATE agent_threads SET updated_at = datetime('now') WHERE id = ?").run(row.thread_id);
   }
 
-  private hasWorkflowMessage(threadId: string, text: string): boolean {
+  private getWorkflowMessage(threadId: string, text: string): { id: string; response_json: string | null } | null {
     const row = this.db
-      .prepare("SELECT 1 FROM agent_messages WHERE thread_id = ? AND role = 'agent' AND text = ? LIMIT 1")
-      .get(threadId, text) as { 1: number } | undefined;
-    return row != null;
+      .prepare("SELECT id, response_json FROM agent_messages WHERE thread_id = ? AND role = 'agent' AND text = ? LIMIT 1")
+      .get(threadId, text) as { id: string; response_json: string | null } | undefined;
+    return row ?? null;
   }
 }
 

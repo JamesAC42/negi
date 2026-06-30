@@ -10035,7 +10035,16 @@ function AgentView({
         {messages.map((message) => (
           <div className={`agentMessage ${message.role}`} key={message.id}>
             <span>{message.role === "user" ? "You" : "Agent"}</span>
-            <strong>{message.text}</strong>
+            {message.role === "agent" && message.response?.playlistId ? (
+              <strong>
+                {message.text}{" "}
+                <button className="inlineTextButton" type="button" onClick={() => onOpenPlaylist(message.response!.playlistId!)}>
+                  Open playlist
+                </button>
+              </strong>
+            ) : (
+              <strong>{message.text}</strong>
+            )}
             {message.role === "agent" && message.response ? (
               <AgentResultSummary response={message.response} run={message.run ?? null} onOpenPlaylist={onOpenPlaylist} />
             ) : null}

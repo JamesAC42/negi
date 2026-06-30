@@ -5570,6 +5570,21 @@ span.artFallback svg {
   gap: 0.375rem;
 }
 
+.inlineTextButton {
+  border: 0;
+  background: transparent;
+  color: var(--acc);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 0.125rem;
+}
+
+.inlineTextButton:hover {
+  color: var(--acc2);
+}
+
 .playlistItem {
   display: grid;
   grid-template-rows: auto 1fr auto;
