@@ -350,6 +350,63 @@ export class LibraryRepository {
     return this.mapRowsWithDisplayTags(rows as FileRow[]);
   }
 
+  countPlayableFiles(): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS total FROM files WHERE staged = 0 AND missing = 0")
+      .get() as { total: number };
+    return row.total;
+  }
+
+  listLikedFiles(limit = 100): LibraryFilesResponse["files"] {
+    const pagination = getPaginationClause(limit, 0);
+    const rows = this.db
+      .prepare(
+        `${filesWithPlaybackStatsSql}
+         WHERE files.staged = 0
+           AND files.missing = 0
+           AND (file_preferences.liked = 1 OR file_preferences.rating >= 4)
+         ORDER BY COALESCE(file_preferences.liked, 0) DESC,
+                  COALESCE(file_preferences.rating, 0) DESC,
+                  files.date_updated DESC
+         ${pagination.sql}`
+      )
+      .all(pagination.params) as FileRow[];
+    return this.mapRowsWithDisplayTags(rows);
+  }
+
+  listHighRotationFiles(limit = 100): LibraryFilesResponse["files"] {
+    const pagination = getPaginationClause(limit, 0);
+    const rows = this.db
+      .prepare(
+        `${filesWithPlaybackStatsSql}
+         WHERE files.staged = 0
+           AND files.missing = 0
+           AND COALESCE(playback_stats.play_count, 0) > 0
+         ORDER BY COALESCE(playback_stats.play_count, 0) DESC,
+                  playback_stats.last_played_at DESC,
+                  files.date_updated DESC
+         ${pagination.sql}`
+      )
+      .all(pagination.params) as FileRow[];
+    return this.mapRowsWithDisplayTags(rows);
+  }
+
+  listRecentlyPlayedFiles(limit = 100): LibraryFilesResponse["files"] {
+    const pagination = getPaginationClause(limit, 0);
+    const rows = this.db
+      .prepare(
+        `${filesWithPlaybackStatsSql}
+         WHERE files.staged = 0
+           AND files.missing = 0
+           AND playback_stats.last_played_at IS NOT NULL
+         ORDER BY playback_stats.last_played_at DESC,
+                  files.date_updated DESC
+         ${pagination.sql}`
+      )
+      .all(pagination.params) as FileRow[];
+    return this.mapRowsWithDisplayTags(rows);
+  }
+
   getFile(id: string): LibraryFilesResponse["files"][number] {
     const row = this.db.prepare(`${filesWithPlaybackStatsSql} WHERE files.id = ?`).get(id) as FileRow | undefined;
     if (!row) {

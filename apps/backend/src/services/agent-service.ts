@@ -73,16 +73,24 @@ export class AgentService {
   getPlanningContext(): AgentPlanningContext {
     const files = this.library.listFiles("", 500);
     const playable = files.filter((file) => !file.missing && !file.staged);
-    const liked = playable.filter((file) => file.liked === true || (file.rating ?? 0) >= 4);
-    const highRotation = [...playable].sort((left, right) => right.playCount - left.playCount).slice(0, 20);
-    const recent = [...playable]
-      .filter((file) => file.lastPlayedAt)
-      .sort((left, right) => (right.lastPlayedAt ?? "").localeCompare(left.lastPlayedAt ?? ""))
-      .slice(0, 20);
+    const liked = mergeFilesById(
+      this.library.listLikedFiles(100),
+      playable.filter((file) => file.liked === true || (file.rating ?? 0) >= 4)
+    );
+    const highRotation = mergeFilesById(
+      this.library.listHighRotationFiles(100),
+      [...playable].sort((left, right) => right.playCount - left.playCount)
+    ).slice(0, 20);
+    const recent = mergeFilesById(
+      this.library.listRecentlyPlayedFiles(100),
+      [...playable]
+        .filter((file) => file.lastPlayedAt)
+        .sort((left, right) => (right.lastPlayedAt ?? "").localeCompare(left.lastPlayedAt ?? ""))
+    ).slice(0, 20);
     const current = this.getCurrentPlaybackFile();
     const tasteProfile = this.getCompactTasteProfile();
     return {
-      librarySummary: `${playable.length} indexed playable files`,
+      librarySummary: `${this.library.countPlayableFiles()} indexed playable files`,
       currentTrack: current ? formatPlanningTrack(current) : undefined,
       currentArtist: current?.displayTags.artist ?? current?.displayTags.albumartist,
       currentAlbum: current?.displayTags.album,
@@ -1099,6 +1107,20 @@ function topValues(files: LibraryFile[], getValue: (file: LibraryFile) => string
   return [...counts.entries()]
     .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
     .map(([value]) => value);
+}
+
+function mergeFilesById(...groups: LibraryFile[][]): LibraryFile[] {
+  const seen = new Set<string>();
+  const merged: LibraryFile[] = [];
+  for (const group of groups) {
+    for (const file of group) {
+      if (!seen.has(file.id)) {
+        seen.add(file.id);
+        merged.push(file);
+      }
+    }
+  }
+  return merged;
 }
 
 function dedupeTrackCandidates(candidates: AgentTrackCandidate[]): AgentTrackCandidate[] {
