@@ -463,6 +463,104 @@ try {
     "expected queued downloads to preserve researched playlist order"
   );
 
+  const previousSearchConcurrency = process.env.MUSIC_OS_AGENT_RESEARCH_PLAYLIST_SEARCH_CONCURRENCY;
+  const previousCandidateSearchLimit = process.env.MUSIC_OS_AGENT_RESEARCH_PLAYLIST_CANDIDATE_SEARCH_LIMIT;
+  process.env.MUSIC_OS_AGENT_RESEARCH_PLAYLIST_SEARCH_CONCURRENCY = "2";
+  process.env.MUSIC_OS_AGENT_RESEARCH_PLAYLIST_CANDIDATE_SEARCH_LIMIT = "4";
+  let activeSearches = 0;
+  let maxActiveSearches = 0;
+  try {
+    const parallelCandidateRun = await new AgentRunService(
+      app.db,
+      new AgentService(app.library, app.operations, app.playback, {
+        async search(query: string): Promise<DiscoverySearchResponse> {
+          activeSearches += 1;
+          maxActiveSearches = Math.max(maxActiveSearches, activeSearches);
+          await delay(25);
+          activeSearches -= 1;
+          const match = query.match(/^parallel artist (\d+) parallel song \d+$/);
+          if (!match) {
+            return { query, total: 0, results: [] };
+          }
+          const number = match[1]!;
+          return {
+            query,
+            total: 1,
+            results: [
+              {
+                id: `parallel-${number}`,
+                source: "slskd",
+                username: "parallel-user",
+                filename: `${number.padStart(2, "0")} - Parallel Song ${number}.flac`,
+                path: `Parallel Artist ${number}/Parallel Album/${number.padStart(2, "0")} - Parallel Song ${number}.flac`,
+                folder: `Parallel Artist ${number}/Parallel Album`,
+                sizeBytes: 30_000_000 + Number(number),
+                extension: "flac",
+                bitrate: 900_000,
+                sampleRate: 44_100,
+                lengthSeconds: 200 + Number(number),
+                isLocked: false,
+                hasFreeUploadSlot: true,
+                uploadSpeedBytesPerSecond: 1_250_000,
+                queueLength: 0,
+                raw: {}
+              }
+            ]
+          };
+        }
+      }),
+      {
+        name: "fixture_model",
+        async plan() {
+          return {
+            summary: "Fixture model returned candidates that should be searched concurrently",
+            intent: "research_playlist",
+            playlistName: "Parallel Candidate Playlist",
+            searchQueryHints: [],
+            trackCandidates: Array.from({ length: 4 }, (_, index) => {
+              const number = index + 1;
+              return {
+                artist: `Parallel Artist ${number}`,
+                title: `Parallel Song ${number}`,
+                album: "Parallel Album",
+                query: `parallel artist ${number} parallel song ${number}`
+              };
+            })
+          };
+        }
+      },
+      undefined,
+      app.agentPlaylistWorkflows
+    ).run("make me a researched playlist without serial soulseek stalls");
+    const parallelLibraryStep = parallelCandidateRun.steps.find((step) => step.toolName === "search_library");
+    const parallelMissingCount =
+      typeof parallelLibraryStep?.output === "object" &&
+      parallelLibraryStep.output != null &&
+      Array.isArray((parallelLibraryStep.output as { missing?: unknown }).missing)
+        ? (parallelLibraryStep.output as { missing: unknown[] }).missing.length
+        : 0;
+    assert(
+      parallelMissingCount === 4,
+      `expected four missing parallel candidates to reach Soulseek search, got ${parallelMissingCount}`
+    );
+    assert(maxActiveSearches > 1, `expected researched playlist searches to overlap, max active was ${maxActiveSearches}`);
+    assert(
+      parallelCandidateRun.response?.discoveryResults.map((result) => result.discoveryId).join(",") === "parallel-1,parallel-2,parallel-3,parallel-4",
+      `expected parallel candidate search to preserve playlist order, got ${parallelCandidateRun.response?.discoveryResults.map((result) => result.discoveryId).join(",")}`
+    );
+  } finally {
+    if (previousSearchConcurrency === undefined) {
+      delete process.env.MUSIC_OS_AGENT_RESEARCH_PLAYLIST_SEARCH_CONCURRENCY;
+    } else {
+      process.env.MUSIC_OS_AGENT_RESEARCH_PLAYLIST_SEARCH_CONCURRENCY = previousSearchConcurrency;
+    }
+    if (previousCandidateSearchLimit === undefined) {
+      delete process.env.MUSIC_OS_AGENT_RESEARCH_PLAYLIST_CANDIDATE_SEARCH_LIMIT;
+    } else {
+      process.env.MUSIC_OS_AGENT_RESEARCH_PLAYLIST_CANDIDATE_SEARCH_LIMIT = previousCandidateSearchLimit;
+    }
+  }
+
   const titleOnlyFallbackCalls: string[] = [];
   const titleOnlyFallbackRun = await new AgentRunService(
     app.db,
@@ -976,6 +1074,10 @@ function assert(condition: boolean, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function makeId3Fixture(title: string, artist: string, album: string, year: string): Buffer {

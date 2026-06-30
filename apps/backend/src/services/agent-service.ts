@@ -149,7 +149,7 @@ export class AgentService {
 
   async handleMessage(message: string, options: AgentHandleMessageOptions = {}): Promise<AgentMessageResponse> {
     const detectedIntent = detectAgentIntent(message);
-    const intent = applySuggestedIntent(detectedIntent, options.suggestedIntent);
+    const intent = applySuggestedIntent(detectedIntent, options.suggestedIntent, { hasTrackCandidates: (options.trackCandidates?.length ?? 0) > 0 });
     const searchQuery =
       cleanSuggestedAgentSearchQuery(options.suggestedSearchQuery) ||
       this.resolveContextualSearchQuery(message, intent) ||
@@ -616,25 +616,34 @@ export class AgentService {
     const qualityPreference = this.getDiscoveryQualityPreference();
     if (this.discovery) {
       const candidateSearchLimit = researchedPlaylistCandidateSearchLimit(candidates.length);
-      for (const { candidate, index } of missingCandidates.slice(0, candidateSearchLimit)) {
-        const queries = candidateDiscoveryQueries(candidate);
-        let selected: DiscoveryResult | null = null;
-        for (const query of queries) {
-          const discovery = await this.discovery.search(query.query, 30);
-          options.recordStep?.({
-            type: "tool",
-            toolName: "search_soulseek",
-            status: "completed",
-            summary: `Soulseek search returned ${discovery.results.length} result${discovery.results.length === 1 ? "" : "s"} for "${query.query}"`,
-            input: { candidate, query: query.query, requireArtist: query.requireArtist, responseLimit: 30 },
-            output: { query: discovery.query, total: discovery.total, resultCount: discovery.results.length }
-          });
-          selected = selectDiscoveryTrackResult(discovery.results, candidate, qualityPreference, query);
-          if (selected) {
-            selectedDiscoveryResults.push(selected);
-            playlistItemRefs[index] = { type: "download", discoveryId: selected.id };
-            break;
+      const selectedByCandidate = await mapWithConcurrency(
+        missingCandidates.slice(0, candidateSearchLimit),
+        researchedPlaylistSearchConcurrency(),
+        async ({ candidate, index }) => {
+          const queries = candidateDiscoveryQueries(candidate);
+          let selected: DiscoveryResult | null = null;
+          for (const query of queries) {
+            const discovery = await this.discovery!.search(query.query, 30);
+            options.recordStep?.({
+              type: "tool",
+              toolName: "search_soulseek",
+              status: "completed",
+              summary: `Soulseek search returned ${discovery.results.length} result${discovery.results.length === 1 ? "" : "s"} for "${query.query}"`,
+              input: { candidate, query: query.query, requireArtist: query.requireArtist, responseLimit: 30 },
+              output: { query: discovery.query, total: discovery.total, resultCount: discovery.results.length }
+            });
+            selected = selectDiscoveryTrackResult(discovery.results, candidate, qualityPreference, query);
+            if (selected) {
+              break;
+            }
           }
+          return { index, selected };
+        }
+      );
+      for (const { index, selected } of selectedByCandidate.sort((left, right) => left.index - right.index)) {
+        if (selected) {
+          selectedDiscoveryResults.push(selected);
+          playlistItemRefs[index] = { type: "download", discoveryId: selected.id };
         }
       }
     }
@@ -782,10 +791,14 @@ export function detectAgentIntent(message: string): AgentMessageResponse["intent
 
 function applySuggestedIntent(
   detectedIntent: AgentMessageResponse["intent"],
-  suggestedIntent: AgentMessageResponse["intent"] | undefined
+  suggestedIntent: AgentMessageResponse["intent"] | undefined,
+  options: { hasTrackCandidates?: boolean } = {}
 ): AgentMessageResponse["intent"] {
   if (!suggestedIntent || suggestedIntent === "unknown" || suggestedIntent === detectedIntent) {
     return detectedIntent;
+  }
+  if (suggestedIntent === "research_playlist" && options.hasTrackCandidates) {
+    return suggestedIntent;
   }
   if (detectedIntent === "search_library" || detectedIntent === "unknown") {
     return suggestedIntent;
@@ -1055,6 +1068,34 @@ function researchedPlaylistCandidateSearchLimit(candidateCount: number): number 
   }
   const parsed = Number(configured);
   return Number.isFinite(parsed) && parsed > 0 ? Math.min(candidateCount, Math.floor(parsed)) : candidateCount;
+}
+
+function researchedPlaylistSearchConcurrency(): number {
+  const configured = process.env.MUSIC_OS_AGENT_RESEARCH_PLAYLIST_SEARCH_CONCURRENCY;
+  if (!configured) {
+    return 3;
+  }
+  const parsed = Number(configured);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(8, Math.floor(parsed)) : 3;
+}
+
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, map: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      for (;;) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= items.length) {
+          return;
+        }
+        results[index] = await map(items[index]!);
+      }
+    })
+  );
+  return results;
 }
 
 function wantsReleaseContext(message: string): boolean {
