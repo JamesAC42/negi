@@ -59,6 +59,7 @@ try {
   process.env.MUSIC_OS_DISCOVERY_DOWNLOAD_INSPECT_MS = "100";
   await mkdir(libraryPath, { recursive: true });
   await mkdir(downloadsPath, { recursive: true });
+  await writeFile(join(libraryPath, "Owned Artist - Owned Title.mp3"), makeId3Fixture("Owned Title", "Owned Artist", "Owned Album", "1984"));
 
   app = createBackendApp({
     host: "127.0.0.1",
@@ -69,6 +70,8 @@ try {
     slskdDownloadDirectory: downloadsPath
   });
   const root = app.library.addRoot(libraryPath, "agent-playlist-download");
+  const scan = await app.scanner.scanRoot(root);
+  assert(scan.inserted === 1, `expected one owned fixture file, got ${scan.inserted}`);
   const fakeSlskd = new FakeSlskd(completedPath);
   const downloads = new DiscoveryDownloadService(app.db, fakeSlskd as unknown as SlskdService, app.imports);
   const operations = new OperationService(app.db, app.imports, app.library, downloads);
@@ -95,7 +98,10 @@ try {
               summary: "Fixture source for the remote track."
             }
           ],
-          trackCandidates: [{ artist: "Remote Artist", title: "Remote Title", album: "Remote Album", query: "remote artist remote title" }]
+          trackCandidates: [
+            { artist: "Owned Artist", title: "Owned Title", album: "Owned Album", query: "owned artist owned title" },
+            { artist: "Remote Artist", title: "Remote Title", album: "Remote Album", query: "remote artist remote title" }
+          ]
         };
       }
     },
@@ -108,6 +114,7 @@ try {
   assert(run.response?.intent === "research_playlist", `expected research_playlist response, got ${run.response?.intent}`);
   assert(run.response.operationBatch?.status === "applied", `expected auto-applied download batch, got ${run.response.operationBatch?.status}`);
   const workflow = await waitForWorkflow(workflows, run.id, "completed");
+  assert(workflow.ownedFileIds.length === 1, `expected workflow to record one owned file, got ${workflow.ownedFileIds.length}`);
   assert(workflow.downloadJobId != null, "expected workflow to record the download job");
   assert(workflow.importId != null, "expected workflow to record the import batch");
   assert(workflow.importOperationBatchId != null, "expected workflow to approve downloaded import items");
@@ -115,13 +122,14 @@ try {
 
   const playlist = app.playlists.getPlaylist(workflow.playlistId);
   assert(playlist.name === "Downloaded Agent Playlist", `expected playlist name, got ${playlist.name}`);
-  assert(playlist.items.length === 1, `expected one playlist item, got ${playlist.items.length}`);
-  assert(playlist.items[0].file.displayTags.artist === "Remote Artist", `expected imported artist, got ${playlist.items[0].file.displayTags.artist}`);
-  assert(app.library.countPlayableFiles() === 1, `expected one imported playable file, got ${app.library.countPlayableFiles()}`);
+  assert(playlist.items.length === 2, `expected two playlist items, got ${playlist.items.length}`);
+  assert(playlist.items[0].file.displayTags.artist === "Owned Artist", `expected owned artist first, got ${playlist.items[0].file.displayTags.artist}`);
+  assert(playlist.items[1].file.displayTags.artist === "Remote Artist", `expected imported artist second, got ${playlist.items[1].file.displayTags.artist}`);
+  assert(app.library.countPlayableFiles() === 2, `expected owned plus imported playable files, got ${app.library.countPlayableFiles()}`);
   const thread = app.agentThreads.getThread(run.threadId!);
   const threadMessageTexts = thread.messages.map((message) => `${message.role}: ${message.text}`);
   assert(
-    thread.messages.some((message) => message.role === "agent" && message.text === "Here's your playlist: Downloaded Agent Playlist. 1 track is ready."),
+    thread.messages.some((message) => message.role === "agent" && message.text === "Here's your playlist: Downloaded Agent Playlist. 2 tracks are ready."),
     `expected final playlist-ready message in the agent thread, got ${JSON.stringify(threadMessageTexts)}`
   );
 

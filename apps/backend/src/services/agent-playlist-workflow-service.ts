@@ -24,6 +24,7 @@ interface WorkflowRow {
   playlist_name: string;
   playlist_description: string | null;
   owned_file_ids_json: string;
+  playlist_item_refs_json: string;
   download_job_id: string | null;
   import_id: string | null;
   import_operation_batch_id: string | null;
@@ -34,6 +35,16 @@ interface WorkflowRow {
   updated_at: string;
   completed_at: string | null;
 }
+
+type PlaylistItemRef =
+  | {
+      type: "owned";
+      fileId: string;
+    }
+  | {
+      type: "download";
+      discoveryId: string;
+    };
 
 export class AgentPlaylistWorkflowService {
   constructor(
@@ -82,14 +93,15 @@ export class AgentPlaylistWorkflowService {
       nullableStringValue(researchPlaylistPayload?.description) ??
       `Agent researched playlist from: ${response.searchQuery}`;
     const ownedFileIds = [...new Set([...stringArrayValue(playlistPayload?.fileIds), ...stringArrayValue(researchPlaylistPayload?.ownedFileIds)])];
+    const playlistItemRefs = playlistItemRefsValue(researchPlaylistPayload?.playlistItemRefs);
 
     this.db
       .prepare(
         `INSERT INTO agent_playlist_workflows (
-          id, run_id, thread_id, operation_batch_id, status, playlist_name, playlist_description, owned_file_ids_json
-        ) VALUES (?, ?, ?, ?, 'waiting_for_batch', ?, ?, ?)`
+          id, run_id, thread_id, operation_batch_id, status, playlist_name, playlist_description, owned_file_ids_json, playlist_item_refs_json
+        ) VALUES (?, ?, ?, ?, 'waiting_for_batch', ?, ?, ?, ?)`
       )
-      .run(nanoid(), runId, threadId, response.operationBatch.id, name, description, JSON.stringify(ownedFileIds));
+      .run(nanoid(), runId, threadId, response.operationBatch.id, name, description, JSON.stringify(ownedFileIds), JSON.stringify(playlistItemRefs));
   }
 
   async advanceAll(): Promise<void> {
@@ -188,7 +200,7 @@ export class AgentPlaylistWorkflowService {
 
   private async createOrUpdatePlaylist(row: WorkflowRow, playlistId: string | null, importedFileIds: string[]): Promise<void> {
     const ownedFileIds = parseStringArray(row.owned_file_ids_json);
-    const fileIds = [...new Set([...ownedFileIds, ...importedFileIds])].filter((fileId) => {
+    const fileIds = this.resolvePlaylistFileIds(row, ownedFileIds, importedFileIds).filter((fileId) => {
       try {
         this.library.getFile(fileId);
         return true;
@@ -233,6 +245,69 @@ export class AgentPlaylistWorkflowService {
       row,
       `Here's your playlist: ${row.playlist_name}. ${playlist.items.length} track${playlist.items.length === 1 ? " is" : "s are"} ready.`
     );
+  }
+
+  private resolvePlaylistFileIds(row: WorkflowRow, ownedFileIds: string[], importedFileIds: string[]): string[] {
+    const refs = parsePlaylistItemRefs(row.playlist_item_refs_json);
+    if (refs.length === 0) {
+      return [...new Set([...ownedFileIds, ...importedFileIds])];
+    }
+
+    const importedByDiscoveryId = this.importedFileIdsByDiscoveryId(row.import_id);
+    const ordered = refs
+      .map((ref) => {
+        if (ref.type === "owned") {
+          return ref.fileId;
+        }
+        return importedByDiscoveryId.get(ref.discoveryId) ?? null;
+      })
+      .filter((fileId): fileId is string => Boolean(fileId));
+    const referenced = new Set(ordered);
+    for (const fileId of [...ownedFileIds, ...importedFileIds]) {
+      if (!referenced.has(fileId)) {
+        ordered.push(fileId);
+        referenced.add(fileId);
+      }
+    }
+    return ordered;
+  }
+
+  private importedFileIdsByDiscoveryId(importId: string | null): Map<string, string> {
+    const byDiscoveryId = new Map<string, string>();
+    if (!importId) {
+      return byDiscoveryId;
+    }
+    let importBatch;
+    try {
+      importBatch = this.imports.getImport(importId);
+    } catch {
+      return byDiscoveryId;
+    }
+    const context = this.importSourceContext(importId);
+    const selectedResults = Array.isArray(context?.selectedResults) ? context.selectedResults : [];
+    for (let index = 0; index < importBatch.items.length; index += 1) {
+      const fileId = importBatch.items[index]?.fileId;
+      const selected = asRecord(selectedResults[index]);
+      const discoveryId = stringValue(selected?.id);
+      if (fileId && discoveryId) {
+        byDiscoveryId.set(discoveryId, fileId);
+      }
+    }
+    return byDiscoveryId;
+  }
+
+  private importSourceContext(importId: string): Record<string, unknown> | null {
+    const row = this.db.prepare("SELECT source_context_json FROM imports WHERE id = ?").get(importId) as
+      | { source_context_json: string }
+      | undefined;
+    if (!row) {
+      return null;
+    }
+    try {
+      return asRecord(JSON.parse(row.source_context_json));
+    } catch {
+      return null;
+    }
   }
 
   private filterMissingPlaylistFileIds(playlistId: string, fileIds: string[]): string[] {
@@ -377,10 +452,46 @@ function stringArrayValue(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
 }
 
+function playlistItemRefsValue(value: unknown): PlaylistItemRef[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const refs: PlaylistItemRef[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    if (!record) {
+      continue;
+    }
+    const type = record?.type;
+    if (type === "owned") {
+      const fileId = stringValue(record.fileId);
+      if (fileId) {
+        refs.push({ type, fileId });
+      }
+      continue;
+    }
+    if (type === "download") {
+      const discoveryId = stringValue(record.discoveryId);
+      if (discoveryId) {
+        refs.push({ type, discoveryId });
+      }
+    }
+  }
+  return refs;
+}
+
 function parseStringArray(value: string): string[] {
   try {
     const parsed = JSON.parse(value) as unknown;
     return stringArrayValue(parsed);
+  } catch {
+    return [];
+  }
+}
+
+function parsePlaylistItemRefs(value: string): PlaylistItemRef[] {
+  try {
+    return playlistItemRefsValue(JSON.parse(value) as unknown);
   } catch {
     return [];
   }

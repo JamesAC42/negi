@@ -32,6 +32,15 @@ type CandidateDiscoveryQuery = {
   query: string;
   requireArtist: boolean;
 };
+type ResearchPlaylistItemRef =
+  | {
+      type: "owned";
+      fileId: string;
+    }
+  | {
+      type: "download";
+      discoveryId: string;
+    };
 type AgentStepType = "plan" | "tool" | "decision" | "approval" | "final";
 type AgentStepStatus = "running" | "completed" | "failed";
 export type AgentStepRecorder = (step: {
@@ -580,13 +589,15 @@ export class AgentService {
     });
 
     const ownedFiles: LibraryFile[] = [];
-    const missingCandidates: AgentTrackCandidate[] = [];
-    for (const candidate of candidates) {
+    const missingCandidates: Array<{ candidate: AgentTrackCandidate; index: number }> = [];
+    const playlistItemRefs: Array<ResearchPlaylistItemRef | null> = Array.from({ length: candidates.length }, () => null);
+    for (const [index, candidate] of candidates.entries()) {
       const owned = findOwnedCandidate(this.library, candidate);
       if (owned) {
         ownedFiles.push(owned);
+        playlistItemRefs[index] = { type: "owned", fileId: owned.id };
       } else {
-        missingCandidates.push(candidate);
+        missingCandidates.push({ candidate, index });
       }
     }
     options.recordStep?.({
@@ -597,7 +608,7 @@ export class AgentService {
       input: { candidateCount: candidates.length },
       output: {
         owned: ownedFiles.map((file) => ({ fileId: file.id, title: file.displayTags.title ?? file.filename, artist: file.displayTags.artist ?? file.displayTags.albumartist ?? null })),
-        missing: missingCandidates
+        missing: missingCandidates.map((item) => item.candidate)
       }
     });
 
@@ -605,7 +616,7 @@ export class AgentService {
     const qualityPreference = this.getDiscoveryQualityPreference();
     if (this.discovery) {
       const candidateSearchLimit = researchedPlaylistCandidateSearchLimit(candidates.length);
-      for (const candidate of missingCandidates.slice(0, candidateSearchLimit)) {
+      for (const { candidate, index } of missingCandidates.slice(0, candidateSearchLimit)) {
         const queries = candidateDiscoveryQueries(candidate);
         let selected: DiscoveryResult | null = null;
         for (const query of queries) {
@@ -621,6 +632,7 @@ export class AgentService {
           selected = selectDiscoveryTrackResult(discovery.results, candidate, qualityPreference, query);
           if (selected) {
             selectedDiscoveryResults.push(selected);
+            playlistItemRefs[index] = { type: "download", discoveryId: selected.id };
             break;
           }
         }
@@ -635,6 +647,7 @@ export class AgentService {
             options.playlistDescription ?? `Agent researched playlist from: ${originalMessage}`,
             ownedFiles.map((file) => file.id),
             orderedDiscoveryResults,
+            playlistItemRefs.filter((ref): ref is ResearchPlaylistItemRef => ref != null),
             searchQuery || originalMessage
           )
         : null;
@@ -679,6 +692,7 @@ export class AgentService {
     description: string,
     ownedFileIds: string[],
     discoveryResults: DiscoveryResult[],
+    playlistItemRefs: ResearchPlaylistItemRef[],
     query: string
   ): AgentMessageResponse["operationBatch"] {
     const operations = [];
@@ -692,7 +706,8 @@ export class AgentService {
           researchPlaylist: {
             name,
             description,
-            ownedFileIds: [...new Set(ownedFileIds)]
+            ownedFileIds: [...new Set(ownedFileIds)],
+            playlistItemRefs
           }
         }
       });
