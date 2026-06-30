@@ -241,10 +241,19 @@ export class AgentPlaylistWorkflowService {
          WHERE id = ?`
       )
       .run(playlistOperationBatchId, finalPlaylistId, row.id);
-    this.insertWorkflowMessage(
-      row,
-      `Here's your playlist: ${row.playlist_name}. ${playlist.items.length} track${playlist.items.length === 1 ? " is" : "s are"} ready.`
-    );
+    const message = `Here's your playlist: ${row.playlist_name}. ${playlist.items.length} track${playlist.items.length === 1 ? " is" : "s are"} ready.`;
+    this.insertWorkflowMessage(row, message, {
+      reply: message,
+      intent: "research_playlist",
+      searchQuery: row.playlist_name,
+      playlistId: finalPlaylistId,
+      results: [],
+      discoveryResults: [],
+      parsedListItems: [],
+      importResults: [],
+      operationBatch: null,
+      playback: null
+    });
   }
 
   private resolvePlaylistFileIds(row: WorkflowRow, ownedFileIds: string[], importedFileIds: string[]): string[] {
@@ -382,16 +391,16 @@ export class AgentPlaylistWorkflowService {
       );
   }
 
-  private insertWorkflowMessage(row: WorkflowRow, text: string): void {
+  private insertWorkflowMessage(row: WorkflowRow, text: string, response: AgentMessageResponse | null = null): void {
     if (!row.thread_id || this.hasWorkflowMessage(row.thread_id, text)) {
       return;
     }
     this.db
       .prepare(
         `INSERT INTO agent_messages (id, thread_id, role, text, response_json)
-         VALUES (?, ?, 'agent', ?, NULL)`
+         VALUES (?, ?, 'agent', ?, ?)`
       )
-      .run(nanoid(), row.thread_id, text);
+      .run(nanoid(), row.thread_id, text, response == null ? null : JSON.stringify(response));
     this.db.prepare("UPDATE agent_threads SET updated_at = datetime('now') WHERE id = ?").run(row.thread_id);
   }
 

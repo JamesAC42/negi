@@ -1154,6 +1154,12 @@ export function App(): ReactElement {
     const interval = window.setInterval(() => {
       void (async () => {
         const workflows = await refreshAgentPlaylistWorkflows();
+        const completedWorkflowCreatedPlaylist = workflows.some(
+          (workflow) => openWorkflowIds.has(workflow.id) && workflow.status === "completed" && workflow.playlistId
+        );
+        if (completedWorkflowCreatedPlaylist) {
+          await refreshPlaylists();
+        }
         const hasActiveThreadWorkflowUpdate =
           activeView === "Agent" &&
           workflows.some((workflow) => workflow.threadId === agentThreadId && (openWorkflowIds.has(workflow.id) || isOpenAgentPlaylistWorkflow(workflow)));
@@ -1994,6 +2000,12 @@ export function App(): ReactElement {
     }
   }
 
+  function openPlaylist(playlistId: string): void {
+    setSelectedPlaylistId(playlistId);
+    setActiveView("Playlists");
+    void refreshPlaylists();
+  }
+
   async function handlePlayAlbum(albumId: string): Promise<void> {
     if (playbackBusy) {
       return;
@@ -2810,6 +2822,7 @@ export function App(): ReactElement {
             onDownloadSelection={handleProposeDiscoveryDownload}
             onInspectGroup={setInspectedDiscoveryGroupId}
             onOpenAgentThread={handleOpenAgentThread}
+            onOpenPlaylist={openPlaylist}
             onOpenJobs={() => setActiveView("Jobs")}
             onRefreshHealth={refreshDiscoveryHealth}
             onProposeSavedCandidateDownload={handleProposeSavedDiscoveryCandidateDownload}
@@ -2835,7 +2848,7 @@ export function App(): ReactElement {
             onEnqueuePlayback={handleEnqueuePlayback}
             onOpenAlbumPage={openAlbumPage}
             onOpenArtistPage={openArtistPage}
-            onOpenPlaylist={setSelectedPlaylistId}
+            onOpenPlaylist={openPlaylist}
             currentWaveform={currentWaveform.waveform}
             playback={playback}
             onPlayFile={handlePlayFile}
@@ -2852,6 +2865,7 @@ export function App(): ReactElement {
             activeThreadId={agentThreadId}
             messages={agentMessages}
             threads={agentThreads}
+            onOpenPlaylist={openPlaylist}
             setAgentInput={setAgentInput}
             onNewThread={handleNewAgentThread}
             onSelectThread={handleSelectAgentThread}
@@ -6788,6 +6802,7 @@ function DiscoveryView({
   onDownloadSelection,
   onInspectGroup,
   onOpenAgentThread,
+  onOpenPlaylist,
   onOpenJobs,
   onRefreshHealth,
   onProposeSavedCandidateDownload,
@@ -6835,6 +6850,7 @@ function DiscoveryView({
   onDownloadSelection(): Promise<void>;
   onInspectGroup(groupId: string): void;
   onOpenAgentThread(threadId: string): Promise<void>;
+  onOpenPlaylist(playlistId: string): void;
   onOpenJobs(): void;
   onRefreshHealth(): Promise<void>;
   onProposeSavedCandidateDownload(candidate: SavedDiscoveryCandidate): Promise<void>;
@@ -7325,11 +7341,18 @@ function DiscoveryView({
                         {workflow.error ? ` · ${workflow.error}` : ""}
                       </span>
                     </div>
-                    {workflow.threadId ? (
+                    {workflow.threadId || workflow.playlistId ? (
                       <div className="savedDiscoveryActions">
-                        <button className="secondary compactButton" type="button" onClick={() => void onOpenAgentThread(workflow.threadId!)}>
-                          Agent Thread
-                        </button>
+                        {workflow.playlistId ? (
+                          <button className="secondary compactButton" type="button" onClick={() => onOpenPlaylist(workflow.playlistId!)}>
+                            Open Playlist
+                          </button>
+                        ) : null}
+                        {workflow.threadId ? (
+                          <button className="secondary compactButton" type="button" onClick={() => void onOpenAgentThread(workflow.threadId!)}>
+                            Agent Thread
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -9949,6 +9972,7 @@ function AgentView({
   activeThreadId,
   messages,
   threads,
+  onOpenPlaylist,
   setAgentInput,
   onNewThread,
   onSelectThread,
@@ -9959,6 +9983,7 @@ function AgentView({
   activeThreadId: string | null;
   messages: AgentMessage[];
   threads: AgentThreadsResponse["threads"];
+  onOpenPlaylist(playlistId: string): void;
   setAgentInput(value: string): void;
   onNewThread(): Promise<void>;
   onSelectThread(threadId: string): Promise<void>;
@@ -10012,7 +10037,7 @@ function AgentView({
             <span>{message.role === "user" ? "You" : "Agent"}</span>
             <strong>{message.text}</strong>
             {message.role === "agent" && message.response ? (
-              <AgentResultSummary response={message.response} run={message.run ?? null} />
+              <AgentResultSummary response={message.response} run={message.run ?? null} onOpenPlaylist={onOpenPlaylist} />
             ) : null}
           </div>
         ))}
@@ -10027,7 +10052,15 @@ function AgentView({
   );
 }
 
-function AgentResultSummary({ response, run }: { response: AgentMessageResponse; run?: AgentRun | null }): ReactElement {
+function AgentResultSummary({
+  response,
+  run,
+  onOpenPlaylist
+}: {
+  response: AgentMessageResponse;
+  run?: AgentRun | null;
+  onOpenPlaylist(playlistId: string): void;
+}): ReactElement {
   const resultCount =
     response.intent === "search_discovery"
       ? response.discoveryResults.length
@@ -10045,6 +10078,13 @@ function AgentResultSummary({ response, run }: { response: AgentMessageResponse;
         <span>
           Proposed batch: {response.operationBatch.summary} · {response.operationBatch.status}
         </span>
+      ) : null}
+      {response.playlistId ? (
+        <div className="agentResultActions">
+          <button className="secondary compactButton" type="button" onClick={() => onOpenPlaylist(response.playlistId!)}>
+            Open Playlist
+          </button>
+        </div>
       ) : null}
       {run && run.steps.length > 0 ? <AgentRunTrace run={run} /> : null}
       {response.researchSources && response.researchSources.length > 0 ? (

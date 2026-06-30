@@ -652,6 +652,7 @@ export const agentMessageResponseSchema = z.object({
     "unknown"
   ]),
   searchQuery: z.string(),
+  playlistId: z.string().min(1).nullable().optional(),
   results: z.array(agentSearchResultSchema),
   discoveryResults: z.array(agentDiscoveryResultSchema),
   discoveryGroups: z.array(agentDiscoveryGroupSchema).optional(),

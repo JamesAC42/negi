@@ -581,7 +581,7 @@ export class AgentService {
     originalMessage: string,
     options: AgentHandleMessageOptions
   ): Promise<AgentMessageResponse> {
-    const candidates = dedupeTrackCandidates(options.trackCandidates ?? []).slice(0, 15);
+    const candidates = dedupeTrackCandidates(options.trackCandidates ?? []).slice(0, 20);
     if (candidates.length === 0) {
       return {
         reply:
@@ -665,7 +665,7 @@ export class AgentService {
       }
     }
 
-    const orderedDiscoveryResults = selectedDiscoveryResults.filter((result) => !result.isLocked).slice(0, 12);
+    const orderedDiscoveryResults = selectedDiscoveryResults.filter((result) => !result.isLocked).slice(0, 16);
     const operationBatch =
       ownedFiles.length > 0 || orderedDiscoveryResults.length > 0
         ? this.createResearchPlaylistBatch(
