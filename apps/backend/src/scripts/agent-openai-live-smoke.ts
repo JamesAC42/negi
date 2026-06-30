@@ -35,6 +35,7 @@ assert(
   "expected every track candidate to include artist, title, reason, and query"
 );
 assert((plan.searchQueryHints?.length ?? 0) > 0, "expected Soulseek search query hints");
+assert((plan.researchSources?.length ?? 0) > 0, "expected hosted planner to include web research sources");
 
 console.log(
   JSON.stringify(
