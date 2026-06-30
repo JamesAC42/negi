@@ -8,6 +8,7 @@ import type {
   ImportItem,
   LibraryFilesResponse
 } from "@music-os/core";
+import type { AgentPlanningContext, AgentTrackCandidate } from "./agent-model-provider.js";
 import { rankDiscoveryResultsByAvailability } from "./discovery-availability.js";
 import { LibraryRepository } from "./library-repository.js";
 import { OperationService } from "./operation-service.js";
@@ -34,6 +35,9 @@ export interface AgentHandleMessageOptions {
   discoveryQueryHints?: string[];
   suggestedIntent?: AgentMessageResponse["intent"];
   suggestedSearchQuery?: string;
+  playlistName?: string;
+  playlistDescription?: string;
+  trackCandidates?: AgentTrackCandidate[];
 }
 
 export class AgentService {
@@ -44,6 +48,25 @@ export class AgentService {
     private readonly discovery?: DiscoverySearchTool,
     private readonly imports?: ImportService
   ) {}
+
+  getPlanningContext(): AgentPlanningContext {
+    const files = this.library.listFiles("", 500);
+    const playable = files.filter((file) => !file.missing && !file.staged);
+    const liked = playable.filter((file) => file.liked === true || (file.rating ?? 0) >= 4);
+    const highRotation = [...playable].sort((left, right) => right.playCount - left.playCount).slice(0, 20);
+    const recent = [...playable]
+      .filter((file) => file.lastPlayedAt)
+      .sort((left, right) => (right.lastPlayedAt ?? "").localeCompare(left.lastPlayedAt ?? ""))
+      .slice(0, 20);
+    return {
+      librarySummary: `${playable.length} indexed playable files`,
+      favoriteArtists: topValues(liked, (file) => file.displayTags.artist ?? file.displayTags.albumartist).slice(0, 12),
+      favoriteAlbums: topValues(liked, (file) => file.displayTags.album).slice(0, 12),
+      favoriteTracks: liked.map(formatPlanningTrack).filter(Boolean).slice(0, 20),
+      highRotationTracks: highRotation.map(formatPlanningTrack).filter(Boolean).slice(0, 20),
+      recentTracks: recent.map(formatPlanningTrack).filter(Boolean).slice(0, 20)
+    };
+  }
 
   async handleMessage(message: string, options: AgentHandleMessageOptions = {}): Promise<AgentMessageResponse> {
     const detectedIntent = detectIntent(message);
@@ -73,6 +96,9 @@ export class AgentService {
     }
     if (intent === "search_discovery") {
       return this.handleDiscoverySearch(searchQuery, message, options);
+    }
+    if (intent === "research_playlist" || (intent === "propose_playlist" && (options.trackCandidates?.length ?? 0) > 0)) {
+      return this.handleResearchPlaylist(searchQuery, message, options);
     }
 
     const results = this.library.listFiles(searchQuery).slice(0, intent === "propose_playlist" ? 50 : 20);
@@ -420,12 +446,161 @@ export class AgentService {
     };
   }
 
+  private async handleResearchPlaylist(
+    searchQuery: string,
+    originalMessage: string,
+    options: AgentHandleMessageOptions
+  ): Promise<AgentMessageResponse> {
+    const candidates = dedupeTrackCandidates(options.trackCandidates ?? []).slice(0, 15);
+    if (candidates.length === 0) {
+      return {
+        reply: "I need researched track candidates before I can build that playlist.",
+        intent: "research_playlist",
+        searchQuery,
+        results: [],
+        discoveryResults: [],
+        parsedListItems: [],
+        importResults: [],
+        operationBatch: null,
+        playback: null
+      };
+    }
+
+    options.recordStep?.({
+      type: "decision",
+      status: "completed",
+      summary: `Using ${candidates.length} researched playlist candidate${candidates.length === 1 ? "" : "s"}`,
+      input: { originalMessage, searchQuery },
+      output: { candidates }
+    });
+
+    const ownedFiles: LibraryFile[] = [];
+    const missingCandidates: AgentTrackCandidate[] = [];
+    for (const candidate of candidates) {
+      const owned = findOwnedCandidate(this.library, candidate);
+      if (owned) {
+        ownedFiles.push(owned);
+      } else {
+        missingCandidates.push(candidate);
+      }
+    }
+    options.recordStep?.({
+      type: "tool",
+      toolName: "search_library",
+      status: "completed",
+      summary: `Matched ${ownedFiles.length} candidate${ownedFiles.length === 1 ? "" : "s"} already in the library`,
+      input: { candidateCount: candidates.length },
+      output: {
+        owned: ownedFiles.map((file) => ({ fileId: file.id, title: file.displayTags.title ?? file.filename, artist: file.displayTags.artist ?? file.displayTags.albumartist ?? null })),
+        missing: missingCandidates
+      }
+    });
+
+    const selectedDiscoveryResults: DiscoveryResult[] = [];
+    if (this.discovery) {
+      for (const candidate of missingCandidates.slice(0, 12)) {
+        const queries = candidateDiscoveryQueries(candidate);
+        let selected: DiscoveryResult | null = null;
+        for (const query of queries) {
+          const discovery = await this.discovery.search(query, 30);
+          options.recordStep?.({
+            type: "tool",
+            toolName: "search_soulseek",
+            status: "completed",
+            summary: `Soulseek search returned ${discovery.results.length} result${discovery.results.length === 1 ? "" : "s"} for "${query}"`,
+            input: { candidate, query, responseLimit: 30 },
+            output: { query: discovery.query, total: discovery.total, resultCount: discovery.results.length }
+          });
+          selected = selectDiscoveryTrackResult(discovery.results, candidate);
+          if (selected) {
+            selectedDiscoveryResults.push(selected);
+            break;
+          }
+        }
+      }
+    }
+
+    const rankedDiscoveryResults = rankDiscoveryResultsByAvailability(selectedDiscoveryResults.filter((result) => !result.isLocked)).slice(0, 12);
+    const operationBatch =
+      ownedFiles.length > 0 || rankedDiscoveryResults.length > 0
+        ? this.createResearchPlaylistBatch(
+            options.playlistName ?? playlistName(searchQuery || originalMessage),
+            options.playlistDescription ?? `Agent researched playlist from: ${originalMessage}`,
+            ownedFiles.map((file) => file.id),
+            rankedDiscoveryResults,
+            searchQuery || originalMessage
+          )
+        : null;
+    options.recordStep?.({
+      type: "approval",
+      toolName: "propose_research_playlist",
+      status: "completed",
+      summary: operationBatch
+        ? `Created reviewable research playlist batch with ${operationBatch.operations.length} operation${operationBatch.operations.length === 1 ? "" : "s"}`
+        : "No owned tracks or unlocked Discovery candidates were available for a playlist batch",
+      input: { ownedCount: ownedFiles.length, selectedDiscoveryCount: rankedDiscoveryResults.length },
+      output: operationBatch ? { operationBatchId: operationBatch.id, operationCount: operationBatch.operations.length } : null
+    });
+
+    return {
+      reply: operationBatch
+        ? `I built a researched playlist proposal with ${ownedFiles.length} library match${ownedFiles.length === 1 ? "" : "es"} and ${rankedDiscoveryResults.length} Soulseek download candidate${rankedDiscoveryResults.length === 1 ? "" : "s"}. Review the batch in Operations.`
+        : "I researched candidate tracks, but I could not match any local files or unlocked Soulseek candidates.",
+      intent: "research_playlist",
+      searchQuery,
+      results: ownedFiles.map(mapAgentResult),
+      discoveryResults: rankedDiscoveryResults.map((result) => mapAgentDiscoveryResult(result, this.library)),
+      discoveryGroups: groupAgentDiscoveryResults(rankedDiscoveryResults, this.library),
+      parsedListItems: [],
+      importResults: [],
+      operationBatch,
+      playback: null
+    };
+  }
+
   private createDiscoveryDownloadProposal(results: DiscoveryResult[], searchQuery: string): AgentMessageResponse["operationBatch"] {
     const selected = rankDiscoveryResultsByAvailability(results.filter((result) => !result.isLocked)).slice(0, 10);
     if (selected.length === 0) {
       return null;
     }
     return this.operations.createQueueDownloadBatch(selected, searchQuery, "agent");
+  }
+
+  private createResearchPlaylistBatch(
+    name: string,
+    description: string,
+    ownedFileIds: string[],
+    discoveryResults: DiscoveryResult[],
+    query: string
+  ): AgentMessageResponse["operationBatch"] {
+    const operations = [];
+    if (discoveryResults.length > 0) {
+      operations.push({
+        type: "queue_download" as const,
+        payload: { query, results: discoveryResults }
+      });
+    }
+    if (ownedFileIds.length > 0) {
+      operations.push({
+        type: "create_playlist" as const,
+        payload: {
+          name,
+          description,
+          type: "manual",
+          createdBy: "agent",
+          fileIds: [...new Set(ownedFileIds)]
+        }
+      });
+    }
+    if (operations.length === 0) {
+      return null;
+    }
+    return this.operations.createBatch({
+      source: "agent",
+      summary: `Create researched playlist ${name}`,
+      riskLevel: discoveryResults.length > 0 ? "medium" : "low",
+      operations
+    });
   }
 }
 
@@ -447,6 +622,9 @@ function detectIntent(message: string): AgentMessageResponse["intent"] {
     return "search_discovery";
   }
   if (/\b(playlist|mix)\b/.test(text) && /\b(make|create|build|propose|generate)\b/.test(text)) {
+    if (/\b(mood|vibe|like|similar|recommend|think i would like|for me|based on|research|download|find)\b/.test(text)) {
+      return "research_playlist";
+    }
     return "propose_playlist";
   }
   if (/\b(play|queue|listen)\b/.test(text)) {
@@ -466,6 +644,9 @@ function applySuggestedIntent(
     return detectedIntent;
   }
   if (detectedIntent === "search_library" || detectedIntent === "unknown") {
+    return suggestedIntent;
+  }
+  if (detectedIntent === "propose_playlist" && suggestedIntent === "research_playlist") {
     return suggestedIntent;
   }
   return detectedIntent;
@@ -507,6 +688,8 @@ function extractSearchQuery(message: string, intent: AgentMessageResponse["inten
   const intentWords =
     intent === "propose_playlist"
       ? ["make", "create", "build", "propose", "generate", "playlist", "mix"]
+      : intent === "research_playlist"
+        ? ["make", "create", "build", "propose", "generate", "playlist", "mix", "songs", "song", "mood", "vibe", "like", "similar", "recommend", "research"]
       : intent === "playback"
         ? ["play", "queue", "listen"]
         : intent === "parse_pasted_list"
@@ -706,6 +889,99 @@ function playlistName(query: string): string {
 
 function titleCase(value: string): string {
   return value.replace(/\b\p{L}/gu, (match) => match.toUpperCase());
+}
+
+function formatPlanningTrack(file: LibraryFile): string {
+  const tags = file.displayTags;
+  const artist = tags.artist ?? tags.albumartist;
+  const title = tags.title ?? file.filename.replace(/\.[^.]+$/, "");
+  const album = tags.album;
+  return [artist, title].filter(Boolean).join(" - ") + (album ? ` (${album})` : "");
+}
+
+function topValues(files: LibraryFile[], getValue: (file: LibraryFile) => string | undefined | null): string[] {
+  const counts = new Map<string, number>();
+  for (const file of files) {
+    const value = getValue(file)?.trim();
+    if (value) {
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([value]) => value);
+}
+
+function dedupeTrackCandidates(candidates: AgentTrackCandidate[]): AgentTrackCandidate[] {
+  const seen = new Set<string>();
+  const deduped: AgentTrackCandidate[] = [];
+  for (const candidate of candidates) {
+    const artist = candidate.artist.trim();
+    const title = candidate.title.trim();
+    if (!artist || !title) {
+      continue;
+    }
+    const key = `${normalizeFallbackKey(artist)}\u0000${normalizeFallbackKey(title)}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push({
+        ...candidate,
+        artist,
+        title,
+        album: candidate.album?.trim() || undefined,
+        query: candidate.query?.trim() || undefined,
+        reason: candidate.reason?.trim() || undefined
+      });
+    }
+  }
+  return deduped;
+}
+
+function findOwnedCandidate(library: LibraryRepository, candidate: AgentTrackCandidate): LibraryFile | null {
+  const queries = candidateDiscoveryQueries(candidate);
+  for (const query of queries) {
+    const normalizedArtist = normalizeFallbackKey(candidate.artist);
+    const normalizedTitle = normalizeFallbackKey(candidate.title);
+    const match = library
+      .listFiles(query, 10)
+      .find((file) => {
+        const tags = file.displayTags;
+        const artist = normalizeFallbackKey(tags.artist ?? tags.albumartist ?? "");
+        const title = normalizeFallbackKey(tags.title ?? file.filename.replace(/\.[^.]+$/, ""));
+        return title.includes(normalizedTitle) && (!normalizedArtist || artist.includes(normalizedArtist));
+      });
+    if (match) {
+      return match;
+    }
+  }
+  return null;
+}
+
+function candidateDiscoveryQueries(candidate: AgentTrackCandidate): string[] {
+  return [
+    candidate.query,
+    `${candidate.artist} ${candidate.title}`,
+    candidate.album ? `${candidate.artist} ${candidate.album} ${candidate.title}` : null,
+    candidate.title
+  ]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .map(cleanFallbackQuery)
+    .filter(Boolean)
+    .filter((value, index, values) => values.findIndex((other) => normalizeFallbackKey(other) === normalizeFallbackKey(value)) === index)
+    .slice(0, 4);
+}
+
+function selectDiscoveryTrackResult(results: DiscoveryResult[], candidate: AgentTrackCandidate): DiscoveryResult | null {
+  const normalizedArtist = normalizeFallbackKey(candidate.artist);
+  const normalizedTitle = normalizeFallbackKey(candidate.title);
+  const eligible = results.filter((result) => {
+    if (result.isLocked) {
+      return false;
+    }
+    const haystack = normalizeFallbackKey([result.filename, result.path, result.folder].filter(Boolean).join(" "));
+    return haystack.includes(normalizedTitle) && (!normalizedArtist || haystack.includes(normalizedArtist));
+  });
+  return rankDiscoveryResultsByAvailability(eligible)[0] ?? null;
 }
 
 function mapAgentResult(file: LibraryFile): AgentMessageResponse["results"][number] {

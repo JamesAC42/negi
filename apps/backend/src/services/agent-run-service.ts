@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
 import type { AgentMessageResponse, AgentRunResponse } from "@music-os/core";
 import type { AgentService, AgentStepRecorder } from "./agent-service.js";
-import type { AgentModelProvider } from "./agent-model-provider.js";
+import type { AgentModelProvider, AgentTrackCandidate } from "./agent-model-provider.js";
 import type { AgentMetadataTool } from "./agent-metadata-tool.js";
 
 interface AgentRunRow {
@@ -96,6 +96,9 @@ export class AgentRunService {
 
     try {
       const searchQueryHints: string[] = [];
+      let playlistName: string | undefined;
+      let playlistDescription: string | undefined;
+      let trackCandidates: AgentTrackCandidate[] = [];
       let suggestedIntent: AgentMessageResponse["intent"] | undefined;
       let suggestedSearchQuery: string | undefined;
       if (this.metadataTool) {
@@ -125,18 +128,22 @@ export class AgentRunService {
       }
       if (this.modelProvider && this.modelProvider.name !== "local") {
         try {
-          const modelPlan = await this.modelProvider.plan(objective);
+          const planningContext = this.agent.getPlanningContext();
+          const modelPlan = await this.modelProvider.plan(objective, planningContext);
           if (modelPlan) {
             suggestedIntent = modelPlan.intent ?? suggestedIntent;
             suggestedSearchQuery = modelPlan.searchQuery ?? suggestedSearchQuery;
+            playlistName = modelPlan.playlistName ?? playlistName;
+            playlistDescription = modelPlan.playlistDescription ?? playlistDescription;
+            trackCandidates = modelPlan.trackCandidates ?? trackCandidates;
             searchQueryHints.push(...modelPlan.searchQueryHints);
             recordStep({
               type: "plan",
               toolName: `model:${this.modelProvider.name}`,
               status: "completed",
               summary: modelPlan.summary,
-              input: { objective },
-              output: { suggestedIntent, suggestedSearchQuery, searchQueryHints }
+              input: { objective, planningContext },
+              output: { suggestedIntent, suggestedSearchQuery, searchQueryHints, playlistName, playlistDescription, trackCandidates }
             });
           }
         } catch (error) {
@@ -155,7 +162,10 @@ export class AgentRunService {
           recordStep,
           discoveryQueryHints: searchQueryHints,
           suggestedIntent,
-          suggestedSearchQuery
+          suggestedSearchQuery,
+          playlistName,
+          playlistDescription,
+          trackCandidates
         })),
         runId,
         threadId: thread.id

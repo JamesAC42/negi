@@ -220,6 +220,68 @@ try {
   assert(modelIntentSearchCalls[0] === "daft punk", `expected cleaned model query first, got ${modelIntentSearchCalls[0]}`);
   assert(!modelIntentSearchCalls.includes("daft punk song here"), "did not expect literal filler query to be searched");
 
+  const researchPlaylistSearchCalls: string[] = [];
+  const researchPlaylistAgent = new AgentService(app.library, app.operations, app.playback, {
+    async search(query: string): Promise<DiscoverySearchResponse> {
+      researchPlaylistSearchCalls.push(query);
+      if (query === "air la femme d'argent" || query === "boards of canada roygbiv") {
+        return {
+          query,
+          total: 1,
+          results: [
+            {
+              id: `${query}-result`,
+              source: "slskd",
+              username: "remote-user",
+              filename: query === "air la femme d'argent" ? "01 - La femme d'argent.flac" : "06 - Roygbiv.flac",
+              path: query === "air la femme d'argent" ? "Air/Moon Safari/01 - La femme d'argent.flac" : "Boards of Canada/Music Has the Right to Children/06 - Roygbiv.flac",
+              folder: query === "air la femme d'argent" ? "Air/Moon Safari" : "Boards of Canada/Music Has the Right to Children",
+              sizeBytes: 42_000_000,
+              extension: "flac",
+              bitrate: 900_000,
+              sampleRate: 44_100,
+              lengthSeconds: 420,
+              isLocked: false,
+              hasFreeUploadSlot: true,
+              uploadSpeedBytesPerSecond: 2_000_000,
+              queueLength: 0,
+              raw: {}
+            }
+          ]
+        };
+      }
+      return { query, total: 0, results: [] };
+    }
+  });
+  const researchPlaylistRuns = new AgentRunService(
+    app.db,
+    researchPlaylistAgent,
+    {
+      name: "fixture_model",
+      async plan() {
+        return {
+          summary: "Fixture model researched a late-night electronic playlist",
+          intent: "research_playlist",
+          searchQuery: "late night electronic",
+          playlistName: "Late Night Electronic",
+          playlistDescription: "Downtempo electronic recommendations from the fixture model.",
+          searchQueryHints: [],
+          trackCandidates: [
+            { artist: "Air", title: "La femme d'argent", album: "Moon Safari", query: "air la femme d'argent" },
+            { artist: "Boards of Canada", title: "Roygbiv", album: "Music Has the Right to Children", query: "boards of canada roygbiv" }
+          ]
+        };
+      }
+    },
+    undefined
+  );
+  const researchPlaylistRun = await researchPlaylistRuns.run("make me a playlist of songs for a late night electronic mood");
+  assert(researchPlaylistRun.response?.intent === "research_playlist", `expected research_playlist intent, got ${researchPlaylistRun.response?.intent}`);
+  assert(researchPlaylistRun.response?.discoveryResults.length === 2, "expected researched playlist to find two Discovery candidates");
+  assert(researchPlaylistRun.response?.operationBatch?.operations.some((operation) => operation.type === "queue_download") === true, "expected researched playlist to propose queue_download");
+  assert(researchPlaylistSearchCalls.includes("air la femme d'argent"), "expected first candidate query");
+  assert(researchPlaylistSearchCalls.includes("boards of canada roygbiv"), "expected second candidate query");
+
   const releaseContextSearchCalls: string[] = [];
   const releaseContextAgent = new AgentService(app.library, app.operations, app.playback, {
     async search(query: string): Promise<DiscoverySearchResponse> {
@@ -284,6 +346,8 @@ try {
         modelAttemptedQueries: modelSearchCalls,
         modelIntentRunId: modelIntentRun.id,
         modelIntentAttemptedQueries: modelIntentSearchCalls,
+        researchPlaylistRunId: researchPlaylistRun.id,
+        researchPlaylistAttemptedQueries: researchPlaylistSearchCalls,
         releaseContextRunId: releaseContextRun.id,
         releaseContextAttemptedQueries: releaseContextSearchCalls
       },

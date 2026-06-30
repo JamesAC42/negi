@@ -637,6 +637,7 @@ export const agentMessageResponseSchema = z.object({
   intent: z.enum([
     "search_library",
     "search_discovery",
+    "research_playlist",
     "parse_pasted_list",
     "propose_import",
     "propose_playlist",
