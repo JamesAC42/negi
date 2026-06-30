@@ -223,6 +223,12 @@ export class AgentPlaylistWorkflowService {
          WHERE id = ?`
       )
       .run(applied.id, finalPlaylistId, row.id);
+    this.insertWorkflowMessage(
+      row,
+      `Here's your playlist: ${row.playlist_name}. ${fileIds.length} track${fileIds.length === 1 ? "" : "s"} ${
+        playlistId ? "were added to it" : "are ready"
+      }.`
+    );
   }
 
   private getRow(workflowId: string): WorkflowRow {
@@ -242,6 +248,7 @@ export class AgentPlaylistWorkflowService {
   }
 
   private fail(workflowId: string, message: string): void {
+    const row = this.getRow(workflowId);
     this.db
       .prepare(
         `UPDATE agent_playlist_workflows
@@ -249,6 +256,7 @@ export class AgentPlaylistWorkflowService {
          WHERE id = ?`
       )
       .run(message, workflowId);
+    this.insertWorkflowMessage(row, `I could not finish ${row.playlist_name}: ${message}`);
   }
 
   private updateLinks(
@@ -277,6 +285,26 @@ export class AgentPlaylistWorkflowService {
         links.playlistId ?? null,
         workflowId
       );
+  }
+
+  private insertWorkflowMessage(row: WorkflowRow, text: string): void {
+    if (!row.thread_id || this.hasWorkflowMessage(row.thread_id, text)) {
+      return;
+    }
+    this.db
+      .prepare(
+        `INSERT INTO agent_messages (id, thread_id, role, text, response_json)
+         VALUES (?, ?, 'agent', ?, NULL)`
+      )
+      .run(nanoid(), row.thread_id, text);
+    this.db.prepare("UPDATE agent_threads SET updated_at = datetime('now') WHERE id = ?").run(row.thread_id);
+  }
+
+  private hasWorkflowMessage(threadId: string, text: string): boolean {
+    const row = this.db
+      .prepare("SELECT 1 FROM agent_messages WHERE thread_id = ? AND role = 'agent' AND text = ? LIMIT 1")
+      .get(threadId, text) as { 1: number } | undefined;
+    return row != null;
   }
 }
 

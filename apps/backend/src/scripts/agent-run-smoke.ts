@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { agentPlaylistWorkflowsResponseSchema, type AgentStep, type DiscoverySearchResponse } from "@music-os/core";
@@ -301,6 +301,51 @@ try {
   });
   assert(workflowResponse.workflows.some((workflow) => workflow.runId === researchPlaylistRun.id), "expected workflow to parse through public schema");
 
+  const ownedLibraryPath = join(fixtureDir, "owned-library");
+  await mkdir(ownedLibraryPath, { recursive: true });
+  await writeFile(join(ownedLibraryPath, "durable-one.mp3"), makeId3Fixture("Durable One", "Durable Artist", "Durable Album", "1981"));
+  const ownedRoot = app.library.addRoot(ownedLibraryPath, "owned-agent-workflow");
+  const ownedScan = await app.scanner.scanRoot(ownedRoot);
+  assert(ownedScan.inserted === 1, `expected owned workflow fixture scan to insert one file, got ${ownedScan.inserted}`);
+  const ownedPlaylistRuns = new AgentRunService(
+    app.db,
+    new AgentService(app.library, app.operations, app.playback, {
+      async search(query: string): Promise<DiscoverySearchResponse> {
+        return { query, total: 0, results: [] };
+      }
+    }),
+    {
+      name: "fixture_model",
+      async plan() {
+        return {
+          summary: "Fixture model used an owned track for a playlist",
+          intent: "research_playlist",
+          searchQuery: "durable owned",
+          playlistName: "Owned Durable",
+          playlistDescription: "Owned-track workflow fixture.",
+          searchQueryHints: [],
+          trackCandidates: [{ artist: "Durable Artist", title: "Durable One", album: "Durable Album" }]
+        };
+      }
+    },
+    undefined,
+    app.agentPlaylistWorkflows
+  );
+  const ownedPlaylistRun = await ownedPlaylistRuns.run("make me an owned durable playlist");
+  const ownedWorkflow = app.agentPlaylistWorkflows.listWorkflows().find((workflow) => workflow.runId === ownedPlaylistRun.id);
+  assert(ownedWorkflow != null, "expected owned workflow to be registered");
+  assert(ownedPlaylistRun.response?.operationBatch != null, "expected owned playlist proposal batch");
+  app.operations.approveBatch(ownedPlaylistRun.response.operationBatch.id);
+  await app.operations.applyBatch(ownedPlaylistRun.response.operationBatch.id);
+  await app.agentPlaylistWorkflows.advanceAll();
+  const completedOwnedWorkflow = app.agentPlaylistWorkflows.listWorkflows().find((workflow) => workflow.runId === ownedPlaylistRun.id);
+  assert(completedOwnedWorkflow?.status === "completed", `expected owned workflow completed, got ${completedOwnedWorkflow?.status}`);
+  const ownedThread = app.agentThreads.getThread(ownedPlaylistRun.threadId!);
+  assert(
+    ownedThread.messages.some((message) => message.role === "agent" && message.text.startsWith("Here's your playlist: Owned Durable.")),
+    "expected completed workflow to add a final agent playlist message"
+  );
+
   const releaseContextSearchCalls: string[] = [];
   const releaseContextAgent = new AgentService(app.library, app.operations, app.playback, {
     async search(query: string): Promise<DiscoverySearchResponse> {
@@ -383,4 +428,25 @@ function assert(condition: boolean, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function makeId3Fixture(title: string, artist: string, album: string, year: string): Buffer {
+  const frames = Buffer.concat([
+    makeTextFrame("TIT2", title),
+    makeTextFrame("TPE1", artist),
+    makeTextFrame("TALB", album),
+    makeTextFrame("TYER", year)
+  ]);
+  return Buffer.concat([Buffer.from("ID3"), Buffer.from([3, 0, 0]), encodeSyncSafe(frames.length), frames]);
+}
+
+function makeTextFrame(id: string, value: string): Buffer {
+  const body = Buffer.concat([Buffer.from([0]), Buffer.from(value, "latin1")]);
+  const size = Buffer.alloc(4);
+  size.writeUInt32BE(body.length, 0);
+  return Buffer.concat([Buffer.from(id, "ascii"), size, Buffer.from([0, 0]), body]);
+}
+
+function encodeSyncSafe(size: number): Buffer {
+  return Buffer.from([(size >> 21) & 0x7f, (size >> 14) & 0x7f, (size >> 7) & 0x7f, size & 0x7f]);
 }
