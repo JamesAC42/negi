@@ -844,6 +844,10 @@ try {
     localRecommendationRun.response.searchQuery === "daft punk",
     `expected recommendation filler words to be stripped, got ${localRecommendationRun.response.searchQuery}`
   );
+  assert(
+    localRecommendationRun.response.reply.includes("MUSIC_OS_AGENT_MODEL_PROVIDER=openai"),
+    `expected missing hosted planner guidance, got ${localRecommendationRun.response.reply}`
+  );
 
   const ownedLibraryPath = join(fixtureDir, "owned-library");
   await mkdir(ownedLibraryPath, { recursive: true });

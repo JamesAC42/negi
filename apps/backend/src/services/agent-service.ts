@@ -568,7 +568,8 @@ export class AgentService {
     const candidates = dedupeTrackCandidates(options.trackCandidates ?? []).slice(0, 15);
     if (candidates.length === 0) {
       return {
-        reply: "I need researched track candidates before I can build that playlist.",
+        reply:
+          "I can build researched playlists, but this backend did not return any researched track candidates. Make sure the backend is running with MUSIC_OS_AGENT_MODEL_PROVIDER=openai and OPENAI_API_KEY or MUSIC_OS_OPENAI_API_KEY, then try again.",
         intent: "research_playlist",
         searchQuery,
         results: [],
