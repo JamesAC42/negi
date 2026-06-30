@@ -16,6 +16,7 @@
     "agent-playlist-download-workflow:smoke": "tsx src/scripts/agent-playlist-download-workflow-smoke.ts",
     "agent-openai-live:smoke": "tsx src/scripts/agent-openai-live-smoke.ts",
     "agent-openai-slskd-preflight:smoke": "tsx src/scripts/agent-openai-slskd-preflight-smoke.ts",
+    "agent-openai-slskd-live-workflow:smoke": "tsx src/scripts/agent-openai-slskd-live-workflow-smoke.ts",
     "agent-model-provider:smoke": "tsx src/scripts/agent-model-provider-smoke.ts",
     "agent-thread:smoke": "tsx src/scripts/agent-thread-smoke.ts",
     "album-playback:smoke": "tsx src/scripts/album-playback-smoke.ts",
