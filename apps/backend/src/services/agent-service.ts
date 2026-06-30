@@ -125,12 +125,12 @@ export class AgentService {
   }
 
   async handleMessage(message: string, options: AgentHandleMessageOptions = {}): Promise<AgentMessageResponse> {
-    const detectedIntent = detectIntent(message);
+    const detectedIntent = detectAgentIntent(message);
     const intent = applySuggestedIntent(detectedIntent, options.suggestedIntent);
     const searchQuery =
-      cleanSuggestedSearchQuery(options.suggestedSearchQuery) ||
+      cleanSuggestedAgentSearchQuery(options.suggestedSearchQuery) ||
       this.resolveContextualSearchQuery(message, intent) ||
-      extractSearchQuery(message, intent);
+      extractAgentSearchQuery(message, intent);
     options.recordStep?.({
       type: "plan",
       status: "completed",
@@ -709,7 +709,7 @@ export class AgentService {
   }
 }
 
-function detectIntent(message: string): AgentMessageResponse["intent"] {
+export function detectAgentIntent(message: string): AgentMessageResponse["intent"] {
   const text = message.toLowerCase();
   if (looksLikePastedList(message)) {
     return "parse_pasted_list";
@@ -766,7 +766,7 @@ function applySuggestedIntent(
   return detectedIntent;
 }
 
-function extractSearchQuery(message: string, intent: AgentMessageResponse["intent"]): string {
+export function extractAgentSearchQuery(message: string, intent: AgentMessageResponse["intent"]): string {
   let query = message.toLowerCase();
   query = query.replace(/[^\p{L}\p{N}\s'-]+/gu, " ");
   const stopWords = new Set([
@@ -894,7 +894,7 @@ function extractSearchQuery(message: string, intent: AgentMessageResponse["inten
     .trim();
 }
 
-function cleanSuggestedSearchQuery(value: string | undefined): string {
+export function cleanSuggestedAgentSearchQuery(value: string | undefined): string {
   if (!value) {
     return "";
   }
