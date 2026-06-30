@@ -77,6 +77,10 @@ export class AgentService {
       this.library.listLikedFiles(100),
       playable.filter((file) => file.liked === true || (file.rating ?? 0) >= 4)
     );
+    const disliked = mergeFilesById(
+      this.library.listDislikedFiles(100),
+      playable.filter((file) => file.disliked === true || (file.rating != null && file.rating <= 2))
+    ).slice(0, 20);
     const highRotation = mergeFilesById(
       this.library.listHighRotationFiles(100),
       [...playable].sort((left, right) => right.playCount - left.playCount)
@@ -87,6 +91,10 @@ export class AgentService {
         .filter((file) => file.lastPlayedAt)
         .sort((left, right) => (right.lastPlayedAt ?? "").localeCompare(left.lastPlayedAt ?? ""))
     ).slice(0, 20);
+    const skipped = [...playable]
+      .filter((file) => file.skipCount > 0)
+      .sort((left, right) => right.skipCount - left.skipCount || (right.lastSkippedAt ?? "").localeCompare(left.lastSkippedAt ?? ""))
+      .slice(0, 20);
     const current = this.getCurrentPlaybackFile();
     const tasteProfile = this.getCompactTasteProfile();
     return {
@@ -97,9 +105,15 @@ export class AgentService {
       tasteProfile,
       favoriteArtists: topValues(liked, (file) => file.displayTags.artist ?? file.displayTags.albumartist).slice(0, 12),
       favoriteAlbums: topValues(liked, (file) => file.displayTags.album).slice(0, 12),
+      favoriteGenres: topValues(liked, (file) => file.displayTags.genre).slice(0, 12),
       favoriteTracks: liked.map(formatPlanningTrack).filter(Boolean).slice(0, 20),
+      highRotationArtists: topValues(highRotation, (file) => file.displayTags.artist ?? file.displayTags.albumartist).slice(0, 12),
       highRotationTracks: highRotation.map(formatPlanningTrack).filter(Boolean).slice(0, 20),
-      recentTracks: recent.map(formatPlanningTrack).filter(Boolean).slice(0, 20)
+      recentArtists: topValues(recent, (file) => file.displayTags.artist ?? file.displayTags.albumartist).slice(0, 12),
+      recentTracks: recent.map(formatPlanningTrack).filter(Boolean).slice(0, 20),
+      dislikedArtists: topValues(disliked, (file) => file.displayTags.artist ?? file.displayTags.albumartist).slice(0, 12),
+      dislikedTracks: disliked.map(formatPlanningTrack).filter(Boolean).slice(0, 20),
+      skippedTracks: skipped.map(formatPlanningTrack).filter(Boolean).slice(0, 20)
     };
   }
 

@@ -374,6 +374,23 @@ export class LibraryRepository {
     return this.mapRowsWithDisplayTags(rows);
   }
 
+  listDislikedFiles(limit = 100): LibraryFilesResponse["files"] {
+    const pagination = getPaginationClause(limit, 0);
+    const rows = this.db
+      .prepare(
+        `${filesWithPlaybackStatsSql}
+         WHERE files.staged = 0
+           AND files.missing = 0
+           AND (file_preferences.disliked = 1 OR (file_preferences.rating IS NOT NULL AND file_preferences.rating <= 2))
+         ORDER BY COALESCE(file_preferences.disliked, 0) DESC,
+                  COALESCE(file_preferences.rating, 99) ASC,
+                  files.date_updated DESC
+         ${pagination.sql}`
+      )
+      .all(pagination.params) as FileRow[];
+    return this.mapRowsWithDisplayTags(rows);
+  }
+
   listHighRotationFiles(limit = 100): LibraryFilesResponse["files"] {
     const pagination = getPaginationClause(limit, 0);
     const rows = this.db

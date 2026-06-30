@@ -23,9 +23,15 @@ export interface AgentPlanningContext {
   tasteProfile?: Partial<TasteProfile>;
   favoriteArtists?: string[];
   favoriteAlbums?: string[];
+  favoriteGenres?: string[];
   favoriteTracks?: string[];
+  highRotationArtists?: string[];
   highRotationTracks?: string[];
+  recentArtists?: string[];
   recentTracks?: string[];
+  dislikedArtists?: string[];
+  dislikedTracks?: string[];
+  skippedTracks?: string[];
 }
 
 export interface AgentModelPlan {
@@ -95,7 +101,7 @@ class OpenAIResponsesAgentModelProvider implements AgentModelProvider {
                 "Use research_playlist when the user asks for a playlist, mood/occasion recommendations, music like an artist/song, a song here/for this situation, or music they might like. For research_playlist, ALWAYS return playlistName, playlistDescription, and 8-15 concrete trackCandidates.\n" +
                 "Each trackCandidates item must include artist, title, reason, and query. Include album when you know it. The query must be a short Soulseek-ready search for that candidate, not the user's full sentence.\n" +
                 "If the user asks to find the album/release a song is on, use search_discovery and set searchQuery to the resolved artist + album or artist + title + album. Example: 'find the Green Day album with When I Come Around on it' should not become 'green day when i come around album its on'; it should target Green Day Dookie.\n" +
-                "For requests about music the user might like, strongly use tasteProfile plus favoriteTracks, highRotationTracks, recentTracks, and liked/rated library context. Avoid blockedArtists, blockedGenres, and overplayedTracks.\n" +
+                "For requests about music the user might like, strongly use tasteProfile plus favoriteArtists, favoriteGenres, favoriteTracks, highRotationArtists, highRotationTracks, recentArtists, recentTracks, and liked/rated library context. Treat dislikedArtists, dislikedTracks, skippedTracks, blockedArtists, blockedGenres, and overplayedTracks as negative taste signals to avoid.\n" +
                 "When the user says this song, this track, current song, or current artist, resolve that using currentTrack/currentArtist/currentAlbum from the Taste/library context.\n" +
                 "For research_playlist, use current web research when available. Prefer sources from music discussion and recommendation contexts such as Reddit, Last.fm, Rate Your Music, Album of the Year, Bandcamp, Discogs, AllMusic, Pitchfork, Stereogum, Resident Advisor, forums, and label/artist pages. Include only sources you actually used in researchSources.\n" +
                 "searchQuery should be the cleaned music target, not filler words like here, this, song, album, find, search, or download.\n" +

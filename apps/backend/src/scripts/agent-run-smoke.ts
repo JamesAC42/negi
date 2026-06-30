@@ -537,9 +537,10 @@ try {
   const ownedLibraryPath = join(fixtureDir, "owned-library");
   await mkdir(ownedLibraryPath, { recursive: true });
   await writeFile(join(ownedLibraryPath, "durable-one.mp3"), makeId3Fixture("Durable One", "Durable Artist", "Durable Album", "1981"));
+  await writeFile(join(ownedLibraryPath, "avoid-this.mp3"), makeId3Fixture("Avoid This", "Rejected Artist", "Rejected Album", "1982"));
   const ownedRoot = app.library.addRoot(ownedLibraryPath, "owned-agent-workflow");
   const ownedScan = await app.scanner.scanRoot(ownedRoot);
-  assert(ownedScan.inserted === 1, `expected owned workflow fixture scan to insert one file, got ${ownedScan.inserted}`);
+  assert(ownedScan.inserted === 2, `expected owned workflow fixture scan to insert two files, got ${ownedScan.inserted}`);
   const ownedPlaylistRuns = new AgentRunService(
     app.db,
     new AgentService(app.library, app.operations, app.playback, {
@@ -587,6 +588,15 @@ try {
 
   const currentFile = app.library.listFiles("durable one", 1)[0];
   assert(currentFile != null, "expected current playback fixture file");
+  const dislikedFile = app.library.listFiles("avoid this", 1)[0];
+  assert(dislikedFile != null, "expected disliked planning fixture file");
+  app.library.setFileFavoriteStatus(dislikedFile.id, { liked: false, disliked: true });
+  app.playbackHistory.recordEnded({
+    fileId: dislikedFile.id,
+    reason: "stop",
+    positionMs: 1_000,
+    durationMs: 180_000
+  });
   app.tasteProfile.updateProfile(
     {
       ...app.tasteProfile.getProfile().profile,
@@ -599,6 +609,7 @@ try {
   );
   let sawCurrentTrackContext = false;
   let sawTasteProfileContext = false;
+  let sawNegativeTasteContext = false;
   const currentContextRuns = new AgentRunService(
     app.db,
     new AgentService(
@@ -637,6 +648,10 @@ try {
           context?.tasteProfile?.preferredGenres?.includes("sophisti-pop") === true &&
           context.tasteProfile.blockedArtists?.includes("Blocked Fixture Artist") === true &&
           context.tasteProfile.playlistStylePreferences === "Prefer deep cuts over obvious singles.";
+        sawNegativeTasteContext =
+          context?.dislikedArtists?.includes("Rejected Artist") === true &&
+          context.dislikedTracks?.some((track) => track.includes("Rejected Artist") && track.includes("Avoid This")) === true &&
+          context.skippedTracks?.some((track) => track.includes("Rejected Artist") && track.includes("Avoid This")) === true;
         return {
           summary: "Fixture model used the current song context",
           intent: "research_playlist",
@@ -653,6 +668,7 @@ try {
   const currentContextRun = await currentContextRuns.run("make me a playlist like this song");
   assert(sawCurrentTrackContext, "expected model planning context to include current track metadata");
   assert(sawTasteProfileContext, "expected model planning context to include explicit taste profile");
+  assert(sawNegativeTasteContext, "expected model planning context to include disliked and skipped track signals");
   assert(currentContextRun.response?.intent === "research_playlist", `expected current-song prompt to route research_playlist, got ${currentContextRun.response?.intent}`);
   assert(
     currentContextRun.response.searchQuery.includes("durable artist") && currentContextRun.response.searchQuery.includes("durable one"),
