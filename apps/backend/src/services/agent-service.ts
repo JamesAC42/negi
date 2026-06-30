@@ -28,6 +28,10 @@ type DiscoveryQualityPreference = {
   allowMp3IfRare: boolean;
   minimumBitrateKbps: number | null;
 };
+type CandidateDiscoveryQuery = {
+  query: string;
+  requireArtist: boolean;
+};
 type AgentStepType = "plan" | "tool" | "decision" | "approval" | "final";
 type AgentStepStatus = "running" | "completed" | "failed";
 export type AgentStepRecorder = (step: {
@@ -582,16 +586,16 @@ export class AgentService {
         const queries = candidateDiscoveryQueries(candidate);
         let selected: DiscoveryResult | null = null;
         for (const query of queries) {
-          const discovery = await this.discovery.search(query, 30);
+          const discovery = await this.discovery.search(query.query, 30);
           options.recordStep?.({
             type: "tool",
             toolName: "search_soulseek",
             status: "completed",
-            summary: `Soulseek search returned ${discovery.results.length} result${discovery.results.length === 1 ? "" : "s"} for "${query}"`,
-            input: { candidate, query, responseLimit: 30 },
+            summary: `Soulseek search returned ${discovery.results.length} result${discovery.results.length === 1 ? "" : "s"} for "${query.query}"`,
+            input: { candidate, query: query.query, requireArtist: query.requireArtist, responseLimit: 30 },
             output: { query: discovery.query, total: discovery.total, resultCount: discovery.results.length }
           });
-          selected = selectDiscoveryTrackResult(discovery.results, candidate, qualityPreference);
+          selected = selectDiscoveryTrackResult(discovery.results, candidate, qualityPreference, query);
           if (selected) {
             selectedDiscoveryResults.push(selected);
             break;
@@ -1127,7 +1131,7 @@ function findOwnedCandidate(library: LibraryRepository, candidate: AgentTrackCan
     const normalizedArtist = normalizeFallbackKey(candidate.artist);
     const normalizedTitle = normalizeFallbackKey(candidate.title);
     const match = library
-      .listFiles(query, 10)
+      .listFiles(query.query, 10)
       .find((file) => {
         const tags = file.displayTags;
         const artist = normalizeFallbackKey(tags.artist ?? tags.albumartist ?? "");
@@ -1141,43 +1145,50 @@ function findOwnedCandidate(library: LibraryRepository, candidate: AgentTrackCan
   return null;
 }
 
-function candidateDiscoveryQueries(candidate: AgentTrackCandidate): string[] {
+function candidateDiscoveryQueries(candidate: AgentTrackCandidate): CandidateDiscoveryQuery[] {
   return [
-    candidate.query,
-    `${candidate.artist} ${candidate.title}`,
-    candidate.album ? `${candidate.artist} ${candidate.album} ${candidate.title}` : null,
-    candidate.title
+    { query: candidate.query, requireArtist: true },
+    { query: `${candidate.artist} ${candidate.title}`, requireArtist: true },
+    { query: candidate.album ? `${candidate.artist} ${candidate.album} ${candidate.title}` : null, requireArtist: true },
+    { query: candidate.title, requireArtist: false }
   ]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .map(cleanFallbackQuery)
-    .filter(Boolean)
-    .filter((value, index, values) => values.findIndex((other) => normalizeFallbackKey(other) === normalizeFallbackKey(value)) === index)
+    .map((value) => ({ ...value, query: value.query ? cleanFallbackQuery(value.query) : "" }))
+    .filter((value) => Boolean(value.query))
+    .filter((value, index, values) => values.findIndex((other) => normalizeFallbackKey(other.query) === normalizeFallbackKey(value.query)) === index)
     .slice(0, 4);
 }
 
 function selectDiscoveryTrackResult(
   results: DiscoveryResult[],
   candidate: AgentTrackCandidate,
-  qualityPreference: DiscoveryQualityPreference
+  qualityPreference: DiscoveryQualityPreference,
+  query: CandidateDiscoveryQuery
 ): DiscoveryResult | null {
   const normalizedArtist = normalizeFallbackKey(candidate.artist);
   const normalizedTitle = normalizeFallbackKey(candidate.title);
+  const normalizedAlbum = normalizeFallbackKey(candidate.album ?? "");
   const eligible = results.filter((result) => {
     if (result.isLocked) {
       return false;
     }
     const haystack = normalizeFallbackKey([result.filename, result.path, result.folder].filter(Boolean).join(" "));
-    return haystack.includes(normalizedTitle) && (!normalizedArtist || haystack.includes(normalizedArtist));
+    const titleMatches = haystack.includes(normalizedTitle);
+    const artistMatches = !normalizedArtist || haystack.includes(normalizedArtist);
+    const albumMatches = Boolean(normalizedAlbum && haystack.includes(normalizedAlbum));
+    return titleMatches && (artistMatches || albumMatches || !query.requireArtist);
   });
-  return rankDiscoveryResultsByQuality(eligible, qualityPreference)[0] ?? null;
+  return rankDiscoveryResultsByQuality(eligible, qualityPreference, candidate)[0] ?? null;
 }
 
 function rankDiscoveryResultsByQuality(
   results: DiscoveryResult[],
-  qualityPreference: DiscoveryQualityPreference
+  qualityPreference: DiscoveryQualityPreference,
+  candidate?: AgentTrackCandidate
 ): DiscoveryResult[] {
   return rankDiscoveryResultsByAvailability(results).sort((left, right) => {
-    const qualityDelta = discoveryQualityScore(right, qualityPreference) - discoveryQualityScore(left, qualityPreference);
+    const qualityDelta =
+      discoveryQualityScore(right, qualityPreference, candidate) -
+      discoveryQualityScore(left, qualityPreference, candidate);
     if (qualityDelta !== 0) {
       return qualityDelta;
     }
@@ -1185,9 +1196,24 @@ function rankDiscoveryResultsByQuality(
   });
 }
 
-function discoveryQualityScore(result: DiscoveryResult, qualityPreference: DiscoveryQualityPreference): number {
+function discoveryQualityScore(
+  result: DiscoveryResult,
+  qualityPreference: DiscoveryQualityPreference,
+  candidate?: AgentTrackCandidate
+): number {
   const extension = (result.extension ?? result.filename.split(".").pop() ?? "").toLowerCase();
   let score = 0;
+  if (candidate) {
+    const haystack = normalizeFallbackKey([result.filename, result.path, result.folder].filter(Boolean).join(" "));
+    const artist = normalizeFallbackKey(candidate.artist);
+    const album = normalizeFallbackKey(candidate.album ?? "");
+    if (artist && haystack.includes(artist)) {
+      score += 40;
+    }
+    if (album && haystack.includes(album)) {
+      score += 20;
+    }
+  }
   const preferredIndex = qualityPreference.preferredFormats.indexOf(extension);
   if (preferredIndex >= 0) {
     score += 200 - preferredIndex;

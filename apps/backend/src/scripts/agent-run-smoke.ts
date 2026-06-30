@@ -299,6 +299,61 @@ try {
   });
   assert(workflowResponse.workflows.some((workflow) => workflow.runId === researchPlaylistRun.id), "expected workflow to parse through public schema");
 
+  const titleOnlyFallbackCalls: string[] = [];
+  const titleOnlyFallbackRun = await new AgentRunService(
+    app.db,
+    new AgentService(app.library, app.operations, app.playback, {
+      async search(query: string): Promise<DiscoverySearchResponse> {
+        titleOnlyFallbackCalls.push(query);
+        return query === "unblacklistable title"
+          ? {
+              query,
+              total: 1,
+              results: [
+                {
+                  id: "title-only-result",
+                  source: "slskd",
+                  username: "fallback-user",
+                  filename: "07 - Unblacklistable Title.flac",
+                  path: "Incoming/07 - Unblacklistable Title.flac",
+                  folder: "Incoming",
+                  sizeBytes: 36_000_000,
+                  extension: "flac",
+                  bitrate: 880_000,
+                  sampleRate: 44_100,
+                  lengthSeconds: 194,
+                  isLocked: false,
+                  hasFreeUploadSlot: true,
+                  uploadSpeedBytesPerSecond: 1_500_000,
+                  queueLength: 0,
+                  raw: {}
+                }
+              ]
+            }
+          : { query, total: 0, results: [] };
+      }
+    }),
+    {
+      name: "fixture_model",
+      async plan() {
+        return {
+          summary: "Fixture model supplied a candidate whose artist queries are suppressed upstream",
+          intent: "research_playlist",
+          playlistName: "Title Fallback",
+          searchQueryHints: [],
+          trackCandidates: [{ artist: "Suppressed Artist", title: "Unblacklistable Title", album: "Suppressed Album" }]
+        };
+      }
+    },
+    undefined,
+    app.agentPlaylistWorkflows
+  ).run("make me a playlist with a suppressed artist fallback");
+  assert(titleOnlyFallbackCalls.includes("unblacklistable title"), "expected title-only fallback query to be attempted");
+  assert(
+    titleOnlyFallbackRun.response?.discoveryResults[0]?.discoveryId === "title-only-result",
+    "expected title-only fallback result to be accepted when artist is absent from the path"
+  );
+
   app.tasteProfile.updateProfile(
     {
       ...app.tasteProfile.getProfile().profile,
