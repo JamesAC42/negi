@@ -32,6 +32,10 @@ type CandidateDiscoveryQuery = {
   query: string;
   requireArtist: boolean;
 };
+type DiscoveryReleasePlaylistSelection = {
+  name: string;
+  results: DiscoveryResult[];
+};
 type ResearchPlaylistItemRef =
   | {
       type: "owned";
@@ -477,6 +481,7 @@ export class AgentService {
     });
 
     let discovery = { query: searchQuery, results: [] as DiscoveryResult[], total: 0 };
+    const collectedResults: DiscoveryResult[] = [];
     const attemptedQueries: string[] = [];
     for (const query of queries) {
       attemptedQueries.push(query);
@@ -503,12 +508,16 @@ export class AgentService {
         output: { query: discovery.query, total: discovery.total, resultCount: discovery.results.length }
       });
       if (discovery.results.length > 0) {
-        break;
+        collectedResults.push(...discovery.results);
+        if (!wantsReleaseContext(originalMessage)) {
+          break;
+        }
       }
     }
 
-    const discoveryResults = discovery.results.slice(0, 20).map((result) => mapAgentDiscoveryResult(result, this.library));
-    const discoveryGroups = groupAgentDiscoveryResults(discovery.results, this.library).slice(0, 8);
+    const resultsForRanking = wantsReleaseContext(originalMessage) && collectedResults.length > 0 ? dedupeDiscoveryResults(collectedResults) : discovery.results;
+    const discoveryResults = resultsForRanking.slice(0, 20).map((result) => mapAgentDiscoveryResult(result, this.library));
+    const discoveryGroups = groupAgentDiscoveryResults(resultsForRanking, this.library).slice(0, 8);
     const ownedCount = discoveryResults.filter((result) => result.ownedMatchCount > 0).length;
     const unlockedCount = discoveryResults.filter((result) => !result.isLocked).length;
     options.recordStep?.({
@@ -525,17 +534,22 @@ export class AgentService {
         attemptedQueries
       }
     });
-    const operationBatch = wantsDownloadProposal(originalMessage)
-      ? this.createDiscoveryDownloadProposal(discovery.results, searchQuery)
-      : null;
-    if (wantsDownloadProposal(originalMessage)) {
+    const releasePlaylistSelection = wantsReleaseContext(originalMessage) ? selectDiscoveryReleasePlaylistResults(resultsForRanking) : null;
+    const operationBatch = releasePlaylistSelection
+      ? this.createDiscoveryReleasePlaylistBatch(releasePlaylistSelection, searchQuery, originalMessage)
+      : wantsDownloadProposal(originalMessage)
+        ? this.createDiscoveryDownloadProposal(resultsForRanking, searchQuery)
+        : null;
+    if (releasePlaylistSelection || wantsDownloadProposal(originalMessage)) {
       options.recordStep?.({
         type: "approval",
-        toolName: "propose_queue_download",
+        toolName: releasePlaylistSelection ? "propose_release_playlist_download" : "propose_queue_download",
         status: "completed",
-        summary: operationBatch
-          ? `Created reviewable queue_download batch with ${operationBatch.operations.length} operation${operationBatch.operations.length === 1 ? "" : "s"}`
-          : "No unlocked Discovery results were available for a queue_download proposal",
+        summary: releasePlaylistSelection
+          ? `Created release playlist workflow for ${releasePlaylistSelection.name}`
+          : operationBatch
+            ? `Created reviewable queue_download batch with ${operationBatch.operations.length} operation${operationBatch.operations.length === 1 ? "" : "s"}`
+            : "No unlocked Discovery results were available for a queue_download proposal",
         input: { searchQuery, selectedQuery: discovery.query },
         output: operationBatch ? { operationBatchId: operationBatch.id, operationCount: operationBatch.operations.length } : null
       });
@@ -546,7 +560,9 @@ export class AgentService {
         discoveryResults.length === 0
           ? `I searched Discovery for "${searchQuery}"${attemptedQueries.length > 1 ? ` using ${attemptedQueries.length} query variants` : ""} and found no candidates.`
           : operationBatch
-            ? `I found ${discoveryResults.length} Discovery candidate${discoveryResults.length === 1 ? "" : "s"} for "${searchQuery}"${discovery.query !== searchQuery ? ` via fallback query "${discovery.query}"` : ""} and proposed a download batch with ${operationBatch.operations.length} reviewable operation. Review it in Operations before any staging work.`
+            ? releasePlaylistSelection
+              ? `I found ${releasePlaylistSelection.results.length} unlocked track candidate${releasePlaylistSelection.results.length === 1 ? "" : "s"} for ${releasePlaylistSelection.name} and created a download/import playlist workflow. I will post here when the playlist is ready.`
+              : `I found ${discoveryResults.length} Discovery candidate${discoveryResults.length === 1 ? "" : "s"} for "${searchQuery}"${discovery.query !== searchQuery ? ` via fallback query "${discovery.query}"` : ""} and proposed a download batch with ${operationBatch.operations.length} reviewable operation. Review it in Operations before any staging work.`
             : `I found ${discoveryResults.length} Discovery candidate${discoveryResults.length === 1 ? "" : "s"} for "${searchQuery}"${discovery.query !== searchQuery ? ` via fallback query "${discovery.query}"` : ""} (${unlockedCount} unlocked, ${ownedCount} with possible library matches). Review candidates in Discovery before staging downloads.`,
       intent: "search_discovery",
       searchQuery,
@@ -695,6 +711,22 @@ export class AgentService {
       return null;
     }
     return this.operations.createQueueDownloadBatch(selected, searchQuery, "agent", this.library.listRoots()[0]?.id);
+  }
+
+  private createDiscoveryReleasePlaylistBatch(
+    selection: DiscoveryReleasePlaylistSelection,
+    query: string,
+    originalMessage: string
+  ): AgentMessageResponse["operationBatch"] {
+    const playlistItemRefs = selection.results.map((result) => ({ type: "download" as const, discoveryId: result.id }));
+    return this.createResearchPlaylistBatch(
+      selection.name,
+      `Agent release lookup from: ${originalMessage}`,
+      [],
+      selection.results,
+      playlistItemRefs,
+      query
+    );
   }
 
   private createResearchPlaylistBatch(
@@ -1454,6 +1486,19 @@ function mapAgentDiscoveryResult(result: DiscoveryResult, library: LibraryReposi
   };
 }
 
+function dedupeDiscoveryResults(results: DiscoveryResult[]): DiscoveryResult[] {
+  const seen = new Set<string>();
+  const deduped: DiscoveryResult[] = [];
+  for (const result of results) {
+    if (seen.has(result.id)) {
+      continue;
+    }
+    seen.add(result.id);
+    deduped.push(result);
+  }
+  return deduped;
+}
+
 function groupAgentDiscoveryResults(results: DiscoveryResult[], library: LibraryRepository): AgentDiscoveryGroup[] {
   const groups = new Map<string, DiscoveryResult[]>();
   for (const result of results) {
@@ -1491,6 +1536,65 @@ function groupAgentDiscoveryResults(results: DiscoveryResult[], library: Library
       return a.releaseTitle.localeCompare(b.releaseTitle);
     });
 }
+
+function selectDiscoveryReleasePlaylistResults(results: DiscoveryResult[]): DiscoveryReleasePlaylistSelection | null {
+  const unlockedAudio = results.filter((result) => !result.isLocked && isAudioDiscoveryResult(result));
+  if (unlockedAudio.length === 0) {
+    return null;
+  }
+
+  const releaseGroups = new Map<string, DiscoveryResult[]>();
+  for (const result of unlockedAudio) {
+    const release = inferDiscoveryRelease(result);
+    const key = `${normalizeDiscoveryText(release.artist ?? "")}\u0000${normalizeDiscoveryText(release.title)}`;
+    releaseGroups.set(key, [...(releaseGroups.get(key) ?? []), result]);
+  }
+
+  const bestRelease = [...releaseGroups.values()].sort((left, right) => releaseResultScore(right) - releaseResultScore(left))[0];
+  if (!bestRelease) {
+    return null;
+  }
+
+  const sourceGroups = new Map<string, DiscoveryResult[]>();
+  for (const result of bestRelease) {
+    const key = `${result.username ?? "unknown"}\u0000${result.folder ?? result.path}`;
+    sourceGroups.set(key, [...(sourceGroups.get(key) ?? []), result]);
+  }
+  const selectedSource = [...sourceGroups.values()].sort((left, right) => releaseResultScore(right) - releaseResultScore(left))[0] ?? bestRelease;
+  const selected = sortDiscoveryTracks(selectedSource).slice(0, 40);
+  const release = inferDiscoveryRelease(selected[0] ?? bestRelease[0]!);
+  return {
+    name: [release.artist, release.title].filter(Boolean).join(" - ") || release.title,
+    results: selected
+  };
+}
+
+function releaseResultScore(results: DiscoveryResult[]): number {
+  return (
+    results.length * 1000 +
+    results.filter((result) => losslessFormats.has((result.extension ?? "").toLowerCase())).length * 100 +
+    results.filter((result) => result.hasFreeUploadSlot === true).length * 10 -
+    Math.min(...results.map((result) => result.queueLength ?? 0))
+  );
+}
+
+function sortDiscoveryTracks(results: DiscoveryResult[]): DiscoveryResult[] {
+  return [...results].sort((left, right) => discoveryTrackNumber(left) - discoveryTrackNumber(right) || left.filename.localeCompare(right.filename));
+}
+
+function discoveryTrackNumber(result: DiscoveryResult): number {
+  const value = [result.filename, result.path].join(" ");
+  const match = value.match(/(?:^|[\\/ ])(?:disc\s*)?\d{0,2}\s*[-_. ]\s*(\d{1,3})(?=\s*[-_. ])/i) ?? value.match(/(?:^|[\\/ ])(\d{1,3})\s*[-_. ]/);
+  const parsed = Number(match?.[1]);
+  return Number.isFinite(parsed) ? parsed : 9999;
+}
+
+function isAudioDiscoveryResult(result: DiscoveryResult): boolean {
+  const extension = (result.extension ?? result.filename.split(".").pop() ?? "").toLowerCase();
+  return audioDiscoveryExtensions.has(extension);
+}
+
+const audioDiscoveryExtensions = new Set(["aac", "aiff", "aif", "alac", "ape", "dsf", "flac", "m4a", "mp3", "ogg", "opus", "wav", "wma"]);
 
 function inferDiscoveryRelease(result: DiscoveryResult): { artist: string | null; title: string } {
   const folderParts = result.folder?.split(/[\\/]+/).filter(Boolean) ?? [];

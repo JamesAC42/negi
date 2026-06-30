@@ -1003,16 +1003,34 @@ try {
       return query === "green day dookie" || query === "dookie"
         ? {
             query,
-            total: 1,
+            total: 2,
             results: [
               {
-                id: "green-day-dookie-result",
+                id: "green-day-dookie-burnout",
+                source: "slskd",
+                username: "remote-user",
+                filename: "01 - Burnout.flac",
+                path: "Green Day/Dookie/01 - Burnout.flac",
+                folder: "Green Day/Dookie",
+                sizeBytes: 32_000_000,
+                extension: "flac",
+                bitrate: 900_000,
+                sampleRate: 44_100,
+                lengthSeconds: 128,
+                isLocked: false,
+                hasFreeUploadSlot: true,
+                uploadSpeedBytesPerSecond: 2_000_000,
+                queueLength: 0,
+                raw: {}
+              },
+              {
+                id: "green-day-dookie-when-i-come-around",
                 source: "slskd",
                 username: "remote-user",
                 filename: "06 - When I Come Around.flac",
                 path: "Green Day/Dookie/06 - When I Come Around.flac",
                 folder: "Green Day/Dookie",
-                sizeBytes: 32_000_000,
+                sizeBytes: 34_000_000,
                 extension: "flac",
                 bitrate: 900_000,
                 sampleRate: 44_100,
@@ -1028,15 +1046,21 @@ try {
         : { query, total: 0, results: [] };
     }
   });
-  const releaseContextRuns = new AgentRunService(app.db, releaseContextAgent, undefined, {
-    name: "fixture_metadata",
-    async lookup() {
-      return {
-        summary: "Fixture metadata resolved the containing album",
-        queryHints: ["Green Day Dookie", "Dookie", "Green Day When I Come Around", "When I Come Around"]
-      };
-    }
-  });
+  const releaseContextRuns = new AgentRunService(
+    app.db,
+    releaseContextAgent,
+    undefined,
+    {
+      name: "fixture_metadata",
+      async lookup() {
+        return {
+          summary: "Fixture metadata resolved the containing album",
+          queryHints: ["Green Day Dookie", "Dookie", "Green Day When I Come Around", "When I Come Around"]
+        };
+      }
+    },
+    app.agentPlaylistWorkflows
+  );
   const releaseContextRun = await releaseContextRuns.run("find the green day album with when i come around on it");
   assert(
     releaseContextSearchCalls[0] === "green day dookie",
@@ -1046,7 +1070,18 @@ try {
     releaseContextRun.response?.intent === "search_discovery",
     `expected release-context prompt to use Discovery, got ${releaseContextRun.response?.intent}`
   );
-  assert(releaseContextRun.response?.discoveryResults.length === 1, "expected release-context search to find a Discovery result");
+  assert(releaseContextRun.response?.discoveryResults.length === 2, "expected release-context search to find Discovery results");
+  const releaseQueueOperation = releaseContextRun.response.operationBatch?.operations.find((operation) => operation.type === "queue_download");
+  assert(releaseQueueOperation != null, "expected release-context search to create a queue_download operation");
+  const releaseQueuePayload = releaseQueueOperation.payload as { researchPlaylist?: { name?: string; playlistItemRefs?: unknown[] }; results?: DiscoveryResult[] };
+  assert(releaseQueuePayload.researchPlaylist?.name === "Green Day - Dookie", `expected release playlist name, got ${releaseQueuePayload.researchPlaylist?.name}`);
+  assert(releaseQueuePayload.researchPlaylist.playlistItemRefs?.length === 2, "expected release playlist item refs for selected tracks");
+  assert(
+    releaseQueuePayload.results?.map((result) => result.id).join(",") === "green-day-dookie-burnout,green-day-dookie-when-i-come-around",
+    `expected release tracks sorted by track number, got ${releaseQueuePayload.results?.map((result) => result.id).join(",")}`
+  );
+  const releaseWorkflow = app.agentPlaylistWorkflows.listWorkflows().find((workflow) => workflow.runId === releaseContextRun.id);
+  assert(releaseWorkflow?.playlistName === "Green Day - Dookie", `expected registered release workflow, got ${releaseWorkflow?.playlistName}`);
 
   console.log(
     JSON.stringify(

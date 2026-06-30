@@ -178,7 +178,7 @@ export class AgentRunService {
       };
       this.attachOperationBatch(response, thread.id);
       this.playlistWorkflows?.registerAgentResponse(runId, thread.id, response);
-      if (this.autoStartResearchPlaylists && response.intent === "research_playlist" && response.operationBatch) {
+      if (this.autoStartResearchPlaylists && response.operationBatch && (response.intent === "research_playlist" || hasResearchPlaylistQueue(response))) {
         try {
           const appliedBatch = await this.agent.startOperationBatch(response.operationBatch.id);
           response.operationBatch = {
@@ -369,6 +369,15 @@ function inferIntentFromModelPlan(modelPlan: AgentModelPlan): AgentMessageRespon
     return "search_discovery";
   }
   return undefined;
+}
+
+function hasResearchPlaylistQueue(response: AgentMessageResponse): response is AgentMessageResponse & { operationBatch: NonNullable<AgentMessageResponse["operationBatch"]> } {
+  return (
+    response.operationBatch?.operations.some((operation) => {
+      const payload = operation.payload;
+      return operation.type === "queue_download" && typeof payload === "object" && payload != null && "researchPlaylist" in payload;
+    }) === true
+  );
 }
 
 function startedResearchPlaylistReply(response: AgentMessageResponse): string {

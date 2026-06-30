@@ -68,7 +68,7 @@ export class AgentPlaylistWorkflowService {
   }
 
   registerAgentResponse(runId: string, threadId: string | null, response: AgentMessageResponse): void {
-    if (response.intent !== "research_playlist" || !response.operationBatch) {
+    if (!response.operationBatch) {
       return;
     }
     const existing = this.db
