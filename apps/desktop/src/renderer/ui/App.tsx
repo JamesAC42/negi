@@ -2803,6 +2803,7 @@ export function App(): ReactElement {
             onGroupSelect={toggleDiscoveryGroupSelection}
             onDownloadSelection={handleProposeDiscoveryDownload}
             onInspectGroup={setInspectedDiscoveryGroupId}
+            onOpenAgentThread={handleOpenAgentThread}
             onOpenJobs={() => setActiveView("Jobs")}
             onRefreshHealth={refreshDiscoveryHealth}
             onProposeSavedCandidateDownload={handleProposeSavedDiscoveryCandidateDownload}
@@ -6780,6 +6781,7 @@ function DiscoveryView({
   onGroupSelect,
   onDownloadSelection,
   onInspectGroup,
+  onOpenAgentThread,
   onOpenJobs,
   onRefreshHealth,
   onProposeSavedCandidateDownload,
@@ -6826,6 +6828,7 @@ function DiscoveryView({
   onGroupSelect(group: DiscoveryGroup): void;
   onDownloadSelection(): Promise<void>;
   onInspectGroup(groupId: string): void;
+  onOpenAgentThread(threadId: string): Promise<void>;
   onOpenJobs(): void;
   onRefreshHealth(): Promise<void>;
   onProposeSavedCandidateDownload(candidate: SavedDiscoveryCandidate): Promise<void>;
@@ -7310,11 +7313,19 @@ function DiscoveryView({
                   <div className="savedDiscoveryItem" key={workflow.id}>
                     <div>
                       <strong>{workflow.playlistName}</strong>
+                      <span>{formatAgentPlaylistWorkflowDetail(workflow)}</span>
                       <span>
-                        {formatAgentPlaylistWorkflowStatus(workflow)}
+                        {formatAgentPlaylistWorkflowCompactStatus(workflow)}
                         {workflow.error ? ` · ${workflow.error}` : ""}
                       </span>
                     </div>
+                    {workflow.threadId ? (
+                      <div className="savedDiscoveryActions">
+                        <button className="secondary compactButton" type="button" onClick={() => void onOpenAgentThread(workflow.threadId!)}>
+                          Agent Thread
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -11472,6 +11483,30 @@ function cleanQuotedMessage(value: string): string {
 
 function titleCase(value: string): string {
   return value.replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function formatAgentPlaylistWorkflowCompactStatus(workflow: AgentPlaylistWorkflow): string {
+  if (workflow.status === "completed" && workflow.playlistId) {
+    return "Completed - playlist ready";
+  }
+  return formatAgentPlaylistWorkflowStatus(workflow);
+}
+
+function formatAgentPlaylistWorkflowDetail(workflow: AgentPlaylistWorkflow): string {
+  const parts: string[] = [];
+  if (workflow.ownedFileIds.length > 0) {
+    parts.push(`${workflow.ownedFileIds.length.toLocaleString()} owned`);
+  }
+  if (workflow.downloadJobId) {
+    parts.push("Soulseek download");
+  }
+  if (workflow.importId) {
+    parts.push("import staged");
+  }
+  if (workflow.playlistId) {
+    parts.push("playlist created");
+  }
+  return parts.length > 0 ? parts.join(" - ") : "Preparing researched playlist";
 }
 
 function formatAgentPlaylistWorkflowStatus(workflow: AgentPlaylistWorkflow): string {
