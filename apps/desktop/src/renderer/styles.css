@@ -7323,11 +7323,11 @@ img.playerArt {
   isolation: isolate;
   display: grid;
   grid-template-columns: minmax(0, 1fr) clamp(19rem, 23vw, 26rem);
-  grid-template-rows: auto;
+  grid-template-rows: minmax(0, auto);
   align-items: stretch;
   gap: 0;
   width: min(100%, 104rem);
-  height: auto;
+  height: fit-content;
   max-height: calc(100vh - clamp(6rem, 12vw, 10rem));
   overflow: hidden;
   border: 0;
@@ -7401,6 +7401,7 @@ img.playerArt {
   gap: clamp(0.75rem, 1.2vw, 1rem);
   min-width: 0;
   min-height: 0;
+  align-self: start;
   overflow: hidden;
   padding: clamp(1rem, 2vw, 1.625rem) var(--visualizer-side-gutter) var(--spectrogram-clearance);
 }
@@ -7863,13 +7864,16 @@ img.playerArt {
 .nowPlayingQueue {
   position: relative;
   z-index: 4;
+  align-self: stretch;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 0.75rem;
   min-width: 0;
   min-height: 0;
+  height: 100%;
   max-height: 100%;
   overflow: hidden;
+  contain: size layout paint;
   border: 0.0625rem solid var(--np-line);
   border-radius: var(--r-m);
   background:

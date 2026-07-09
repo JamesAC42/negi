@@ -1083,6 +1083,53 @@ try {
   const releaseWorkflow = app.agentPlaylistWorkflows.listWorkflows().find((workflow) => workflow.runId === releaseContextRun.id);
   assert(releaseWorkflow?.playlistName === "Green Day - Dookie", `expected registered release workflow, got ${releaseWorkflow?.playlistName}`);
 
+  const singleTrackAlbumAgent = new AgentService(app.library, app.operations, app.playback, {
+    async search(query: string): Promise<DiscoverySearchResponse> {
+      return {
+        query,
+        total: 8,
+        results: Array.from({ length: 8 }, (_, index) => ({
+          id: `single-when-i-come-around-${index}`,
+          source: "slskd",
+          username: `single-user-${index}`,
+          filename: `${index + 1} - Green Day - When I Come Around.flac`,
+          path: `Singles/Green Day - When I Come Around/${index + 1} - Green Day - When I Come Around.flac`,
+          folder: "Singles/Green Day - When I Come Around",
+          sizeBytes: 34_000_000,
+          extension: "flac",
+          bitrate: 900_000,
+          sampleRate: 44_100,
+          lengthSeconds: 178,
+          isLocked: false,
+          hasFreeUploadSlot: true,
+          uploadSpeedBytesPerSecond: 2_000_000,
+          queueLength: 0,
+          raw: {}
+        }))
+      };
+    }
+  });
+  const singleTrackAlbumRuns = new AgentRunService(
+    app.db,
+    singleTrackAlbumAgent,
+    undefined,
+    {
+      name: "fixture_metadata",
+      async lookup() {
+        return {
+          summary: "Fixture metadata resolved the containing album",
+          queryHints: ["Green Day Dookie", "When I Come Around"]
+        };
+      }
+    },
+    app.agentPlaylistWorkflows
+  );
+  const singleTrackAlbumRun = await singleTrackAlbumRuns.run("download green day dookie, the full album. ensure it includes when i come around on it");
+  assert(
+    singleTrackAlbumRun.response?.operationBatch == null,
+    "full-album release requests should not create a download batch from single-track-only results"
+  );
+
   console.log(
     JSON.stringify(
       {

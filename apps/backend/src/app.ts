@@ -88,6 +88,7 @@ export function createBackendApp(config: BackendConfig): BackendApp {
   const liveAnalyzer = new LiveAnalyzerService(config);
   const visualizer = new VisualizerService(playback, waveforms, liveAnalyzer);
   const workflowAdvanceTimer = startAgentPlaylistWorkflowAdvancer(agentPlaylistWorkflows);
+  let closed = false;
 
   return {
     db,
@@ -126,6 +127,10 @@ export function createBackendApp(config: BackendConfig): BackendApp {
       });
     },
     close() {
+      if (closed) {
+        return;
+      }
+      closed = true;
       clearInterval(workflowAdvanceTimer);
       visualizer.close();
       waveforms.close();

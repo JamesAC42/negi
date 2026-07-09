@@ -871,11 +871,18 @@ server.listen(config.port, config.host, () => {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
+let shuttingDown = false;
+
 function shutdown(): void {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  app.close();
   server.close(() => {
-    app.close();
     process.exit(0);
   });
+  setTimeout(() => process.exit(0), 3_000).unref();
 }
 
 function getAllowedDevOrigin(origin: string | undefined): string | null {

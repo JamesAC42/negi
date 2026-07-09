@@ -2,13 +2,15 @@ import { Fragment, memo, useEffect, useId, useMemo, useRef, useState } from "rea
 import { createPortal } from "react-dom";
 import type {
   CSSProperties,
+  Dispatch,
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent,
   MutableRefObject,
   PointerEvent as ReactPointerEvent,
   ReactElement,
-  ReactNode
+  ReactNode,
+  SetStateAction
 } from "react";
 import {
   clusterDiscoveryGroups,
@@ -362,6 +364,7 @@ export function App(): ReactElement {
   const pageTargetRequestId = useRef(0);
   const selectedJobIdRef = useRef<string | null>(null);
   const playbackRef = useRef<PlaybackStateResponse | null>(null);
+  const playbackActionIdRef = useRef(0);
   const [activeView, setActiveView] = useState("Home");
   const [health, setHealth] = useState<HealthState>({ status: "loading" });
   const [library, setLibrary] = useState<LibraryState>({
@@ -430,6 +433,21 @@ export function App(): ReactElement {
   const [agentBusy, setAgentBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [loadedLibraryQuery, setLoadedLibraryQuery] = useState("");
+  const [libraryFormatFilter, setLibraryFormatFilter] = useState<LibraryFormatFilter>("all");
+  const [libraryMissingFilter, setLibraryMissingFilter] = useState<LibraryMissingFilter>("present");
+  const [libraryFavoriteFilter, setLibraryFavoriteFilter] = useState<LibraryFavoriteFilter>("all");
+  const [librarySortMode, setLibrarySortMode] = useState<LibrarySortMode>("artistAlbum");
+  const [libraryMinimumRating, setLibraryMinimumRating] = useState("");
+  const [libraryMinimumPlays, setLibraryMinimumPlays] = useState("");
+  const [libraryTagFilter, setLibraryTagFilter] = useState("");
+  const [libraryFiltersOpen, setLibraryFiltersOpen] = useState(false);
+  const [artistGroupMode, setArtistGroupMode] = useState<AlbumGroupMode>("all");
+  const [artistSortMode, setArtistSortMode] = useState<ArtistSortMode>("artist");
+  const [artistFacetFilter, setArtistFacetFilter] = useState<AlbumFacetFilter>({ genre: "all", decade: "all" });
+  const [albumViewMode, setAlbumViewMode] = useState<AlbumGroupMode>("all");
+  const [albumLayout, setAlbumLayout] = useState<"grid" | "flow">("grid");
+  const [albumSortMode, setAlbumSortMode] = useState<AlbumSortMode>("artistAlbum");
+  const [albumFacetFilter, setAlbumFacetFilter] = useState<AlbumFacetFilter>({ genre: "all", decade: "all" });
   const [bulkRenamePattern, setBulkRenamePattern] = useState("{artist} - {title}.{ext}");
   const [bulkTagInput, setBulkTagInput] = useState("");
   const [playlistNameInput, setPlaylistNameInput] = useState("");
@@ -1813,24 +1831,51 @@ export function App(): ReactElement {
       return;
     }
 
+    const actionId = ++playbackActionIdRef.current;
     setPlaybackBusy(true);
     try {
       if (playback.currentFileId === fileId) {
-        setPlayback(playback.status === "playing" ? await pausePlayback() : await resumePlayback());
+        const next = playback.status === "playing" ? await pausePlayback() : await resumePlayback();
+        if (actionId === playbackActionIdRef.current) {
+          setPlayback(next);
+        }
         return;
       }
 
       const fileIds = queueFileIds && queueFileIds.length > 0 ? queueFileIds : files.map((file) => file.id);
       const startIndex = Math.max(0, fileIds.indexOf(fileId));
+      const file = files.find((item) => item.id === fileId);
+      if (file) {
+        setPlayback((current) => ({
+          ...current,
+          status: "playing",
+          currentFileId: file.id,
+          currentPath: file.path,
+          currentDisplayName: getPlaybackDisplayName(file),
+          positionMs: 0,
+          durationMs: file.durationMs,
+          queue: fileIds,
+          queueIndex: startIndex,
+          error: null
+        }));
+      }
       const next = await playQueue(fileIds, startIndex);
+      if (actionId !== playbackActionIdRef.current) {
+        return;
+      }
       setPlayback(next);
       if (playback.currentFileId && playback.currentFileId !== next.currentFileId) {
         void refreshLibrary();
       }
     } catch (error) {
+      if (actionId !== playbackActionIdRef.current) {
+        return;
+      }
       setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
     } finally {
-      setPlaybackBusy(false);
+      if (actionId === playbackActionIdRef.current) {
+        setPlaybackBusy(false);
+      }
     }
   }
 
@@ -1855,13 +1900,21 @@ export function App(): ReactElement {
       return;
     }
 
+    const actionId = ++playbackActionIdRef.current;
     setPlaybackBusy(true);
     try {
-      setPlayback(await playQueue(shuffleFileIds(fileIds), 0));
+      const next = await playQueue(shuffleFileIds(fileIds), 0);
+      if (actionId === playbackActionIdRef.current) {
+        setPlayback(next);
+      }
     } catch (error) {
-      setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
+      if (actionId === playbackActionIdRef.current) {
+        setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
+      }
     } finally {
-      setPlaybackBusy(false);
+      if (actionId === playbackActionIdRef.current) {
+        setPlaybackBusy(false);
+      }
     }
   }
 
@@ -1881,30 +1934,42 @@ export function App(): ReactElement {
   }
 
   async function handlePauseResume(): Promise<void> {
-    if (playbackBusy) {
+    if (playbackBusy && playback.status !== "playing") {
       return;
     }
 
+    const actionId = ++playbackActionIdRef.current;
     setPlaybackBusy(true);
     try {
       if (playback.status === "playing") {
-        setPlayback(await pausePlayback());
+        const next = await pausePlayback();
+        if (actionId === playbackActionIdRef.current) {
+          setPlayback(next);
+        }
         return;
       }
 
-      setPlayback(await resumePlayback());
+      const next = await resumePlayback();
+      if (actionId === playbackActionIdRef.current) {
+        setPlayback(next);
+      }
     } catch (error) {
-      setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
+      if (actionId === playbackActionIdRef.current) {
+        setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
+      }
     } finally {
-      setPlaybackBusy(false);
+      if (actionId === playbackActionIdRef.current) {
+        setPlaybackBusy(false);
+      }
     }
   }
 
   async function handleStop(): Promise<void> {
-    if (playbackBusy) {
+    if (playback.status === "stopped" && !playback.currentFileId) {
       return;
     }
 
+    playbackActionIdRef.current += 1;
     setPlaybackBusy(true);
     try {
       setPlayback(await stopPlayback());
@@ -1990,20 +2055,28 @@ export function App(): ReactElement {
       return;
     }
 
+    const actionId = ++playbackActionIdRef.current;
     setPlaybackBusy(true);
     try {
-      setPlayback(await playPlaylist(playlistId));
+      const next = await playPlaylist(playlistId);
+      if (actionId === playbackActionIdRef.current) {
+        setPlayback(next);
+      }
     } catch (error) {
-      setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
+      if (actionId === playbackActionIdRef.current) {
+        setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
+      }
     } finally {
-      setPlaybackBusy(false);
+      if (actionId === playbackActionIdRef.current) {
+        setPlaybackBusy(false);
+      }
     }
   }
 
-  function openPlaylist(playlistId: string): void {
+  async function openPlaylist(playlistId: string): Promise<void> {
     setSelectedPlaylistId(playlistId);
+    await refreshPlaylists();
     setActiveView("Playlists");
-    void refreshPlaylists();
   }
 
   async function handlePlayAlbum(albumId: string): Promise<void> {
@@ -2011,13 +2084,21 @@ export function App(): ReactElement {
       return;
     }
 
+    const actionId = ++playbackActionIdRef.current;
     setPlaybackBusy(true);
     try {
-      setPlayback(await playAlbum(albumId));
+      const next = await playAlbum(albumId);
+      if (actionId === playbackActionIdRef.current) {
+        setPlayback(next);
+      }
     } catch (error) {
-      setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
+      if (actionId === playbackActionIdRef.current) {
+        setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
+      }
     } finally {
-      setPlaybackBusy(false);
+      if (actionId === playbackActionIdRef.current) {
+        setPlaybackBusy(false);
+      }
     }
   }
 
@@ -2606,15 +2687,16 @@ export function App(): ReactElement {
                   type="button"
                   onClick={() => {
                     if (item === "Artists" && activeView === "Artists") {
-                      setArtistViewTarget(null);
                       setArtistsViewResetKey((current) => current + 1);
                     }
                     if (item === "Artists") {
                       setArtistViewTarget(null);
                     }
                     if (item === "Albums") {
+                      if (activeView === "Albums") {
+                        setAlbumsViewResetKey((current) => current + 1);
+                      }
                       setAlbumViewTarget(null);
-                      setAlbumsViewResetKey((current) => current + 1);
                     }
                     if (item === "Playlists") {
                       setSelectedPlaylistId(null);
@@ -2666,6 +2748,11 @@ export function App(): ReactElement {
             files={files}
             libraryLoadingMore={libraryLoadingMore}
             libraryTotal={library.status === "ready" ? library.total : files.length}
+            favoriteFilter={libraryFavoriteFilter}
+            formatFilter={libraryFormatFilter}
+            minimumPlays={libraryMinimumPlays}
+            minimumRating={libraryMinimumRating}
+            missingFilter={libraryMissingFilter}
             playback={playback}
             playbackBusy={playbackBusy}
             playlistAddTargetId={playlistAddTargetId}
@@ -2679,15 +2766,26 @@ export function App(): ReactElement {
             search={search}
             selectedFileIds={selectedLibraryFileIds}
             selectedRoot={selectedRoot}
+            showFilters={libraryFiltersOpen}
+            sortMode={librarySortMode}
+            tagFilter={libraryTagFilter}
             watchedScanResult={watchedScanResult}
             setBulkRenamePattern={setBulkRenamePattern}
             setBulkTagInput={setBulkTagInput}
+            setFavoriteFilter={setLibraryFavoriteFilter}
+            setFormatFilter={setLibraryFormatFilter}
+            setMinimumPlays={setLibraryMinimumPlays}
+            setMinimumRating={setLibraryMinimumRating}
+            setMissingFilter={setLibraryMissingFilter}
             setPlaylistAddTargetId={setPlaylistAddTargetId}
             setPlaylistDescriptionInput={setPlaylistDescriptionInput}
             setPlaylistNameInput={setPlaylistNameInput}
             setRootPath={setRootPath}
             setRootWatchEnabled={setRootWatchEnabled}
             setSearch={setSearch}
+            setShowFilters={setLibraryFiltersOpen}
+            setSortMode={setLibrarySortMode}
+            setTagFilter={setLibraryTagFilter}
             onAddRoot={handleAddRoot}
             onClearSelection={clearLibrarySelection}
             onSelectRootFolder={handleSelectRootFolder}
@@ -2720,12 +2818,18 @@ export function App(): ReactElement {
         ) : activeView === "Artists" ? (
         <ArtistsView
           albumsState={albumsState}
+          artistGroupMode={artistGroupMode}
+          artistSortMode={artistSortMode}
+          facetFilter={artistFacetFilter}
           currentWaveform={currentWaveform.waveform}
           initialTarget={artistViewTarget}
           playback={playback}
           playbackBusy={playbackBusy}
           loadingMore={albumsLoadingMore}
             resetKey={artistsViewResetKey}
+            setArtistGroupMode={setArtistGroupMode}
+            setArtistSortMode={setArtistSortMode}
+            setFacetFilter={setArtistFacetFilter}
             onEnqueuePlayback={handleEnqueuePlayback}
             onLoadMore={loadMoreAlbums}
             onPlayAlbum={handlePlayAlbum}
@@ -2734,12 +2838,20 @@ export function App(): ReactElement {
         ) : activeView === "Albums" ? (
         <AlbumsView
           albumsState={albumsState}
+          albumLayout={albumLayout}
+          albumSortMode={albumSortMode}
+          albumViewMode={albumViewMode}
+          facetFilter={albumFacetFilter}
           currentWaveform={currentWaveform.waveform}
           initialTarget={albumViewTarget}
           playback={playback}
           playbackBusy={playbackBusy}
           loadingMore={albumsLoadingMore}
             resetKey={albumsViewResetKey}
+            setAlbumLayout={setAlbumLayout}
+            setAlbumSortMode={setAlbumSortMode}
+            setAlbumViewMode={setAlbumViewMode}
+            setFacetFilter={setAlbumFacetFilter}
             onEnqueuePlayback={handleEnqueuePlayback}
             onLoadMore={loadMoreAlbums}
             onPlayAlbum={handlePlayAlbum}
@@ -2865,6 +2977,12 @@ export function App(): ReactElement {
             activeThreadId={agentThreadId}
             messages={agentMessages}
             threads={agentThreads}
+            onApplyOperationBatch={handleApplyBatch}
+            onApproveOperationBatch={handleApproveBatch}
+            onOpenOperations={() => {
+              void refreshOperations();
+              setActiveView("Operations");
+            }}
             onOpenPlaylist={openPlaylist}
             setAgentInput={setAgentInput}
             onNewThread={handleNewAgentThread}
@@ -3043,7 +3161,7 @@ export function App(): ReactElement {
             <button
               aria-label={playback.status === "playing" ? "Pause" : "Resume"}
               className="tPlay"
-              disabled={playbackBusy || playback.status === "stopped"}
+              disabled={(playback.status === "stopped" && !playback.currentFileId) || (playbackBusy && playback.status !== "playing")}
               title={playback.status === "playing" ? "Pause (Space)" : "Resume (Space)"}
               type="button"
               onClick={() => void handlePauseResume()}
@@ -3067,7 +3185,7 @@ export function App(): ReactElement {
             />
             <button
               aria-label="Stop playback"
-              disabled={playbackBusy || playback.status === "stopped"}
+              disabled={playback.status === "stopped" && !playback.currentFileId}
               title="Stop"
               type="button"
               onClick={() => void handleStop()}
@@ -4153,8 +4271,13 @@ function LibraryView({
   busyRootId,
   currentWaveform,
   files,
+  favoriteFilter,
+  formatFilter,
   libraryLoadingMore,
   libraryTotal,
+  minimumPlays,
+  minimumRating,
+  missingFilter,
   playback,
   playbackBusy,
   playlistAddTargetId,
@@ -4168,15 +4291,26 @@ function LibraryView({
   search,
   selectedFileIds,
   selectedRoot,
+  showFilters,
+  sortMode,
+  tagFilter,
   watchedScanResult,
   setBulkRenamePattern,
   setBulkTagInput,
+  setFavoriteFilter,
+  setFormatFilter,
+  setMinimumPlays,
+  setMinimumRating,
+  setMissingFilter,
   setPlaylistAddTargetId,
   setPlaylistDescriptionInput,
   setPlaylistNameInput,
   setRootPath,
   setRootWatchEnabled,
   setSearch,
+  setShowFilters,
+  setSortMode,
+  setTagFilter,
   onAddRoot,
   onClearSelection,
   onSelectRootFolder,
@@ -4211,8 +4345,13 @@ function LibraryView({
   busyRootId: string | null;
   currentWaveform: WaveformSummaryResponse | null;
   files: LibraryFile[];
+  favoriteFilter: LibraryFavoriteFilter;
+  formatFilter: LibraryFormatFilter;
   libraryLoadingMore: boolean;
   libraryTotal: number;
+  minimumPlays: string;
+  minimumRating: string;
+  missingFilter: LibraryMissingFilter;
   playback: PlaybackStateResponse;
   playbackBusy: boolean;
   playlistAddTargetId: string;
@@ -4226,15 +4365,26 @@ function LibraryView({
   search: string;
   selectedFileIds: Set<string>;
   selectedRoot: LibraryRoot | null;
+  showFilters: boolean;
+  sortMode: LibrarySortMode;
+  tagFilter: string;
   watchedScanResult: WatchedLibraryScanResult | null;
   setBulkRenamePattern(value: string): void;
   setBulkTagInput(value: string): void;
+  setFavoriteFilter(value: LibraryFavoriteFilter): void;
+  setFormatFilter(value: LibraryFormatFilter): void;
+  setMinimumPlays(value: string): void;
+  setMinimumRating(value: string): void;
+  setMissingFilter(value: LibraryMissingFilter): void;
   setPlaylistAddTargetId(value: string): void;
   setPlaylistDescriptionInput(value: string): void;
   setPlaylistNameInput(value: string): void;
   setRootPath(value: string): void;
   setRootWatchEnabled(value: boolean): void;
   setSearch(value: string): void;
+  setShowFilters: Dispatch<SetStateAction<boolean>>;
+  setSortMode(value: LibrarySortMode): void;
+  setTagFilter(value: string): void;
   onAddRoot(event: FormEvent<HTMLFormElement>): Promise<void>;
   onClearSelection(): void;
   onSelectRootFolder(): Promise<void>;
@@ -4266,14 +4416,6 @@ function LibraryView({
 }): ReactElement {
   const selectedCount = selectedFileIds.size;
   const watchedRootCount = roots.filter((root) => root.watchEnabled).length;
-  const [formatFilter, setFormatFilter] = useState<LibraryFormatFilter>("all");
-  const [missingFilter, setMissingFilter] = useState<LibraryMissingFilter>("present");
-  const [favoriteFilter, setFavoriteFilter] = useState<LibraryFavoriteFilter>("all");
-  const [sortMode, setSortMode] = useState<LibrarySortMode>("artistAlbum");
-  const [minimumRating, setMinimumRating] = useState("");
-  const [minimumPlays, setMinimumPlays] = useState("");
-  const [tagFilter, setTagFilter] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
   const [showRoots, setShowRoots] = useState(false);
   const [selectionActionsOpen, setSelectionActionsOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
@@ -8115,25 +8257,41 @@ function HomeView({
 }
 
 function AlbumsView({
+  albumLayout,
   albumsState,
+  albumSortMode,
+  albumViewMode,
   currentWaveform,
+  facetFilter,
   initialTarget,
   loadingMore,
   playback,
   playbackBusy,
   resetKey,
+  setAlbumLayout,
+  setAlbumSortMode,
+  setAlbumViewMode,
+  setFacetFilter,
   onEnqueuePlayback,
   onLoadMore,
   onPlayAlbum,
   onPlayFile
 }: {
+  albumLayout: "grid" | "flow";
   albumsState: AlbumsState;
+  albumSortMode: AlbumSortMode;
+  albumViewMode: AlbumGroupMode;
   currentWaveform: WaveformSummaryResponse | null;
+  facetFilter: AlbumFacetFilter;
   initialTarget: AlbumViewTarget | null;
   loadingMore: boolean;
   playback: PlaybackStateResponse;
   playbackBusy: boolean;
   resetKey: number;
+  setAlbumLayout(value: "grid" | "flow"): void;
+  setAlbumSortMode(value: AlbumSortMode): void;
+  setAlbumViewMode(value: AlbumGroupMode): void;
+  setFacetFilter(value: AlbumFacetFilter): void;
   onEnqueuePlayback(fileIds: string[], position: QueueInsertPosition): Promise<void>;
   onLoadMore(): Promise<void>;
   onPlayAlbum(albumId: string): Promise<void>;
@@ -8143,13 +8301,9 @@ function AlbumsView({
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
-  const [albumViewMode, setAlbumViewMode] = useState<AlbumGroupMode>("all");
-  const [albumLayout, setAlbumLayout] = useState<"grid" | "flow">("grid");
-  const [albumSortMode, setAlbumSortMode] = useState<AlbumSortMode>("artistAlbum");
   const consumedTargetKeyRef = useRef<number | null>(null);
   const resetKeyRef = useRef(resetKey);
   const sortedAlbums = useMemo(() => sortAlbumsByMode(albums, albumSortMode), [albumSortMode, albums]);
-  const [facetFilter, setFacetFilter] = useState<AlbumFacetFilter>({ genre: "all", decade: "all" });
   const albumFacets = useMemo(() => getAlbumFacets(sortedAlbums), [sortedAlbums]);
   const filteredAlbums = useMemo(() => filterAlbumsByFacet(sortedAlbums, facetFilter), [facetFilter, sortedAlbums]);
   const albumSections = useMemo(() => groupAlbumsByMode(filteredAlbums, albumViewMode), [albumViewMode, filteredAlbums]);
@@ -8617,34 +8771,43 @@ function AlbumFlowView({
 
 function ArtistsView({
   albumsState,
+  artistGroupMode,
+  artistSortMode,
   currentWaveform,
+  facetFilter,
   initialTarget,
   loadingMore,
   playback,
   playbackBusy,
   resetKey,
+  setArtistGroupMode,
+  setArtistSortMode,
+  setFacetFilter,
   onEnqueuePlayback,
   onLoadMore,
   onPlayAlbum,
   onPlayFile
 }: {
   albumsState: AlbumsState;
+  artistGroupMode: AlbumGroupMode;
+  artistSortMode: ArtistSortMode;
   currentWaveform: WaveformSummaryResponse | null;
+  facetFilter: AlbumFacetFilter;
   initialTarget: ArtistViewTarget | null;
   loadingMore: boolean;
   playback: PlaybackStateResponse;
   playbackBusy: boolean;
   resetKey: number;
+  setArtistGroupMode(value: AlbumGroupMode): void;
+  setArtistSortMode(value: ArtistSortMode): void;
+  setFacetFilter(value: AlbumFacetFilter): void;
   onEnqueuePlayback(fileIds: string[], position: QueueInsertPosition): Promise<void>;
   onLoadMore(): Promise<void>;
   onPlayAlbum(albumId: string): Promise<void>;
   onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
 }): ReactElement {
   const albums = "albums" in albumsState ? albumsState.albums.albums : [];
-  const [artistGroupMode, setArtistGroupMode] = useState<AlbumGroupMode>("all");
-  const [artistSortMode, setArtistSortMode] = useState<ArtistSortMode>("artist");
   const sortedAlbums = useMemo(() => sortAlbumsByArtistAlbum(albums), [albums]);
-  const [facetFilter, setFacetFilter] = useState<AlbumFacetFilter>({ genre: "all", decade: "all" });
   const albumFacets = useMemo(() => getAlbumFacets(sortedAlbums), [sortedAlbums]);
   const filteredAlbums = useMemo(() => filterAlbumsByFacet(sortedAlbums, facetFilter), [facetFilter, sortedAlbums]);
   const artistSections = useMemo(() => sortArtistSections(groupAlbumsByArtist(filteredAlbums), artistSortMode), [artistSortMode, filteredAlbums]);
@@ -9024,7 +9187,12 @@ function NowPlayingModal({
                   <button disabled={playbackBusy || playback.status === "stopped"} type="button" onClick={() => void onPrevious()}>
                     <TransportIcon shape="previous" />
                   </button>
-                  <button className="tPlay" disabled={playbackBusy || playback.status === "stopped"} type="button" onClick={() => void onPauseResume()}>
+                  <button
+                    className="tPlay"
+                    disabled={(playback.status === "stopped" && !playback.currentFileId) || (playbackBusy && playback.status !== "playing")}
+                    type="button"
+                    onClick={() => void onPauseResume()}
+                  >
                     <TransportIcon shape={playback.status === "playing" ? "pause" : "play"} />
                   </button>
                   <button disabled={playbackBusy || playback.status === "stopped"} type="button" onClick={() => void onNext()}>
@@ -9972,6 +10140,9 @@ function AgentView({
   activeThreadId,
   messages,
   threads,
+  onApplyOperationBatch,
+  onApproveOperationBatch,
+  onOpenOperations,
   onOpenPlaylist,
   setAgentInput,
   onNewThread,
@@ -9983,7 +10154,10 @@ function AgentView({
   activeThreadId: string | null;
   messages: AgentMessage[];
   threads: AgentThreadsResponse["threads"];
-  onOpenPlaylist(playlistId: string): void;
+  onApplyOperationBatch(batchId: string): Promise<void>;
+  onApproveOperationBatch(batchId: string): Promise<void>;
+  onOpenOperations(): void;
+  onOpenPlaylist(playlistId: string): void | Promise<void>;
   setAgentInput(value: string): void;
   onNewThread(): Promise<void>;
   onSelectThread(threadId: string): Promise<void>;
@@ -10038,7 +10212,7 @@ function AgentView({
             {message.role === "agent" && message.response?.playlistId ? (
               <strong>
                 {message.text}{" "}
-                <button className="inlineTextButton" type="button" onClick={() => onOpenPlaylist(message.response!.playlistId!)}>
+                <button className="inlineTextButton" type="button" onClick={() => void onOpenPlaylist(message.response!.playlistId!)}>
                   Open playlist
                 </button>
               </strong>
@@ -10046,7 +10220,14 @@ function AgentView({
               <strong>{message.text}</strong>
             )}
             {message.role === "agent" && message.response ? (
-              <AgentResultSummary response={message.response} run={message.run ?? null} onOpenPlaylist={onOpenPlaylist} />
+              <AgentResultSummary
+                response={message.response}
+                run={message.run ?? null}
+                onApplyOperationBatch={onApplyOperationBatch}
+                onApproveOperationBatch={onApproveOperationBatch}
+                onOpenOperations={onOpenOperations}
+                onOpenPlaylist={onOpenPlaylist}
+              />
             ) : null}
           </div>
         ))}
@@ -10064,11 +10245,17 @@ function AgentView({
 function AgentResultSummary({
   response,
   run,
+  onApplyOperationBatch,
+  onApproveOperationBatch,
+  onOpenOperations,
   onOpenPlaylist
 }: {
   response: AgentMessageResponse;
   run?: AgentRun | null;
-  onOpenPlaylist(playlistId: string): void;
+  onApplyOperationBatch(batchId: string): Promise<void>;
+  onApproveOperationBatch(batchId: string): Promise<void>;
+  onOpenOperations(): void;
+  onOpenPlaylist(playlistId: string): void | Promise<void>;
 }): ReactElement {
   const resultCount =
     response.intent === "search_discovery"
@@ -10088,9 +10275,32 @@ function AgentResultSummary({
           Proposed batch: {response.operationBatch.summary} · {response.operationBatch.status}
         </span>
       ) : null}
+      {response.operationBatch ? (
+        <div className="agentResultActions">
+          <button className="secondary compactButton" type="button" onClick={onOpenOperations}>
+            Review in Operations
+          </button>
+          <button
+            className="secondary compactButton"
+            disabled={response.operationBatch.status !== "proposed" && response.operationBatch.status !== "draft"}
+            type="button"
+            onClick={() => void onApproveOperationBatch(response.operationBatch!.id)}
+          >
+            Approve
+          </button>
+          <button
+            className="secondary compactButton"
+            disabled={response.operationBatch.status !== "approved" || !isOperationBatchExecutable(response.operationBatch)}
+            type="button"
+            onClick={() => void onApplyOperationBatch(response.operationBatch!.id)}
+          >
+            Apply
+          </button>
+        </div>
+      ) : null}
       {response.playlistId ? (
         <div className="agentResultActions">
-          <button className="secondary compactButton" type="button" onClick={() => onOpenPlaylist(response.playlistId!)}>
+          <button className="secondary compactButton" type="button" onClick={() => void onOpenPlaylist(response.playlistId!)}>
             Open Playlist
           </button>
         </div>
@@ -12783,6 +12993,15 @@ async function messagesFromAgentThread(thread: AgentThreadResponse): Promise<Age
 
 function basenameFromPath(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+}
+
+function getPlaybackDisplayName(file: LibraryFile): string {
+  const title = file.displayTags.title;
+  const artist = file.displayTags.artist ?? file.displayTags.albumartist;
+  if (title && artist) {
+    return `${artist} - ${title}`;
+  }
+  return title ?? file.filename;
 }
 
 export function BackendHealth({ state }: { state: HealthState }): ReactElement {

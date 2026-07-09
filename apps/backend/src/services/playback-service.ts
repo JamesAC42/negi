@@ -23,6 +23,7 @@ export class PlaybackService {
   private trackedFileId: string | null = null;
   private volumePercent = 100;
   private repeatMode: PlaybackRepeatMode = "none";
+  private interruptGeneration = 0;
 
   constructor(
     private readonly config: BackendConfig,
@@ -112,12 +113,8 @@ export class PlaybackService {
 
   private async playQueuedFile(file: LibraryFile): Promise<PlaybackState> {
     this.recordCurrentListen("replaced");
+    const loadToken = ++this.loadGeneration;
     const translatedPath = translatePathForPlayer(file.path, this.config.mpvPath);
-    await this.ensureProcess();
-    await this.sendMpvCommand(["set_property", "volume", this.volumePercent]).catch(() => undefined);
-    await this.sendMpvCommand(["loadfile", translatedPath, "replace"]);
-    await this.sendMpvCommand(["set_property", "pause", false]).catch(() => undefined);
-    this.loadGeneration += 1;
     this.state = {
       status: "playing",
       currentFileId: file.id,
@@ -131,19 +128,79 @@ export class PlaybackService {
       volumePercent: this.volumePercent,
       error: null
     };
-    this.recordListenStarted(file.id);
     this.positionUpdatedAt = Date.now();
-    return this.state;
+
+    try {
+      await this.ensureProcess();
+      if (!this.isActiveLoad(loadToken)) {
+        return this.state;
+      }
+      await this.sendMpvCommand(["set_property", "volume", this.volumePercent]).catch(() => undefined);
+      if (!this.isActiveLoad(loadToken)) {
+        return this.state;
+      }
+      await this.sendMpvCommand(["loadfile", translatedPath, "replace"]);
+      if (!this.isActiveLoad(loadToken)) {
+        return this.state;
+      }
+      await this.sendMpvCommand(["set_property", "pause", false]).catch(() => undefined);
+      if (!this.isActiveLoad(loadToken)) {
+        return this.state;
+      }
+      this.recordListenStarted(file.id);
+      this.positionUpdatedAt = Date.now();
+      return this.state;
+    } catch (error) {
+      if (this.isActiveLoad(loadToken)) {
+        this.positionUpdatedAt = null;
+        this.state = { ...this.state, status: "error", error: error instanceof Error ? error.message : String(error) };
+      }
+      throw error;
+    }
   }
 
   async pause(): Promise<PlaybackState> {
-    return this.runPlaybackOperation(async () => {
-      if (this.process && this.state.status === "playing") {
-        this.applyProgressFallback();
-        await this.sendMpvCommand(["set_property", "pause", true]);
-        this.state = { ...this.state, status: "paused" };
-        this.positionUpdatedAt = null;
+    return this.runInterruptOperation(async () => {
+      const currentFile = this.getCurrentFile();
+      const shouldPause = this.process != null || this.state.status === "playing";
+      if (!shouldPause) {
+        return this.state;
       }
+
+      this.applyProgressFallback();
+      try {
+        if (!this.ipc && this.ipcReady) {
+          this.ipc = await withTimeout(this.ipcReady, 750, "Timed out waiting for mpv IPC to pause playback");
+        }
+        await this.sendMpvCommand(["set_property", "pause", true]);
+      } catch (error) {
+        this.recordCurrentListen("stop");
+        this.killProcessFallback();
+        this.queue = [];
+        this.queueIndex = null;
+        this.positionUpdatedAt = null;
+        this.state = createStoppedState(this.volumePercent, this.repeatMode);
+        return { ...this.state, error: error instanceof Error ? error.message : String(error) };
+      }
+
+      if (currentFile && (this.state.status === "stopped" || this.state.currentFileId !== currentFile.id)) {
+        this.state = {
+          status: "paused",
+          currentFileId: currentFile.id,
+          currentPath: currentFile.path,
+          currentDisplayName: getDisplayName(currentFile),
+          positionMs: 0,
+          durationMs: currentFile.durationMs,
+          queue: this.queue.map((item) => item.id),
+          queueIndex: this.queueIndex,
+          repeatMode: this.repeatMode,
+          volumePercent: this.volumePercent,
+          error: null
+        };
+      } else if (this.state.status !== "stopped" && this.state.status !== "error") {
+        this.state = { ...this.state, status: "paused", error: null };
+      }
+      this.positionUpdatedAt = null;
       return this.state;
     });
   }
@@ -182,12 +239,13 @@ export class PlaybackService {
   }
 
   async stop(): Promise<PlaybackState> {
-    return this.runPlaybackOperation(() => this.stopUnlocked());
+    return this.runInterruptOperation(() => this.stopUnlocked());
   }
 
-  private async stopUnlocked(): Promise<PlaybackState> {
+  private stopUnlocked(): PlaybackState {
+    this.loadGeneration += 1;
     this.recordCurrentListen("stop");
-    await this.sendMpvCommand(["stop"]).catch(() => undefined);
+    this.killProcessFallback();
     this.queue = [];
     this.queueIndex = null;
     this.positionUpdatedAt = null;
@@ -244,13 +302,10 @@ export class PlaybackService {
   }
 
   close(): void {
-    if (!this.process) {
-      return;
-    }
-
-    this.killProcessFallback();
-    this.process = null;
+    this.interruptGeneration += 1;
+    this.loadGeneration += 1;
     this.recordCurrentListen("close");
+    this.killProcessFallback();
     this.queue = [];
     this.queueIndex = null;
     this.positionUpdatedAt = null;
@@ -264,7 +319,6 @@ export class PlaybackService {
     }
 
     this.killProcessFallback();
-    this.killWindowsMpv();
     this.process = null;
     const generation = ++this.processGeneration;
     const windowsMpv = isWindowsPlayer(this.config.mpvPath);
@@ -421,6 +475,7 @@ export class PlaybackService {
   }
 
   private killProcessFallback(): void {
+    this.processGeneration += 1;
     this.ipc?.close();
     this.ipc = null;
     this.ipcReady = null;
@@ -457,18 +512,56 @@ export class PlaybackService {
     }
   }
 
-  private runPlaybackOperation<T>(operation: () => Promise<T> | T): Promise<T> {
-    const next = this.operationChain.then(operation, operation);
+  private runPlaybackOperation(operation: () => Promise<PlaybackState> | PlaybackState): Promise<PlaybackState> {
+    const interruptToken = this.interruptGeneration;
+    const runIfCurrent = () => {
+      if (interruptToken !== this.interruptGeneration) {
+        return this.state;
+      }
+      return operation();
+    };
+    const next = this.operationChain.then(runIfCurrent, runIfCurrent);
     this.operationChain = next.then(
       () => undefined,
       () => undefined
     );
     return next;
   }
+
+  private runInterruptOperation(operation: () => Promise<PlaybackState> | PlaybackState): Promise<PlaybackState> {
+    this.interruptGeneration += 1;
+    this.loadGeneration += 1;
+    const next = Promise.resolve().then(operation);
+    this.operationChain = next.then(
+      () => undefined,
+      () => undefined
+    );
+    return next;
+  }
+
+  private isActiveLoad(loadToken: number): boolean {
+    return loadToken === this.loadGeneration;
+  }
 }
 
 function isWindowsPlayer(playerPath: string): boolean {
   return playerPath.toLowerCase().endsWith(".exe");
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 function isEofReason(reason: unknown): boolean {

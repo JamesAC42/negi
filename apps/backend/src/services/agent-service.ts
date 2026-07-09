@@ -36,6 +36,10 @@ type DiscoveryReleasePlaylistSelection = {
   name: string;
   results: DiscoveryResult[];
 };
+type ReleaseSelectionOptions = {
+  requireAlbumSource: boolean;
+  requiredTrackTitles: string[];
+};
 type ResearchPlaylistItemRef =
   | {
       type: "owned";
@@ -144,7 +148,7 @@ export class AgentService {
   private getDiscoveryQualityPreference(): DiscoveryQualityPreference {
     const profile = this.getCompactTasteProfile();
     return {
-      preferredFormats: profile?.preferredFormats?.map((format) => format.toLowerCase()).filter(Boolean) ?? [],
+      preferredFormats: profile?.preferredFormats?.map((format) => format.toLowerCase()).filter(Boolean) ?? defaultDiscoveryPreferredFormats,
       preferLossless: profile?.qualityPreferences?.preferLossless ?? true,
       allowMp3IfRare: profile?.qualityPreferences?.allowMp3IfRare ?? true,
       minimumBitrateKbps: profile?.qualityPreferences?.minimumBitrateKbps ?? null
@@ -534,10 +538,17 @@ export class AgentService {
         attemptedQueries
       }
     });
-    const releasePlaylistSelection = wantsReleaseContext(originalMessage) ? selectDiscoveryReleasePlaylistResults(resultsForRanking) : null;
+    const releaseContextRequested = wantsReleaseContext(originalMessage);
+    const multipleReleasesRequested = wantsMultipleReleases(originalMessage);
+    const releasePlaylistSelection = releaseContextRequested && !multipleReleasesRequested
+      ? selectDiscoveryReleasePlaylistResults(resultsForRanking, searchQuery, {
+          requireAlbumSource: wantsFullAlbumDownload(originalMessage),
+          requiredTrackTitles: requiredReleaseTrackTitles(originalMessage, searchQuery)
+        })
+      : null;
     const operationBatch = releasePlaylistSelection
       ? this.createDiscoveryReleasePlaylistBatch(releasePlaylistSelection, searchQuery, originalMessage)
-      : wantsDownloadProposal(originalMessage)
+      : !releaseContextRequested && wantsDownloadProposal(originalMessage)
         ? this.createDiscoveryDownloadProposal(resultsForRanking, searchQuery)
         : null;
     if (releasePlaylistSelection || wantsDownloadProposal(originalMessage)) {
@@ -649,8 +660,12 @@ export class AgentService {
               input: { candidate, query: query.query, requireArtist: query.requireArtist, responseLimit: 30 },
               output: { query: discovery.query, total: discovery.total, resultCount: discovery.results.length }
             });
-            selected = selectDiscoveryTrackResult(discovery.results, candidate, qualityPreference, query);
-            if (selected) {
+            const querySelected = selectDiscoveryTrackResult(discovery.results, candidate, qualityPreference, query);
+            if (!querySelected) {
+              continue;
+            }
+            selected = rankDiscoveryResultsByQuality([...(selected ? [selected] : []), querySelected], qualityPreference, candidate)[0] ?? querySelected;
+            if (isPreferredDiscoveryQuality(selected)) {
               break;
             }
           }
@@ -706,7 +721,7 @@ export class AgentService {
   }
 
   private createDiscoveryDownloadProposal(results: DiscoveryResult[], searchQuery: string): AgentMessageResponse["operationBatch"] {
-    const selected = rankDiscoveryResultsByAvailability(results.filter((result) => !result.isLocked)).slice(0, 10);
+    const selected = rankDiscoveryResultsByQuality(results.filter((result) => !result.isLocked), this.getDiscoveryQualityPreference()).slice(0, 10);
     if (selected.length === 0) {
       return null;
     }
@@ -1132,7 +1147,64 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, map: (i
 }
 
 function wantsReleaseContext(message: string): boolean {
-  return /\b(album|release|record|single|ep)\b/i.test(message) && /\b(on|from|with|has|contains|include|includes|appears|appeared|came|comes|its|it's)\b/i.test(message);
+  const mentionsRelease = /\b(album|albums|release|releases|record|records|single|singles|ep)\b/i.test(message);
+  if (!mentionsRelease) {
+    return false;
+  }
+  return (
+    /\b(on|from|with|has|contains|include|includes|including|appears|appeared|came|comes|its|it's)\b/i.test(message) ||
+    /\b(full|entire|complete)\s+(album|release|record)\b/i.test(message) ||
+    /\b(album|release|record)\s+(in full|fully|completely)\b/i.test(message)
+  );
+}
+
+function wantsFullAlbumDownload(message: string): boolean {
+  const text = message.toLowerCase();
+  return (
+    /\b(full|entire|complete)\s+(album|release|record)\b/i.test(message) ||
+    /\b(album|release|record)\s+(in full|fully|completely)\b/i.test(message) ||
+    (wantsDownloadProposal(message) && /\b(album|release|record)\b/.test(text) && /\b(all|every|whole)\s+(songs?|tracks?)\b/.test(text))
+  );
+}
+
+function wantsMultipleReleases(message: string): boolean {
+  return /\b(albums|releases|records|singles)\b/i.test(message) || /\b(some|several|multiple|best)\s+(album|albums|release|releases|record|records)\b/i.test(message);
+}
+
+function requiredReleaseTrackTitles(message: string, searchQuery: string): string[] {
+  const values: string[] = [];
+  const add = (value: string | undefined) => {
+    const cleaned = cleanRequiredTrackTitle(value ?? "", searchQuery);
+    if (cleaned && !values.some((existing) => normalizeFallbackKey(existing) === normalizeFallbackKey(cleaned))) {
+      values.push(cleaned);
+    }
+  };
+  const patterns = [
+    /\b(?:song|track)\s+([\p{L}\p{N}' -]{3,80}?)(?=\s+(?:is|was|appears|appeared|on|from|$))/giu,
+    /\b(?:includes?|including|contains?|with)\s+([\p{L}\p{N}' -]{3,80}?)(?=\s+(?:on|from|if|and|$))/giu,
+    /\b(?:ensure|make sure)\s+(?:it\s+)?(?:includes?|contains?|has)\s+([\p{L}\p{N}' -]{3,80}?)(?=\s+(?:on|from|if|and|$))/giu
+  ];
+  for (const pattern of patterns) {
+    for (const match of message.matchAll(pattern)) {
+      add(match[1]);
+    }
+  }
+  return values;
+}
+
+function cleanRequiredTrackTitle(value: string, searchQuery: string): string {
+  let cleaned = cleanFallbackQuery(value)
+    .replace(/\b(it|the|that|this|one|song|track|album|release|record|full|entire|complete)\b/gi, " ")
+    .replace(/\b(on|from|with|has|contains|include|includes|including|if|and|want|download)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const queryTokens = meaningfulQueryTokens(searchQuery);
+  cleaned = cleaned
+    .split(/\s+/)
+    .filter((token) => !queryTokens.has(token))
+    .join(" ")
+    .trim();
+  return cleaned.length >= 3 ? cleaned : "";
 }
 
 function shouldFallbackToDiscoveryForReleaseContext(message: string, hints: string[] | undefined): boolean {
@@ -1401,6 +1473,16 @@ function discoveryQualityScore(
   return score;
 }
 
+function isPreferredDiscoveryQuality(result: DiscoveryResult): boolean {
+  const extension = discoveryResultExtension(result);
+  return extension === "flac" || losslessFormats.has(extension);
+}
+
+function discoveryResultExtension(result: DiscoveryResult): string {
+  return (result.extension ?? result.filename.split(".").pop() ?? "").toLowerCase();
+}
+
+const defaultDiscoveryPreferredFormats = ["flac", "alac", "wav", "aiff", "aif", "ape", "wv", "dsf", "mp3", "m4a", "aac", "ogg"];
 const losslessFormats = new Set(["flac", "alac", "wav", "aiff", "aif", "ape", "wv", "dsf"]);
 const versionQualifierPattern = /\b(remix|edit|live|demo|instrumental|karaoke|cover|bootleg|acoustic)\b/i;
 
@@ -1537,11 +1619,16 @@ function groupAgentDiscoveryResults(results: DiscoveryResult[], library: Library
     });
 }
 
-function selectDiscoveryReleasePlaylistResults(results: DiscoveryResult[]): DiscoveryReleasePlaylistSelection | null {
+function selectDiscoveryReleasePlaylistResults(
+  results: DiscoveryResult[],
+  searchQuery: string,
+  options: ReleaseSelectionOptions
+): DiscoveryReleasePlaylistSelection | null {
   const unlockedAudio = results.filter((result) => !result.isLocked && isAudioDiscoveryResult(result));
   if (unlockedAudio.length === 0) {
     return null;
   }
+  const queryTokens = meaningfulQueryTokens(searchQuery);
 
   const releaseGroups = new Map<string, DiscoveryResult[]>();
   for (const result of unlockedAudio) {
@@ -1550,17 +1637,28 @@ function selectDiscoveryReleasePlaylistResults(results: DiscoveryResult[]): Disc
     releaseGroups.set(key, [...(releaseGroups.get(key) ?? []), result]);
   }
 
-  const bestRelease = [...releaseGroups.values()].sort((left, right) => releaseResultScore(right) - releaseResultScore(left))[0];
+  const bestRelease = [...releaseGroups.values()].sort(
+    (left, right) => releaseResultScore(right, queryTokens) - releaseResultScore(left, queryTokens)
+  )[0];
   if (!bestRelease) {
+    return null;
+  }
+  if (queryTokens.size > 0 && releaseQueryMatchCount(bestRelease, queryTokens) < Math.min(2, queryTokens.size)) {
     return null;
   }
 
   const sourceGroups = new Map<string, DiscoveryResult[]>();
   for (const result of bestRelease) {
-    const key = `${result.username ?? "unknown"}\u0000${result.folder ?? result.path}`;
+    const key = `${result.username ?? "unknown"}\u0000${discoverySourceFolderKey(result)}`;
     sourceGroups.set(key, [...(sourceGroups.get(key) ?? []), result]);
   }
-  const selectedSource = [...sourceGroups.values()].sort((left, right) => releaseResultScore(right) - releaseResultScore(left))[0] ?? bestRelease;
+  const selectedSource =
+    [...sourceGroups.values()]
+      .filter((source) => isEligibleReleaseSource(source, options))
+      .sort((left, right) => releaseResultScore(right, queryTokens) - releaseResultScore(left, queryTokens))[0] ?? null;
+  if (!selectedSource) {
+    return null;
+  }
   const selected = sortDiscoveryTracks(selectedSource).slice(0, 40);
   const release = inferDiscoveryRelease(selected[0] ?? bestRelease[0]!);
   return {
@@ -1569,13 +1667,71 @@ function selectDiscoveryReleasePlaylistResults(results: DiscoveryResult[]): Disc
   };
 }
 
-function releaseResultScore(results: DiscoveryResult[]): number {
+function releaseResultScore(results: DiscoveryResult[], queryTokens = new Set<string>()): number {
   return (
+    releaseQueryMatchCount(results, queryTokens) * 10000 +
     results.length * 1000 +
-    results.filter((result) => losslessFormats.has((result.extension ?? "").toLowerCase())).length * 100 +
+    results.filter((result) => discoveryResultExtension(result) === "flac").length * 180 +
+    results.filter((result) => losslessFormats.has(discoveryResultExtension(result))).length * 100 +
     results.filter((result) => result.hasFreeUploadSlot === true).length * 10 -
     Math.min(...results.map((result) => result.queueLength ?? 0))
   );
+}
+
+function releaseQueryMatchCount(results: DiscoveryResult[], queryTokens: Set<string>): number {
+  if (queryTokens.size === 0 || results.length === 0) {
+    return 0;
+  }
+  const release = inferDiscoveryRelease(results[0]!);
+  const haystack = normalizeFallbackKey([release.artist, release.title, results[0]?.folder].filter(Boolean).join(" "));
+  let count = 0;
+  for (const token of queryTokens) {
+    if (haystack.includes(token)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function discoverySourceFolderKey(result: DiscoveryResult): string {
+  const folder = result.folder?.trim();
+  if (folder) {
+    return normalizeDiscoveryText(folder);
+  }
+  const parts = result.path.split(/[\\/]+/).filter(Boolean);
+  return normalizeDiscoveryText(parts.length > 1 ? parts.slice(0, -1).join("/") : result.path);
+}
+
+function isEligibleReleaseSource(results: DiscoveryResult[], options: ReleaseSelectionOptions): boolean {
+  if (results.length === 0) {
+    return false;
+  }
+  const distinctTrackKeys = new Set(results.map(releaseTrackIdentity).filter(Boolean));
+  if (options.requireAlbumSource) {
+    const trackNumbers = new Set(results.map(discoveryTrackNumber).filter((trackNumber) => trackNumber !== 9999));
+    if (results.length < 6 || distinctTrackKeys.size < 6 || trackNumbers.size < 5) {
+      return false;
+    }
+    if (distinctTrackKeys.size / Math.max(1, results.length) < 0.65) {
+      return false;
+    }
+  }
+  return options.requiredTrackTitles.every((title) => releaseSourceContainsTrack(results, title));
+}
+
+function releaseSourceContainsTrack(results: DiscoveryResult[], title: string): boolean {
+  const requiredTokens = meaningfulQueryTokens(title);
+  if (requiredTokens.size === 0) {
+    return true;
+  }
+  return results.some((result) => {
+    const identity = releaseTrackIdentity(result);
+    return [...requiredTokens].every((token) => identity.includes(token));
+  });
+}
+
+function releaseTrackIdentity(result: DiscoveryResult): string {
+  return normalizeFallbackKey(stripDiscoveryTrackPrefix(result.filename.replace(/\.[^.]+$/, "")));
 }
 
 function sortDiscoveryTracks(results: DiscoveryResult[]): DiscoveryResult[] {
