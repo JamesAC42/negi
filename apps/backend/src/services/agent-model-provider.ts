@@ -50,6 +50,70 @@ export interface AgentModelProvider {
   plan(message: string, context?: AgentPlanningContext): Promise<AgentModelPlan | null>;
 }
 
+const agentPlanJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    summary: { type: "string" },
+    intent: {
+      type: "string",
+      enum: [
+        "search_library",
+        "search_discovery",
+        "research_playlist",
+        "parse_pasted_list",
+        "propose_import",
+        "propose_playlist",
+        "propose_duplicate_cleanup",
+        "playback",
+        "unknown"
+      ]
+    },
+    searchQuery: { type: "string" },
+    searchQueryHints: { type: "array", items: { type: "string" } },
+    playlistName: { type: "string" },
+    playlistDescription: { type: "string" },
+    researchSources: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          title: { type: "string" },
+          url: { type: "string" },
+          summary: { type: "string" }
+        },
+        required: ["title", "url", "summary"]
+      }
+    },
+    trackCandidates: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          artist: { type: "string" },
+          title: { type: "string" },
+          album: { type: "string" },
+          reason: { type: "string" },
+          query: { type: "string" }
+        },
+        required: ["artist", "title", "album", "reason", "query"]
+      }
+    }
+  },
+  required: [
+    "summary",
+    "intent",
+    "searchQuery",
+    "searchQueryHints",
+    "playlistName",
+    "playlistDescription",
+    "researchSources",
+    "trackCandidates"
+  ]
+} as const;
+
 export function createAgentModelProvider(config: BackendConfig): AgentModelProvider {
   if (config.agentModelProvider === "openai" && config.openaiApiKey) {
     return new OpenAIResponsesAgentModelProvider(
@@ -82,8 +146,16 @@ class OpenAIResponsesAgentModelProvider implements AgentModelProvider {
     const useWebResearch = this.webResearchEnabled && shouldUseAgentWebResearch(message);
     const requestBody: Record<string, unknown> = {
       model: this.model,
-      reasoning: { effort: useWebResearch ? "medium" : "low" },
-      max_output_tokens: useWebResearch ? 6000 : 1200,
+      reasoning: { effort: "low" },
+      max_output_tokens: useWebResearch ? 16_000 : 3_000,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "music_agent_plan",
+          strict: true,
+          schema: agentPlanJsonSchema
+        }
+      },
       instructions:
         "You plan music-library agent work for Music OS. Return compact JSON only. Do not use markdown. Never claim actions were taken. Mutating actions require local approval outside the model.",
       input: [
