@@ -40,6 +40,10 @@ assert(
   shouldUseAgentWebResearch("make me a playlist of songs like this that you think I would like"),
   "expected taste-based playlist prompt to use web research"
 );
+assert(
+  shouldUseAgentWebResearch("make a playlist for hype edits like these tracks and research niche picks"),
+  "expected seeded edit-playlist prompt to use web research"
+);
 assert(!shouldUseAgentWebResearch("search my library for gaucho"), "expected explicit local library search to skip web research");
 
 console.log(JSON.stringify({ ok: true, parsedPlaylistName: fenced.playlistName }, null, 2));

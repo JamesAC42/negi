@@ -680,7 +680,7 @@ export class AgentService {
       }
     }
 
-    const orderedDiscoveryResults = selectedDiscoveryResults.filter((result) => !result.isLocked).slice(0, 16);
+    const orderedDiscoveryResults = selectedDiscoveryResults.filter((result) => !result.isLocked);
     const operationBatch =
       ownedFiles.length > 0 || orderedDiscoveryResults.length > 0
         ? this.createResearchPlaylistBatch(
@@ -804,6 +804,18 @@ export function detectAgentIntent(message: string): AgentMessageResponse["intent
   if (/\b(import|imports|inbox)\b/.test(text) && /\b(propose|approve|review|stage|staged)\b/.test(text)) {
     return "propose_import";
   }
+  // Playlist requests are curation tasks even when they also mention tracks,
+  // remixes, downloads, or Soulseek. Those terms are research constraints, not
+  // a reason to run the entire prompt as one Discovery query.
+  if (/\b(playlist|mix)\b/.test(text) && /\b(make|create|build|propose|generate|curate|put together)\b/.test(text)) {
+    if (
+      !explicitlyLocalLibrarySearch(message) &&
+      /\b(mood|vibe|like|similar|recommend|think i would like|for me|for\s+(a\s+|an\s+|the\s+)?[\p{L}\p{N}'-]+|based on|research|download|find|edit|edits|remix|remixes|niche|soulseek|slsk|slskd)\b/u.test(text)
+    ) {
+      return "research_playlist";
+    }
+    return "propose_playlist";
+  }
   if (/\b(discover|discovery|soulseek|slsk|slskd|download|external|find online)\b/.test(text)) {
     return "search_discovery";
   }
@@ -818,15 +830,6 @@ export function detectAgentIntent(message: string): AgentMessageResponse["intent
   }
   if (wantsMusicRecommendation(message)) {
     return "research_playlist";
-  }
-  if (/\b(playlist|mix)\b/.test(text) && /\b(make|create|build|propose|generate)\b/.test(text)) {
-    if (
-      !explicitlyLocalLibrarySearch(message) &&
-      /\b(mood|vibe|like|similar|recommend|think i would like|for me|for\s+(a\s+|an\s+|the\s+)?[\p{L}\p{N}'-]+|based on|research|download|find)\b/u.test(text)
-    ) {
-      return "research_playlist";
-    }
-    return "propose_playlist";
   }
   if (/\b(play|queue|listen)\b/.test(text)) {
     return "playback";
@@ -843,6 +846,9 @@ function applySuggestedIntent(
   options: { hasTrackCandidates?: boolean } = {}
 ): AgentMessageResponse["intent"] {
   if (!suggestedIntent || suggestedIntent === "unknown" || suggestedIntent === detectedIntent) {
+    return detectedIntent;
+  }
+  if (detectedIntent === "research_playlist") {
     return detectedIntent;
   }
   if (suggestedIntent === "research_playlist" && options.hasTrackCandidates) {

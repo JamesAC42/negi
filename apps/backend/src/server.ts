@@ -866,6 +866,11 @@ const server = createServer(async (request, response) => {
 
 server.listen(config.port, config.host, () => {
   console.log(`music-os backend listening at http://${config.host}:${config.port}`);
+  console.log(
+    `agent planner: ${config.agentModelProvider === "openai" && config.openaiApiKey ? `openai (${config.openaiModel})` : "local"}; web research: ${
+      config.agentModelProvider === "openai" && config.openaiApiKey && config.agentWebResearchEnabled !== false ? "enabled" : "unavailable"
+    }`
+  );
 });
 
 process.on("SIGINT", shutdown);

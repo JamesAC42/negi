@@ -30,6 +30,20 @@ assert(currentArtistIntent === "research_playlist", `expected current-artist pla
 const moodPlaylistIntent = detectAgentIntent("make me a playlist for studying late at night");
 assert(moodPlaylistIntent === "research_playlist", `expected playlist-for-mood prompt to use research_playlist, got ${moodPlaylistIntent}`);
 
+const seededEditPlaylistIntent = detectAgentIntent(
+  "can you make a playlist used for hype edits like a remix of abba gimme gimme gimme, dua lipa dont start now, lady hear me tonight by modjo, or dvrst close eyes; do some deep research and find niche stuff like these"
+);
+assert(
+  seededEditPlaylistIntent === "research_playlist",
+  `expected a playlist request with named tracks and edits to use research_playlist, got ${seededEditPlaylistIntent}`
+);
+
+const downloadablePlaylistIntent = detectAgentIntent("build me a playlist like these tracks, research it, then download the missing songs from Soulseek");
+assert(
+  downloadablePlaylistIntent === "research_playlist",
+  `expected a playlist request mentioning downloads and Soulseek to use research_playlist, got ${downloadablePlaylistIntent}`
+);
+
 const localPlaylistIntent = detectAgentIntent("make a playlist from my library for gaucho");
 assert(localPlaylistIntent === "propose_playlist", `expected explicit local playlist prompt to stay local, got ${localPlaylistIntent}`);
 

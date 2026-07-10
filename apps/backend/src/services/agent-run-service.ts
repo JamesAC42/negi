@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
 import type { AgentMessageResponse, AgentResearchSource, AgentRunResponse } from "@music-os/core";
-import type { AgentService, AgentStepRecorder } from "./agent-service.js";
+import { detectAgentIntent, type AgentService, type AgentStepRecorder } from "./agent-service.js";
 import type { AgentModelPlan, AgentModelProvider, AgentTrackCandidate } from "./agent-model-provider.js";
 import type { AgentMetadataTool } from "./agent-metadata-tool.js";
 import type { AgentPlaylistWorkflowService } from "./agent-playlist-workflow-service.js";
@@ -98,6 +98,7 @@ export class AgentRunService {
     };
 
     try {
+      const deterministicIntent = detectAgentIntent(objective);
       const searchQueryHints: string[] = [];
       let playlistName: string | undefined;
       let playlistDescription: string | undefined;
@@ -105,7 +106,7 @@ export class AgentRunService {
       let researchSources: AgentResearchSource[] = [];
       let suggestedIntent: AgentMessageResponse["intent"] | undefined;
       let suggestedSearchQuery: string | undefined;
-      if (this.metadataTool) {
+      if (this.metadataTool && deterministicIntent !== "research_playlist" && deterministicIntent !== "propose_playlist") {
         try {
           const metadata = await this.metadataTool.lookup(objective);
           if (metadata) {
@@ -161,6 +162,18 @@ export class AgentRunService {
             error: error instanceof Error ? error.message : String(error)
           });
         }
+      } else {
+        recordStep({
+          type: "plan",
+          toolName: "model:local",
+          status: "completed",
+          summary:
+            deterministicIntent === "research_playlist"
+              ? "Hosted model planner is not configured; web research and candidate curation are unavailable"
+              : "Using the local deterministic planner; hosted model planning is not configured",
+          input: { objective },
+          output: { deterministicIntent, webResearchAvailable: false }
+        });
       }
       const response = {
         ...(await this.agent.handleMessage(objective, {
