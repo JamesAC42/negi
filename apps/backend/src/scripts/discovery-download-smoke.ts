@@ -20,12 +20,48 @@ class FakeSlskd {
   }
 }
 
+class PartialFakeSlskd {
+  constructor(private readonly completedPath: string) {}
+
+  async queueDownloadResults(results: DiscoveryResult[]): Promise<DiscoveryResult[]> {
+    await writeFile(this.completedPath, makeId3Fixture());
+    return results;
+  }
+
+  async findCompletedDownloadPaths(): Promise<string[]> {
+    return [this.completedPath];
+  }
+
+  async inspectDownloadResults() {
+    return {
+      downloadDirectory: this.completedPath,
+      directoryError: null,
+      filesSeen: 1,
+      completedPaths: [this.completedPath],
+      transfers: {
+        total: 2,
+        matched: 2,
+        completed: 1,
+        failed: 0,
+        active: 0,
+        queued: 1,
+        other: 0,
+        samples: [],
+        error: null
+      }
+    };
+  }
+}
+
 const fixtureDir = await mkdtemp(join(tmpdir(), "music-os-discovery-download-"));
 const databasePath = join(fixtureDir, "music-os.sqlite");
 const libraryPath = join(fixtureDir, "library");
 const downloadPath = join(fixtureDir, "downloads", "Remote Artist - Remote Title.mp3");
 
 try {
+  process.env.MUSIC_OS_DISCOVERY_DOWNLOAD_POLL_MS = "50";
+  process.env.MUSIC_OS_DISCOVERY_DOWNLOAD_INSPECT_MS = "50";
+  process.env.MUSIC_OS_DISCOVERY_DOWNLOAD_PARTIAL_IDLE_MS = "200";
   await mkdir(libraryPath, { recursive: true });
   await mkdir(join(fixtureDir, "downloads"), { recursive: true });
 
@@ -79,8 +115,26 @@ try {
   const operationCompleted = await waitForJob(downloads, createdJobId, "succeeded");
   assert(operationCompleted.imported?.items.length === 1, "operation-created download job should create one import item");
 
+  const partialDownloads = new DiscoveryDownloadService(
+    app.db,
+    new PartialFakeSlskd(downloadPath) as unknown as SlskdService,
+    app.imports
+  );
+  const pendingResult = {
+    ...result,
+    id: `${result.id}-pending`,
+    username: "pending-user",
+    filename: "Pending Artist - Pending Title.mp3",
+    path: "Pending Folder\\Pending Artist - Pending Title.mp3"
+  };
+  const partialJob = partialDownloads.createJob([result, pendingResult], root.id);
+  const partialCompleted = await waitForJob(partialDownloads, partialJob.id, "succeeded");
+  assert(partialCompleted.completedCount === 1, `expected one partial completed file, got ${partialCompleted.completedCount}`);
+  assert(partialCompleted.selectedCount === 2, `expected two selected files, got ${partialCompleted.selectedCount}`);
+  assert(partialCompleted.imported?.items.length === 1, "expected the completed subset to be staged without waiting for the queued transfer");
+
   app.close();
-  console.log(JSON.stringify({ ok: true, completed, retriedCompleted, appliedDownload, operationCompleted }, null, 2));
+  console.log(JSON.stringify({ ok: true, completed, retriedCompleted, appliedDownload, operationCompleted, partialCompleted }, null, 2));
 } finally {
   await rm(fixtureDir, { recursive: true, force: true });
 }

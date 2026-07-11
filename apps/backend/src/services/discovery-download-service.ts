@@ -153,6 +153,8 @@ export class DiscoveryDownloadService {
       );
 
       let completedPaths: string[] = [];
+      let lastCompletedCount = 0;
+      let lastDownloadProgressAt = Date.now();
       let lastInspection: SlskdDownloadInspection | null = null;
       let lastInspectionSignature: string | null = null;
       let nextInspectionAt = Date.now() + downloadInspectionIntervalMs();
@@ -167,6 +169,10 @@ export class DiscoveryDownloadService {
         if (Date.now() >= nextLocalScanAt) {
           completedPaths = await this.discovery.findCompletedDownloadPaths(queued);
           this.updateProgress(jobId, queued.length, completedPaths.length);
+          if (completedPaths.length > lastCompletedCount) {
+            lastCompletedCount = completedPaths.length;
+            lastDownloadProgressAt = Date.now();
+          }
           if (completedPaths.length >= queued.length) {
             break;
           }
@@ -184,6 +190,8 @@ export class DiscoveryDownloadService {
           if (lastInspection.completedPaths.length > completedPaths.length) {
             completedPaths = lastInspection.completedPaths;
             this.updateProgress(jobId, queued.length, completedPaths.length);
+            lastCompletedCount = completedPaths.length;
+            lastDownloadProgressAt = Date.now();
           }
           if (completedPaths.length >= queued.length) {
             break;
@@ -192,6 +200,16 @@ export class DiscoveryDownloadService {
           nextInspectionAt = Date.now() + downloadInspectionIntervalMs();
           if (allKnownTransfersFailed(lastInspection, queued.length)) {
             throw new Error(formatNoCompletedDownloadsError(lastInspection));
+          }
+          if (shouldSettlePartialDownload(lastInspection, queued.length, completedPaths.length, lastDownloadProgressAt)) {
+            this.addEvent(
+              jobId,
+              "warning",
+              `Proceeding with ${completedPaths.length}/${queued.length} completed files after the remaining transfers made no progress for ${Math.round(
+                partialDownloadIdleMs() / 1000
+              )} seconds`
+            );
+            break;
           }
         }
       }
@@ -384,6 +402,10 @@ function queuedLocalScanIntervalMs(): number {
   return readPositiveIntegerEnv("MUSIC_OS_DISCOVERY_DOWNLOAD_QUEUED_SCAN_MS", 30 * 1000);
 }
 
+function partialDownloadIdleMs(): number {
+  return readPositiveIntegerEnv("MUSIC_OS_DISCOVERY_DOWNLOAD_PARTIAL_IDLE_MS", 2 * 60 * 1000);
+}
+
 function readPositiveIntegerEnv(name: string, fallback: number): number {
   const value = process.env[name];
   if (!value) {
@@ -395,6 +417,22 @@ function readPositiveIntegerEnv(name: string, fallback: number): number {
 
 function allKnownTransfersFailed(inspection: SlskdDownloadInspection, selectedCount: number): boolean {
   return inspection.transfers.matched >= selectedCount && inspection.transfers.failed >= selectedCount;
+}
+
+function shouldSettlePartialDownload(
+  inspection: SlskdDownloadInspection,
+  selectedCount: number,
+  completedCount: number,
+  lastProgressAt: number
+): boolean {
+  return (
+    completedCount > 0 &&
+    completedCount < selectedCount &&
+    inspection.transfers.matched >= selectedCount &&
+    inspection.transfers.active === 0 &&
+    inspection.transfers.completed + inspection.transfers.failed + inspection.transfers.queued >= selectedCount &&
+    Date.now() - lastProgressAt >= partialDownloadIdleMs()
+  );
 }
 
 function formatDownloadInspectionEvent(inspection: SlskdDownloadInspection): string {

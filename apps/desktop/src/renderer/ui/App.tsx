@@ -417,6 +417,7 @@ export function App(): ReactElement {
   });
   const [discoveryDownloadJobs, setDiscoveryDownloadJobs] = useState<DiscoveryDownloadJob[]>([]);
   const [agentPlaylistWorkflows, setAgentPlaylistWorkflows] = useState<AgentPlaylistWorkflow[]>([]);
+  const agentPlaylistWorkflowsRef = useRef<AgentPlaylistWorkflow[]>([]);
   const [savedDiscoveryCandidates, setSavedDiscoveryCandidates] = useState<SavedDiscoveryCandidate[]>([]);
   const [savedDiscoveryLists, setSavedDiscoveryLists] = useState<SavedDiscoveryList[]>([]);
   const [agentInput, setAgentInput] = useState("");
@@ -828,7 +829,17 @@ export function App(): ReactElement {
   async function refreshAgentPlaylistWorkflows(): Promise<AgentPlaylistWorkflow[]> {
     try {
       const result = await listAgentPlaylistWorkflows();
+      const previousOpenWorkflowIds = new Set(
+        agentPlaylistWorkflowsRef.current.filter(isOpenAgentPlaylistWorkflow).map((workflow) => workflow.id)
+      );
+      const completedWorkflowCreatedPlaylist = result.workflows.some(
+        (workflow) => previousOpenWorkflowIds.has(workflow.id) && workflow.status === "completed" && workflow.playlistId
+      );
+      agentPlaylistWorkflowsRef.current = result.workflows;
       setAgentPlaylistWorkflows(result.workflows);
+      if (completedWorkflowCreatedPlaylist) {
+        await Promise.all([refreshLibrary(), refreshAlbums(), refreshPlaylists()]);
+      }
       return result.workflows;
     } catch (error) {
       setDiscoveryDownloadState((current) => ({ ...current, message: getErrorMessage(error) }));
