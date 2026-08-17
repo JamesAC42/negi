@@ -306,11 +306,7 @@ const emptyTasteProfile: TasteProfileResponse = {
   updatedAt: null
 };
 
-const navSections = [
-  { label: "Browse", items: ["Home", "Library", "Artists", "Albums", "Playlists"] },
-  { label: "Manage", items: ["Discovery", "Imports", "Duplicates", "Operations", "Jobs"] },
-  { label: "System", items: ["Agent", "Settings"] }
-];
+const topNavigationItems = ["Home", "Library", "Discovery", "Agent", "Playlists", "Settings"] as const;
 const appearanceStorageKey = "music-os:appearance:v1";
 const visualizerModeStorageKey = "music-os:visualizer-mode:v1";
 const defaultAppearanceSettings: AppearanceSettings = {
@@ -362,6 +358,7 @@ type AccentPalette = { acc: string; accDim: string; accInk: string; accLine: str
 export function App(): ReactElement {
   const discoverySearchRequestId = useRef(0);
   const pageTargetRequestId = useRef(0);
+  const globalSearchRef = useRef<HTMLInputElement | null>(null);
   const selectedJobIdRef = useRef<string | null>(null);
   const playbackRef = useRef<PlaybackStateResponse | null>(null);
   const playbackActionIdRef = useRef(0);
@@ -463,7 +460,6 @@ export function App(): ReactElement {
   const [playbackBusy, setPlaybackBusy] = useState(false);
   const [libraryLoadingMore, setLibraryLoadingMore] = useState(false);
   const [albumsLoadingMore, setAlbumsLoadingMore] = useState(false);
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
   const [visualizerMode, setVisualizerMode] = useState<VisualizerMode>(() => loadVisualizerMode());
   const [visualizerCapabilities, setVisualizerCapabilities] = useState<VisualizerCapabilitiesResponse | null>(null);
@@ -497,7 +493,7 @@ export function App(): ReactElement {
     : effectiveVisualizerMode;
   const barVisualizer = useVisualizerStream(liveVisualizersEnabled && playback.status !== "stopped", "spectrum", playback.currentFileId);
   const modalVisualizer = useVisualizerStream(
-    liveVisualizersEnabled && nowPlayingOpen && playback.status !== "stopped",
+    liveVisualizersEnabled && playback.status !== "stopped",
     nowPlayingStreamMode,
     playback.currentFileId
   );
@@ -1155,6 +1151,12 @@ export function App(): ReactElement {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        globalSearchRef.current?.focus();
+        globalSearchRef.current?.select();
+        return;
+      }
       if (event.code !== "Space" || event.repeat) {
         return;
       }
@@ -1486,6 +1488,24 @@ export function App(): ReactElement {
   async function handleRejectImport(importItemId: string): Promise<void> {
     await rejectImportItem(importItemId);
     await refreshImports();
+  }
+
+  async function handleRejectImportBatch(importBatch: ImportBatch): Promise<void> {
+    const removableItems = importBatch.items.filter(
+      (item) => item.status !== "imported" && item.status !== "rejected"
+    );
+    if (removableItems.length === 0) {
+      return;
+    }
+    setBusyImportBatchId(importBatch.id);
+    try {
+      for (const item of removableItems) {
+        await rejectImportItem(item.id);
+      }
+      await refreshImports();
+    } finally {
+      setBusyImportBatchId(null);
+    }
   }
 
   async function handleApproveBatch(batchId: string): Promise<void> {
@@ -2689,86 +2709,178 @@ export function App(): ReactElement {
     [playback.currentFileId, playbackFiles]
   );
   const appearanceStyle = useMemo(() => getAppearanceStyle(appearance), [appearance]);
-  const appShellClassName = `appShell ${inspectorCollapsed ? "inspectorCollapsed " : ""}theme-${appearance.mode}`.trim();
-  const subtitle = useMemo(() => {
-    if (total === 0) {
-      return "Add a folder and scan local audio files.";
+  const appShellClassName = `appShell theme-${appearance.mode}`;
+  const nowPlayingTitle = currentPlaybackFile?.displayTags.title ?? playback.currentDisplayName ?? "Nothing queued";
+  const nowPlayingArtist =
+    currentPlaybackFile?.displayTags.artist ?? currentPlaybackFile?.displayTags.albumartist ?? "Unknown artist";
+  const nowPlayingAlbum = currentPlaybackFile?.displayTags.album ?? "Unknown album";
+  const nowPlayingAlbumTarget = currentPlaybackFile ? getFileAlbumTarget(currentPlaybackFile) : null;
+
+  function navigateToView(item: string): void {
+    if (item === "Artists") {
+      if (activeView === "Artists") {
+        setArtistsViewResetKey((current) => current + 1);
+      }
+      setArtistViewTarget(null);
     }
-    return `${total.toLocaleString()} indexed file${total === 1 ? "" : "s"}`;
-  }, [total]);
+    if (item === "Albums") {
+      if (activeView === "Albums") {
+        setAlbumsViewResetKey((current) => current + 1);
+      }
+      setAlbumViewTarget(null);
+    }
+    if (item === "Playlists") {
+      setSelectedPlaylistId(null);
+    }
+    setActiveView(item);
+  }
+
+  function isTopNavigationActive(item: string): boolean {
+    if (item === "Library") {
+      return ["Library", "LibraryManager", "Artists", "Albums", "Imports", "Duplicates", "Operations"].includes(activeView);
+    }
+    if (item === "Discovery") {
+      return activeView === "Discovery" || activeView === "Jobs";
+    }
+    return activeView === item;
+  }
 
   return (
     <main className={appShellClassName} style={appearanceStyle}>
-      <aside className="sidebar">
-        <div className="brand">
-          <img alt="" className="brandMark" src="./negi.png" />
-          <span>negi</span>
-        </div>
-        <nav className="navList" aria-label="Primary">
-          {navSections.map((section) => (
-            <div className="navSection" key={section.label}>
-              <span className="navSectionLabel">{section.label}</span>
-              {section.items.map((item) => (
-                <button
-                  className={item === activeView ? "navItem active" : "navItem"}
-                  key={item}
-                  type="button"
-                  onClick={() => {
-                    if (item === "Artists" && activeView === "Artists") {
-                      setArtistsViewResetKey((current) => current + 1);
-                    }
-                    if (item === "Artists") {
-                      setArtistViewTarget(null);
-                    }
-                    if (item === "Albums") {
-                      if (activeView === "Albums") {
-                        setAlbumsViewResetKey((current) => current + 1);
-                      }
-                      setAlbumViewTarget(null);
-                    }
-                    if (item === "Playlists") {
-                      setSelectedPlaylistId(null);
-                    }
-                    setActiveView(item);
-                  }}
-                >
-                  <NavIcon view={item} />
-                  {item}
-                </button>
-              ))}
-            </div>
+      <header className="appTopbar">
+        <button className="topBrand" type="button" onClick={() => navigateToView("Home")}>
+          <span className="topBrandMark" aria-hidden="true">n</span>
+          <span className="topBrandCopy">
+            <strong>negi</strong>
+            <small>workbench</small>
+          </span>
+        </button>
+
+        <nav className="topNavigation" aria-label="Primary workspaces">
+          {topNavigationItems.map((item) => (
+            <button
+              aria-current={isTopNavigationActive(item) ? "page" : undefined}
+              className={isTopNavigationActive(item) ? "active" : ""}
+              key={item}
+              type="button"
+              onClick={() => navigateToView(item)}
+            >
+              <NavIcon view={item} />
+              <span>{item === "Playlists" ? "Lists" : item}</span>
+            </button>
           ))}
         </nav>
-      </aside>
+
+        <div className="topbarSpacer" />
+
+        <div className="topTransport" aria-label="Playback controls">
+          <button
+            aria-label="Previous track"
+            disabled={playbackBusy || playback.status === "stopped"}
+            type="button"
+            onClick={() => void handlePrevious()}
+          >
+            <TransportIcon shape="previous" />
+          </button>
+          <button
+            aria-label={playback.status === "playing" ? "Pause" : "Resume"}
+            className="topPlay"
+            disabled={(playback.status === "stopped" && !playback.currentFileId) || (playbackBusy && playback.status !== "playing")}
+            type="button"
+            onClick={() => void handlePauseResume()}
+          >
+            <TransportIcon shape={playback.status === "playing" ? "pause" : "play"} />
+          </button>
+          <span className="topAnalyzer" aria-label="Live spectrum">
+            <SpectrumCanvas
+              className="topAnalyzerCanvas"
+              frameRef={barVisualizer.frameRef}
+              mode="spectrum"
+              playing={playback.status === "playing"}
+            />
+          </span>
+          <button
+            aria-label="Next track"
+            disabled={playbackBusy || playback.status === "stopped"}
+            type="button"
+            onClick={() => void handleNext()}
+          >
+            <TransportIcon shape="next" />
+          </button>
+          <button
+            aria-label="Seek playback"
+            className="topSeek"
+            disabled={playbackBusy || playback.status === "stopped" || !playback.durationMs}
+            type="button"
+            onClick={(event) => void handleSeekPlayback(event)}
+          >
+            <span><i style={{ width: `${getProgressPercent(playback)}%` }} /></span>
+          </button>
+          <span className="topTime">{formatTime(playback.positionMs)}</span>
+          <label className="topVolume">
+            <UiIcon name="volume" />
+            <input
+              aria-label="Playback volume"
+              max={100}
+              min={0}
+              type="range"
+              value={playback.volumePercent}
+              onChange={(event) => void handleVolumeChange(event.target.value)}
+            />
+          </label>
+        </div>
+
+        <form
+          className="topSearch"
+          role="search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            navigateToView("Library");
+            void refreshLibrary(search);
+          }}
+        >
+          <UiIcon name="search" />
+          <input
+            aria-label="Search library"
+            placeholder="Search or command"
+            ref={globalSearchRef}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <kbd>Ctrl K</kbd>
+        </form>
+        <div className="topHealth">
+          <BackendHealth state={health} />
+        </div>
+      </header>
 
       <div className="appBackground" aria-hidden="true" />
 
       <section className="centerPane">
-        <header className="toolbar">
-          <div>
-            <h1>{activeView}</h1>
-            <p>{activeView === "Library" ? subtitle : getViewSubtitle(activeView)}</p>
-          </div>
-          <BackendHealth state={health} />
-        </header>
-
         {activeView === "Home" ? (
-          <HomeView
+          <HomeAnalyticsView
             albumsState={albumsState}
-            currentPlaybackFile={currentPlaybackFile}
-            currentWaveform={currentWaveform.waveform}
             recentAlbums={homeRecentAlbums}
             libraryTotal={library.status === "ready" ? library.total : total}
             playback={playback}
             playbackBusy={playbackBusy}
-            playlists={playlists}
-            visualizerFrameRef={barVisualizer.frameRef}
             onOpenAlbum={openAlbumDetailPage}
             onOpenArtistPage={openArtistPage}
             onPlayAlbum={handlePlayAlbum}
             onPlayFile={handlePlayFile}
           />
         ) : activeView === "Library" ? (
+          <LibraryWorkbenchView
+            albumsState={albumsState}
+            currentWaveform={currentWaveform.waveform}
+            playback={playback}
+            playbackBusy={playbackBusy}
+            onEnqueuePlayback={handleEnqueuePlayback}
+            onManage={() => navigateToView("LibraryManager")}
+            onPlayAlbum={handlePlayAlbum}
+            onPlayFile={handlePlayFile}
+          />
+        ) : activeView === "LibraryManager" ? (
           <LibraryView
             bulkRenamePattern={bulkRenamePattern}
             bulkTagInput={bulkTagInput}
@@ -2932,9 +3044,11 @@ export function App(): ReactElement {
           />
         ) : activeView === "Discovery" ? (
           <DiscoveryView
+            busyImportBatchId={busyImportBatchId}
             discoveryQuery={discoveryQuery}
             downloadState={discoveryDownloadState}
             downloadJobs={discoveryDownloadJobs}
+            importsState={importsState}
             playlistWorkflows={agentPlaylistWorkflows}
             discoveryState={discoveryState}
             discoverySource={discoverySource}
@@ -2965,6 +3079,11 @@ export function App(): ReactElement {
             onOpenAgentThread={handleOpenAgentThread}
             onOpenPlaylist={openPlaylist}
             onOpenJobs={() => setActiveView("Jobs")}
+            onApplyImportBatch={handleApplyImportBatch}
+            onCancelDownload={handleCancelDiscoveryDownload}
+            onInspectImport={handleInspectImportItem}
+            onRejectImportBatch={handleRejectImportBatch}
+            onRetryDownload={handleRetryDiscoveryDownload}
             onRefreshHealth={refreshDiscoveryHealth}
             onProposeSavedCandidateDownload={handleProposeSavedDiscoveryCandidateDownload}
             onRemoveSavedCandidate={handleRemoveSavedDiscoveryCandidate}
@@ -3037,67 +3156,117 @@ export function App(): ReactElement {
         )}
       </section>
 
-      <aside className={inspectorCollapsed ? "inspector collapsed" : "inspector"}>
-        <div className="inspectorHeader">
-          <h2 aria-hidden={inspectorCollapsed}>Library State</h2>
+      <aside className="nowPlayingInspector">
+        <div className="nowPlayingInspectorHeader">
+          <strong>Now Playing</strong>
           <button
-            aria-expanded={!inspectorCollapsed}
-            aria-label={inspectorCollapsed ? "Show library state sidebar" : "Hide library state sidebar"}
-            className="secondary inspectorToggle"
+            aria-label="Open expanded Now Playing"
+            disabled={!playback.currentFileId}
             type="button"
-            onClick={() => setInspectorCollapsed((current) => !current)}
+            onClick={() => setNowPlayingOpen(true)}
           >
-            {inspectorCollapsed ? <StateIcon /> : "Hide"}
+            ...
           </button>
         </div>
-        <div className="agentPanel" aria-hidden={inspectorCollapsed}>
-          <div className="metric">
-            <span>Roots</span>
-            <strong>{roots.length}</strong>
-          </div>
-          <div className="metric">
-            <span>Indexed files</span>
-            <strong>{total}</strong>
-          </div>
-          <div className="metric">
-            <span>Duplicate groups</span>
-            <strong>{duplicates.totalGroups}</strong>
-          </div>
-          <div className="metric">
-            <span>Metadata gaps</span>
-            <strong>{metadataGaps.total}</strong>
-          </div>
-          <div className="metric">
-            <span>Quality upgrades</span>
-            <strong>{qualityUpgrades.total}</strong>
-          </div>
-          <div className="metric">
-            <span>Incomplete albums</span>
-            <strong>{incompleteAlbums.total}</strong>
-          </div>
-          <div className="metric">
-            <span>Album merges</span>
-            <strong>{albumMergeSuggestions.total}</strong>
-          </div>
-          <div className="metric">
-            <span>Alternate editions</span>
-            <strong>{alternateEditions.total}</strong>
-          </div>
-          <div className="metric">
-            <span>Albums</span>
-            <strong>{albums.total}</strong>
-          </div>
-          <div className="metric">
-            <span>Operation batches</span>
-            <strong>{operationBatches.length}</strong>
-          </div>
-          <div className="metric">
-            <span>Playlists</span>
-            <strong>{playlists.length}</strong>
-          </div>
-          <div className="operationPreview">
-            <span>Phase 6</span>
-            <strong>{playlistsState.status === "error" ? playlistsState.message : "Agent tools active"}</strong>
+        <div className="nowPlayingInspectorScroll">
+          <button
+            aria-label="Open expanded Now Playing"
+            className="nowPlayingInspectorArtworkButton"
+            disabled={!playback.currentFileId}
+            type="button"
+            onClick={() => setNowPlayingOpen(true)}
+          >
+            {playback.currentFileId ? (
+              <Artwork className="nowPlayingInspectorArtwork" eager src={artworkFileUrl(playback.currentFileId)} />
+            ) : (
+              <span className="nowPlayingInspectorArtwork placeholder">
+                <UiIcon name="album" />
+              </span>
+            )}
+          </button>
+
+          <div className="nowPlayingInspectorBody">
+            <span className="eyebrow">
+              {playback.queueIndex != null && playback.queue.length > 0
+                ? `Track ${String(playback.queueIndex + 1).padStart(2, "0")} / ${playback.queue.length}`
+                : "Playback idle"}
+            </span>
+            <h2 title={nowPlayingTitle}>{nowPlayingTitle}</h2>
+            <div className="nowPlayingInspectorLinks">
+              <button
+                disabled={!currentPlaybackFile?.displayTags.artist}
+                type="button"
+                onClick={() => currentPlaybackFile?.displayTags.artist
+                  ? openArtistPage(currentPlaybackFile.displayTags.artist)
+                  : undefined}
+              >
+                {nowPlayingArtist}
+              </button>
+              <span aria-hidden="true">-</span>
+              <button
+                disabled={!nowPlayingAlbumTarget}
+                type="button"
+                onClick={() => nowPlayingAlbumTarget ? void openAlbumPage(nowPlayingAlbumTarget) : undefined}
+              >
+                {nowPlayingAlbum}
+              </button>
+            </div>
+
+            <div className="nowPlayingSpectrogram">
+              <SpectrogramCanvas
+                className="nowPlayingSpectrogramCanvas"
+                fileId={playback.currentFileId}
+                frameRef={modalVisualizer.frameRef}
+                playing={playback.status === "playing"}
+              />
+              <span>Spectrogram</span>
+              <small>20 Hz - 20 kHz</small>
+            </div>
+
+            {currentPlaybackFile ? (
+              <NowPlayingActions
+                file={currentPlaybackFile}
+                variant="bar"
+                onFavoriteStatus={handleProposePlaybackFavoriteStatus}
+                onRating={handleProposePlaybackRating}
+              />
+            ) : null}
+
+            <dl className="nowPlayingInspectorMetadata">
+              <div>
+                <dt>Track</dt>
+                <dd>{currentPlaybackFile ? formatTrackNumber(currentPlaybackFile) : "-"}</dd>
+              </div>
+              <div>
+                <dt>Duration</dt>
+                <dd>{formatTime(currentPlaybackFile?.durationMs ?? playback.durationMs)}</dd>
+              </div>
+              <div>
+                <dt>Format</dt>
+                <dd>{currentPlaybackFile ? formatFileFormat(currentPlaybackFile) : "-"}</dd>
+              </div>
+              <div>
+                <dt>File size</dt>
+                <dd>{currentPlaybackFile ? formatBytes(currentPlaybackFile.sizeBytes) : "-"}</dd>
+              </div>
+              <div>
+                <dt>Last played</dt>
+                <dd>{currentPlaybackFile?.lastPlayedAt ? formatDateTime(currentPlaybackFile.lastPlayedAt) : "-"}</dd>
+              </div>
+              <div>
+                <dt>Path</dt>
+                <dd title={currentPlaybackFile?.path}>{currentPlaybackFile?.path ?? "-"}</dd>
+              </div>
+            </dl>
+
+            <button
+              className="nowPlayingMetadataAction"
+              disabled={!currentPlaybackFile}
+              type="button"
+              onClick={() => currentPlaybackFile ? setEditingFile(currentPlaybackFile) : undefined}
+            >
+              Open full metadata -&gt;
+            </button>
           </div>
         </div>
       </aside>
@@ -4291,6 +4460,254 @@ function IndeterminateCheckbox({
       type="checkbox"
       onChange={onChange}
     />
+  );
+}
+
+function LibraryWorkbenchView({
+  albumsState,
+  currentWaveform,
+  playback,
+  playbackBusy,
+  onEnqueuePlayback,
+  onManage,
+  onPlayAlbum,
+  onPlayFile
+}: {
+  albumsState: AlbumsState;
+  currentWaveform: WaveformSummaryResponse | null;
+  playback: PlaybackStateResponse;
+  playbackBusy: boolean;
+  onEnqueuePlayback(fileIds: string[], position: QueueInsertPosition): Promise<void>;
+  onManage(): void;
+  onPlayAlbum(albumId: string): Promise<void>;
+  onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
+}): ReactElement {
+  const albums = "albums" in albumsState ? albumsState.albums.albums : [];
+  const [artistQuery, setArtistQuery] = useState("");
+  const [selectedArtistName, setSelectedArtistName] = useState<string | null>(null);
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const artistGroups = useMemo(
+    () => groupAlbumsByArtist(sortAlbumsByArtistAlbum(albums)),
+    [albums]
+  );
+  const visibleArtists = useMemo(() => {
+    const query = artistQuery.trim().toLocaleLowerCase();
+    return query
+      ? artistGroups.filter((section) => section.artist.toLocaleLowerCase().includes(query))
+      : artistGroups;
+  }, [artistGroups, artistQuery]);
+  const selectedArtist =
+    visibleArtists.find((section) => section.artist === selectedArtistName) ??
+    visibleArtists[0] ??
+    null;
+  const selectedAlbum =
+    selectedArtist?.albums.find((album) => album.id === selectedAlbumId) ??
+    selectedArtist?.albums[0] ??
+    null;
+  const selectedFile =
+    selectedAlbum?.files.find((file) => file.id === selectedFileId) ??
+    selectedAlbum?.files[0] ??
+    null;
+  const albumQueue = useMemo(
+    () => selectedAlbum?.files.map((file) => file.id) ?? [],
+    [selectedAlbum]
+  );
+
+  function selectArtist(artist: string): void {
+    setSelectedArtistName(artist);
+    setSelectedAlbumId(null);
+    setSelectedFileId(null);
+  }
+
+  function selectAlbum(albumId: string): void {
+    setSelectedAlbumId(albumId);
+    setSelectedFileId(null);
+  }
+
+  if (albumsState.status === "loading" && albums.length === 0) {
+    return <div className="emptyState">Loading library.</div>;
+  }
+
+  if (albums.length === 0) {
+    return (
+      <div className="emptyState">
+        {albumsState.status === "error"
+          ? albumsState.message
+          : "No tagged albums are indexed yet. Open Manage to add and scan a library folder."}
+        <button type="button" onClick={onManage}>Manage library</button>
+      </div>
+    );
+  }
+
+  return (
+    <section className="libraryWorkbench" aria-label="Library browser">
+      <section className="libraryBrowserPane artistBrowserPane">
+        <header className="libraryPaneHeader">
+          <strong>Artists</strong>
+          <span>{artistGroups.length.toLocaleString()}</span>
+        </header>
+        <label className="libraryFilter">
+          <UiIcon name="search" />
+          <input
+            aria-label="Filter artists"
+            placeholder="Filter artists"
+            value={artistQuery}
+            onChange={(event) => setArtistQuery(event.target.value)}
+          />
+        </label>
+        <div className="libraryArtistList">
+          {visibleArtists.map((section) => {
+            const fileCount = section.albums.reduce((sum, album) => sum + album.files.length, 0);
+            return (
+              <button
+                className={section.artist === selectedArtist?.artist ? "active" : ""}
+                key={section.artist}
+                type="button"
+                onClick={() => selectArtist(section.artist)}
+              >
+                <strong>{section.artist}</strong>
+                <span>
+                  {section.albums.length} album{section.albums.length === 1 ? "" : "s"} - {fileCount} track{fileCount === 1 ? "" : "s"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <footer>
+          <span>A-Z</span>
+          <button type="button" onClick={onManage}>Manage files</button>
+        </footer>
+      </section>
+
+      <section className="libraryBrowserPane albumBrowserPane">
+        <header className="libraryPaneHeader">
+          <strong>Albums</strong>
+          <span>{selectedArtist?.albums.length ?? 0}</span>
+        </header>
+        <div className="libraryAlbumList">
+          {selectedArtist?.albums.map((album) => (
+            <button
+              className={album.id === selectedAlbum?.id ? "active" : ""}
+              key={album.id}
+              type="button"
+              onClick={() => selectAlbum(album.id)}
+            >
+              <Artwork className="libraryAlbumThumb" src={artworkAlbumUrl(album.id)} />
+              <span>
+                <strong>{album.album}</strong>
+                <small>{album.artist}</small>
+                <em>
+                  {album.year ?? "-"} - {album.fileCount} tracks
+                </em>
+              </span>
+            </button>
+          ))}
+        </div>
+        <footer>
+          <span>Grouped by artist</span>
+          <span>{selectedArtist?.artist ?? "-"}</span>
+        </footer>
+      </section>
+
+      <section className="libraryTrackPane">
+        {selectedAlbum ? (
+          <>
+            <header className="libraryAlbumTitlebar">
+              <div>
+                <span className="eyebrow">Album - {selectedAlbum.year ?? "Unknown year"}</span>
+                <h1>{selectedAlbum.album}</h1>
+                <p>
+                  {selectedAlbum.artist} - {selectedAlbum.fileCount} tracks -{" "}
+                  {selectedAlbum.durationMs == null ? "Unknown duration" : formatTime(selectedAlbum.durationMs)} -{" "}
+                  {selectedAlbum.formats.join(" / ")}
+                </p>
+              </div>
+              <div className="libraryAlbumActions">
+                <button
+                  className="primary"
+                  disabled={playbackBusy}
+                  type="button"
+                  onClick={() => void onPlayAlbum(selectedAlbum.id)}
+                >
+                  <TransportIcon shape="play" />
+                  Play
+                </button>
+                <button
+                  disabled={playbackBusy || albumQueue.length === 0}
+                  type="button"
+                  onClick={() => void onEnqueuePlayback(albumQueue, "end")}
+                >
+                  Queue
+                </button>
+                <button type="button" onClick={onManage}>Manage</button>
+              </div>
+            </header>
+
+            <div className="libraryTrackHeader" aria-hidden="true">
+              <span />
+              <span>#</span>
+              <span>Title</span>
+              <span>Time</span>
+              <span>Plays</span>
+              <span>Rating</span>
+              <span>Format</span>
+            </div>
+            <div className="libraryTrackList">
+              {selectedAlbum.files.map((file, index) => {
+                const isCurrent = playback.currentFileId === file.id;
+                const isSelected = selectedFile?.id === file.id;
+                return (
+                  <div
+                    className={`libraryTrackRow${isSelected ? " selected" : ""}${isCurrent ? " playing" : ""}`}
+                    key={file.id}
+                    onDoubleClick={() => void onPlayFile(file.id, albumQueue)}
+                  >
+                    <button
+                      aria-label={`Play ${file.displayTags.title ?? file.filename}`}
+                      className="libraryTrackPlay"
+                      disabled={playbackBusy}
+                      type="button"
+                      onClick={() => void onPlayFile(file.id, albumQueue)}
+                    >
+                      <TransportIcon shape={isCurrent && playback.status === "playing" ? "pause" : "play"} />
+                    </button>
+                    <span>{String(index + 1).padStart(2, "0")}</span>
+                    <button
+                      className="libraryTrackTitle"
+                      type="button"
+                      onClick={() => setSelectedFileId(file.id)}
+                    >
+                      <strong>{file.displayTags.title ?? file.filename}</strong>
+                      {isCurrent ? <MiniTrackWaveform playback={playback} waveform={currentWaveform} /> : null}
+                    </button>
+                    <span>{file.durationMs == null ? "-" : formatTime(file.durationMs)}</span>
+                    <span>{file.playCount || "-"}</span>
+                    <span className="libraryTrackRating" aria-label={file.rating == null ? "Not rated" : `${file.rating} stars`}>
+                      {[1, 2, 3, 4, 5].map((rating) => (
+                        <i className={(file.rating ?? 0) >= rating ? "active" : ""} key={rating}>
+                          <StarIcon />
+                        </i>
+                      ))}
+                    </span>
+                    <span>{formatFileFormat(file)}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <footer className="libraryTrackFooter">
+              <span>{selectedAlbum.fileCount} tracks</span>
+              <span>
+                {selectedFile?.sampleRate ? `${(selectedFile.sampleRate / 1000).toFixed(1)} kHz - ` : ""}
+                {selectedFile?.extension.toUpperCase() ?? selectedAlbum.formats.join(" / ")}
+              </span>
+            </footer>
+          </>
+        ) : (
+          <div className="emptyState">Choose an artist and album.</div>
+        )}
+      </section>
+    </section>
   );
 }
 
@@ -6701,7 +7118,11 @@ function SettingsView({
   const fontOptions = Object.entries(displayFonts) as Array<[DisplayFontId, (typeof displayFonts)[DisplayFontId]]>;
 
   return (
-    <>
+    <section className="settingsView" aria-label="Settings">
+      <header className="settingsPageHeader">
+        <h1>Settings</h1>
+        <span>Appearance, library behavior, and agent preferences</span>
+      </header>
       {state.status === "error" ? <div className="inlineError">{state.message}</div> : null}
       <section className="settingsPanel appearancePanel" aria-label="Appearance preferences">
         <div>
@@ -6937,14 +7358,16 @@ function SettingsView({
           <textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
         </label>
       </section>
-    </>
+    </section>
   );
 }
 
 function DiscoveryView({
+  busyImportBatchId,
   discoveryQuery,
   downloadState,
   downloadJobs,
+  importsState,
   playlistWorkflows,
   discoveryState,
   discoverySource,
@@ -6975,6 +7398,11 @@ function DiscoveryView({
   onOpenAgentThread,
   onOpenPlaylist,
   onOpenJobs,
+  onApplyImportBatch,
+  onCancelDownload,
+  onInspectImport,
+  onRejectImportBatch,
+  onRetryDownload,
   onRefreshHealth,
   onProposeSavedCandidateDownload,
   onRemoveSavedCandidate,
@@ -6990,9 +7418,11 @@ function DiscoveryView({
   onToggleFileSelect,
   onToggleGroup
 }: {
+  busyImportBatchId: string | null;
   discoveryQuery: string;
   downloadState: { status: "idle" | "working"; message: string | null };
   downloadJobs: DiscoveryDownloadJob[];
+  importsState: ImportsState;
   playlistWorkflows: AgentPlaylistWorkflow[];
   discoveryState: DiscoveryState;
   discoverySource: DiscoverySource;
@@ -7023,6 +7453,11 @@ function DiscoveryView({
   onOpenAgentThread(threadId: string): Promise<void>;
   onOpenPlaylist(playlistId: string): void;
   onOpenJobs(): void;
+  onApplyImportBatch(importBatch: ImportBatch): Promise<void>;
+  onCancelDownload(jobId: string): Promise<void>;
+  onInspectImport(importItemId: string): Promise<void>;
+  onRejectImportBatch(importBatch: ImportBatch): Promise<void>;
+  onRetryDownload(jobId: string): Promise<void>;
   onRefreshHealth(): Promise<void>;
   onProposeSavedCandidateDownload(candidate: SavedDiscoveryCandidate): Promise<void>;
   onRemoveSavedCandidate(candidateId: string): Promise<void>;
@@ -7068,6 +7503,7 @@ function DiscoveryView({
   const [visibleClusterLimit, setVisibleClusterLimit] = useState(10);
   const [discoverySearchMode, setDiscoverySearchMode] = useState<"search" | "list">("search");
   const [discoveryMainView, setDiscoveryMainView] = useState<"results" | "saved">("results");
+  const [discoveryWorkspaceTab, setDiscoveryWorkspaceTab] = useState<"results" | "downloads" | "ready">("results");
   const releaseFilteredClusters = useMemo(
     () => filterDiscoveryClustersByRelease(clusters, releaseFilter, (group) => getDiscoveryLibraryMatch(group, libraryMatches)),
     [clusters, libraryMatches, releaseFilter]
@@ -7097,6 +7533,10 @@ function DiscoveryView({
   const firstMissingParsedItem = parsedListState.items.find((item) => item.ownedMatchCount === 0) ?? null;
   const missingParsedCount = parsedListState.items.filter((item) => item.ownedMatchCount === 0).length;
   const activeDownloadCount = downloadJobs.filter((job) => job.status === "queued" || job.status === "running").length;
+  const importBatches = "imports" in importsState ? importsState.imports : [];
+  const readyImportBatches = importBatches.filter((batch) =>
+    batch.items.some((item) => item.status !== "imported" && item.status !== "rejected")
+  );
   const activeWorkflowCount = playlistWorkflows.filter((workflow) => workflow.status !== "completed" && workflow.status !== "failed").length;
   const discoveryStatusDetail = discoveryState.health?.message ?? discoveryState.health?.url ?? "Check slskd before searching.";
 
@@ -7108,7 +7548,7 @@ function DiscoveryView({
     <section className="discoveryControls discoveryPage" aria-label="Discovery">
       <section className="discoveryHero">
         <div className="discoveryHeroCopy">
-          <h2>{discoverySearchMode === "search" ? "Search songs, artists, and albums" : "Find a list of albums"}</h2>
+          <h2>{discoverySearchMode === "search" ? "Discovery" : "Import a list"}</h2>
           <div className="segmentedControl" aria-label="Discovery mode">
             <button
               className={discoverySearchMode === "search" ? "active" : ""}
@@ -7189,7 +7629,41 @@ function DiscoveryView({
         </div>
       ) : null}
 
-      <div className="discoveryWorkspace">
+      <nav className="discoveryWorkspaceTabs" aria-label="Discovery workspace">
+        <button
+          aria-current={discoveryWorkspaceTab === "results" ? "page" : undefined}
+          className={discoveryWorkspaceTab === "results" ? "active" : ""}
+          type="button"
+          onClick={() => setDiscoveryWorkspaceTab("results")}
+        >
+          <UiIcon name="search" />
+          <span>Results</span>
+          <strong>{clusters.length.toLocaleString()}</strong>
+        </button>
+        <button
+          aria-current={discoveryWorkspaceTab === "downloads" ? "page" : undefined}
+          className={discoveryWorkspaceTab === "downloads" ? "active" : ""}
+          type="button"
+          onClick={() => setDiscoveryWorkspaceTab("downloads")}
+        >
+          <DownloadIcon />
+          <span>Active downloads</span>
+          <strong>{activeDownloadCount.toLocaleString()}</strong>
+        </button>
+        <button
+          aria-current={discoveryWorkspaceTab === "ready" ? "page" : undefined}
+          className={discoveryWorkspaceTab === "ready" ? "active" : ""}
+          type="button"
+          onClick={() => setDiscoveryWorkspaceTab("ready")}
+        >
+          <UiIcon name="import" />
+          <span>Ready to import</span>
+          <strong>{readyImportBatches.length.toLocaleString()}</strong>
+        </button>
+      </nav>
+
+      {discoveryWorkspaceTab === "results" ? (
+        <div className="discoveryWorkspace">
         <div className="discoveryMainColumn">
           {discoveryState.results.length > 0 ? (
             <section className="discoveryFilterPanel" aria-label="Discovery filters">
@@ -7570,6 +8044,224 @@ function DiscoveryView({
             </section>
           ) : null}
         </aside>
+        </div>
+      ) : discoveryWorkspaceTab === "downloads" ? (
+        <DiscoveryDownloadsWorkspace
+          jobs={downloadJobs}
+          onCancel={onCancelDownload}
+          onOpenJobs={onOpenJobs}
+          onRetry={onRetryDownload}
+        />
+      ) : (
+        <DiscoveryReadyImportsWorkspace
+          busyImportBatchId={busyImportBatchId}
+          importsState={importsState}
+          onApplyBatch={onApplyImportBatch}
+          onInspect={onInspectImport}
+          onRemoveBatch={onRejectImportBatch}
+        />
+      )}
+    </section>
+  );
+}
+
+function DiscoveryDownloadsWorkspace({
+  jobs,
+  onCancel,
+  onOpenJobs,
+  onRetry
+}: {
+  jobs: DiscoveryDownloadJob[];
+  onCancel(jobId: string): Promise<void>;
+  onOpenJobs(): void;
+  onRetry(jobId: string): Promise<void>;
+}): ReactElement {
+  const sortedJobs = useMemo(
+    () => [...jobs].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)),
+    [jobs]
+  );
+  const activeJobs = sortedJobs.filter((job) => job.status === "queued" || job.status === "running");
+  const completedJobs = sortedJobs.filter((job) => job.status === "succeeded");
+  const totalRemaining = activeJobs.reduce(
+    (total, job) => total + Math.max(0, job.selectedCount - job.completedCount),
+    0
+  );
+
+  return (
+    <section className="discoveryDownloadsWorkspace" aria-label="Active downloads">
+      <header className="discoveryTabHeader">
+        <div>
+          <span className="eyebrow">Transfers</span>
+          <h2>Active downloads</h2>
+          <p>
+            {activeJobs.length.toLocaleString()} active - {totalRemaining.toLocaleString()} files remaining -{" "}
+            {completedJobs.length.toLocaleString()} completed
+          </p>
+        </div>
+        <button className="secondary" type="button" onClick={onOpenJobs}>
+          All jobs
+        </button>
+      </header>
+
+      <div className="discoveryDownloadRows">
+        {sortedJobs.length === 0 ? (
+          <div className="emptyState">No Discovery downloads yet.</div>
+        ) : (
+          sortedJobs.map((job, index) => {
+            const percent = Math.round(job.progress * 100);
+            const cancellable = job.status === "queued" || job.status === "running";
+            const retryable = job.status === "failed" || job.status === "cancelled";
+            return (
+              <article className="discoveryDownloadRow" key={job.id}>
+                <div className="discoveryDownloadIndex">{String(index + 1).padStart(2, "0")}</div>
+                <div className="discoveryDownloadMain">
+                  <div>
+                    <strong>{job.message ?? `Discovery transfer ${job.id.slice(0, 8)}`}</strong>
+                    <span>
+                      {job.completedCount.toLocaleString()} / {job.selectedCount.toLocaleString()} files
+                      {job.startedAt ? ` - started ${formatDateTime(job.startedAt)}` : ""}
+                    </span>
+                  </div>
+                  <div className="discoveryDownloadProgress">
+                    <i style={{ width: `${percent}%` }} />
+                  </div>
+                </div>
+                <div className="discoveryDownloadStatus">
+                  <strong>{percent}%</strong>
+                  <span className={`statusPill ${job.status}`}>{job.status}</span>
+                </div>
+                <div className="discoveryDownloadActions">
+                  {cancellable ? (
+                    <button className="secondary" type="button" onClick={() => void onCancel(job.id)}>
+                      Cancel
+                    </button>
+                  ) : null}
+                  {retryable ? (
+                    <button type="button" onClick={() => void onRetry(job.id)}>
+                      Retry
+                    </button>
+                  ) : null}
+                  {job.imported ? <span>Staged for import</span> : null}
+                </div>
+              </article>
+            );
+          })
+        )}
+      </div>
+    </section>
+  );
+}
+
+function DiscoveryReadyImportsWorkspace({
+  busyImportBatchId,
+  importsState,
+  onApplyBatch,
+  onInspect,
+  onRemoveBatch
+}: {
+  busyImportBatchId: string | null;
+  importsState: ImportsState;
+  onApplyBatch(importBatch: ImportBatch): Promise<void>;
+  onInspect(importItemId: string): Promise<void>;
+  onRemoveBatch(importBatch: ImportBatch): Promise<void>;
+}): ReactElement {
+  const imports = "imports" in importsState ? importsState.imports : [];
+  const readyBatches = imports.filter((batch) =>
+    batch.items.some((item) => item.status !== "imported" && item.status !== "rejected")
+  );
+  const readyItemCount = readyBatches.reduce(
+    (total, batch) => total + getReviewableImportItems(batch).length,
+    0
+  );
+
+  return (
+    <section className="discoveryReadyWorkspace" aria-label="Ready to import">
+      <header className="discoveryTabHeader">
+        <div>
+          <span className="eyebrow">Staging</span>
+          <h2>Ready to import</h2>
+          <p>
+            {readyBatches.length.toLocaleString()} album batch{readyBatches.length === 1 ? "" : "es"} -{" "}
+            {readyItemCount.toLocaleString()} reviewable files
+          </p>
+        </div>
+      </header>
+
+      {importsState.status === "error" ? <div className="inlineError">{importsState.message}</div> : null}
+      <div className="discoveryReadyBatches">
+        {readyBatches.length === 0 ? (
+          <div className="emptyState">Completed downloads will appear here for review before entering the library.</div>
+        ) : (
+          readyBatches.map((batch) => {
+            const reviewableItems = getReviewableImportItems(batch);
+            const visibleItems = batch.items.filter((item) => item.status !== "rejected");
+            const warningCount = visibleItems.reduce(
+              (total, item) => total + item.warnings.length + item.duplicateCandidates.length,
+              0
+            );
+            const busy = busyImportBatchId === batch.id;
+            const leadItem = visibleItems[0] ?? null;
+            return (
+              <article className="discoveryReadyBatch" key={batch.id}>
+                <header>
+                  <span className="discoveryReadyArtwork" aria-hidden="true">
+                    <UiIcon name="album" />
+                  </span>
+                  <div>
+                    <span className="eyebrow">Album import</span>
+                    <h3>{deriveImportBatchTitle(batch)}</h3>
+                    <p>
+                      {leadItem?.detectedArtist ?? "Unknown artist"} - {visibleItems.length.toLocaleString()} files - {batch.source}
+                    </p>
+                  </div>
+                  <div className="discoveryReadyActions">
+                    <button
+                      className="primary"
+                      disabled={reviewableItems.length === 0 || busy}
+                      type="button"
+                      onClick={() => void onApplyBatch(batch)}
+                    >
+                      {busy ? "Importing" : `Import album (${reviewableItems.length})`}
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={!leadItem || busy}
+                      type="button"
+                      onClick={() => leadItem ? void onInspect(leadItem.id) : undefined}
+                    >
+                      Review metadata
+                    </button>
+                    <button
+                      className="dangerButton"
+                      disabled={busy}
+                      type="button"
+                      onClick={() => void onRemoveBatch(batch)}
+                    >
+                      Remove from staging
+                    </button>
+                  </div>
+                </header>
+                <div className="discoveryReadySummary">
+                  <span>{batch.status}</span>
+                  <span>{reviewableItems.length.toLocaleString()} ready</span>
+                  <span>{warningCount.toLocaleString()} warnings</span>
+                  <span>{formatDateTime(batch.updatedAt)}</span>
+                </div>
+                <div className="discoveryReadyFiles">
+                  {visibleItems.map((item, index) => (
+                    <button type="button" key={item.id} onClick={() => void onInspect(item.id)}>
+                      <span>{String(index + 1).padStart(2, "0")}</span>
+                      <strong>{item.detectedTitle ?? basenameFromPath(item.stagingPath)}</strong>
+                      <span>{item.detectedArtist ?? "Unknown artist"}</span>
+                      <span>{item.status}</span>
+                      <span>{item.warnings.length + item.duplicateCandidates.length} warnings</span>
+                    </button>
+                  ))}
+                </div>
+              </article>
+            );
+          })
+        )}
       </div>
     </section>
   );
@@ -8027,6 +8719,339 @@ function DiscoveryGroupResult({
         </div>
       ) : null}
     </article>
+  );
+}
+
+type HomeAnalyticsPeriod = "7d" | "30d" | "90d" | "all";
+
+function HomeAnalyticsView({
+  albumsState,
+  recentAlbums,
+  libraryTotal,
+  playback,
+  playbackBusy,
+  onOpenAlbum,
+  onOpenArtistPage,
+  onPlayAlbum,
+  onPlayFile
+}: {
+  albumsState: AlbumsState;
+  recentAlbums: AlbumGroupItem[];
+  libraryTotal: number;
+  playback: PlaybackStateResponse;
+  playbackBusy: boolean;
+  onOpenAlbum(album: AlbumGroupItem): void;
+  onOpenArtistPage(artist: string): void;
+  onPlayAlbum(albumId: string): Promise<void>;
+  onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
+}): ReactElement {
+  const [period, setPeriod] = useState<HomeAnalyticsPeriod>("30d");
+  const [showLabels, setShowLabels] = useState(true);
+  const albums = "albums" in albumsState ? albumsState.albums.albums : [];
+  const files = useMemo(() => {
+    const byId = new Map<string, LibraryFile>();
+    for (const album of albums) {
+      for (const file of album.files) {
+        byId.set(file.id, file);
+      }
+    }
+    return [...byId.values()];
+  }, [albums]);
+  const periodCutoff = useMemo(() => {
+    if (period === "all") {
+      return 0;
+    }
+    const days = period === "7d" ? 7 : period === "30d" ? 30 : 90;
+    return Date.now() - days * 24 * 60 * 60 * 1000;
+  }, [period]);
+  const periodFiles = useMemo(
+    () =>
+      period === "all"
+        ? files
+        : files.filter((file) => {
+            if (!file.lastPlayedAt) {
+              return false;
+            }
+            const playedAt = new Date(file.lastPlayedAt).getTime();
+            return Number.isFinite(playedAt) && playedAt >= periodCutoff;
+          }),
+    [files, period, periodCutoff]
+  );
+  const periodFileIds = useMemo(() => new Set(periodFiles.map((file) => file.id)), [periodFiles]);
+  const periodAlbums = useMemo(
+    () => (period === "all" ? albums : albums.filter((album) => album.files.some((file) => periodFileIds.has(file.id)))),
+    [albums, period, periodFileIds]
+  );
+  const usesAllTimeFallback = period !== "all" && periodAlbums.length === 0;
+  const signalAlbums = periodAlbums.length > 0 ? periodAlbums : albums;
+  const signalFiles = periodFiles.length > 0 ? periodFiles : files;
+  const rankedAlbums = useMemo(
+    () =>
+      [...signalAlbums].sort(
+        (left, right) =>
+          albumPlayCount(right.files) - albumPlayCount(left.files) ||
+          albumLikeCount(right.files) - albumLikeCount(left.files) ||
+          albumAverageRating(right.files) - albumAverageRating(left.files) ||
+          compareAlbumsByMode(left, right, "artistAlbum")
+      ),
+    [signalAlbums]
+  );
+  const topAlbums = rankedAlbums.slice(0, 20);
+  const artistSections = useMemo(() => groupAlbumsByArtist(signalAlbums), [signalAlbums]);
+  const topArtists = useMemo(() => sortArtistSections(artistSections, "listens"), [artistSections]);
+  const recentFiles = useMemo(
+    () =>
+      [...files]
+        .filter((file) => Boolean(file.lastPlayedAt))
+        .sort((left, right) => (right.lastPlayedAt ?? "").localeCompare(left.lastPlayedAt ?? ""))
+        .slice(0, 8),
+    [files]
+  );
+  const recentQueue = useMemo(() => recentFiles.map((file) => file.id), [recentFiles]);
+  const playCount = signalFiles.reduce((sum, file) => sum + file.playCount, 0);
+  const listenTimeMs = getFilesListenTimeMs(signalFiles);
+  const losslessCount = signalFiles.filter((file) => isLosslessFile(file)).length;
+  const ratedCount = signalFiles.filter((file) => file.rating != null || file.liked != null || file.disliked != null).length;
+  const maxAlbumPlays = Math.max(1, ...rankedAlbums.slice(0, 24).map((album) => albumPlayCount(album.files)));
+  const distributionAlbums = rankedAlbums.slice(0, 24);
+  const heatmapFiles = useMemo(
+    () =>
+      [...signalFiles]
+        .sort(
+          (left, right) =>
+            right.playCount - left.playCount ||
+            (right.lastPlayedAt ?? "").localeCompare(left.lastPlayedAt ?? "")
+        )
+        .slice(0, 56),
+    [signalFiles]
+  );
+  const maxFilePlays = Math.max(1, ...heatmapFiles.map((file) => file.playCount));
+  const heatmapLevels = Array.from({ length: 56 }, (_, index) => {
+    const file = heatmapFiles[index];
+    return file ? Math.max(1, Math.min(5, Math.ceil((file.playCount / maxFilePlays) * 5))) : 0;
+  });
+  const formatRows = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const file of signalFiles) {
+      const format = (file.codec ?? file.extension ?? "other").toUpperCase();
+      counts.set(format, (counts.get(format) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 4)
+      .map(([format, count]) => ({
+        format,
+        count,
+        percent: signalFiles.length > 0 ? Math.round((count / signalFiles.length) * 100) : 0
+      }));
+  }, [signalFiles]);
+  const genreRows = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const file of signalFiles) {
+      const genre = file.displayTags.genre?.trim();
+      if (!genre) {
+        continue;
+      }
+      for (const value of genre.split(/[,;/]/).map((item) => item.trim()).filter(Boolean)) {
+        counts.set(value, (counts.get(value) ?? 0) + Math.max(1, file.playCount));
+      }
+    }
+    const max = Math.max(1, ...counts.values());
+    return [...counts.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 7)
+      .map(([genre, count]) => ({ genre, width: Math.max(24, Math.round((count / max) * 100)) }));
+  }, [signalFiles]);
+  const periodLabel =
+    period === "7d" ? "Last 7 days" : period === "30d" ? "Last 30 days" : period === "90d" ? "Last 90 days" : "All time";
+  const periodDescription = usesAllTimeFallback ? `${periodLabel} - no timestamped plays; showing all-time signals` : periodLabel;
+  const topArtist = topArtists[0] ?? null;
+  const topAlbum = topAlbums[0] ?? recentAlbums[0] ?? null;
+  const topAlbumPlays = topAlbum ? albumPlayCount(topAlbum.files) : 0;
+
+  return (
+    <section className="homeAnalyticsView" aria-label="Home analytics">
+      <header className="homeAnalyticsHeader">
+        <div>
+          <h1>Home</h1>
+          <span>Listening history and library signals</span>
+        </div>
+        <div className="homePeriodTabs" role="group" aria-label="Analytics period">
+          {([
+            ["7d", "7 days"],
+            ["30d", "30 days"],
+            ["90d", "90 days"],
+            ["all", "All time"]
+          ] as Array<[HomeAnalyticsPeriod, string]>).map(([value, label]) => (
+            <button className={period === value ? "active" : ""} key={value} type="button" onClick={() => setPeriod(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      <div className="homeAnalyticsScroll">
+        {albumsState.status === "error" ? <div className="inlineError">{albumsState.message}</div> : null}
+        {albumsState.status === "loading" && albums.length === 0 ? <div className="emptyState">Loading home.</div> : null}
+
+        <section className="homeAnalyticsTop">
+          <article className="homeCollagePanel">
+            <header>
+              <div>
+                <span className="eyebrow">Generated from listening history</span>
+                <h2>Top albums</h2>
+              </div>
+              <button className={showLabels ? "active" : ""} type="button" onClick={() => setShowLabels((value) => !value)}>
+                Labels
+              </button>
+            </header>
+            <div className={showLabels ? "homeCollageGrid showLabels" : "homeCollageGrid"}>
+              {topAlbums.map((album, index) => (
+                <button
+                  aria-label={`${index + 1}. ${album.album} by ${album.artist}`}
+                  className="homeCollageTile"
+                  key={album.id}
+                  type="button"
+                  onClick={() => onOpenAlbum(album)}
+                >
+                  <Artwork className="homeCollageArtwork" eager={index < 5} src={artworkAlbumUrl(album.id)} />
+                  <span className="homeCollageRank">{String(index + 1).padStart(2, "0")}</span>
+                  <span className="homeCollageLabel">
+                    <strong>{album.album}</strong>
+                    <small>{album.artist} / {albumPlayCount(album.files)} plays</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <footer>
+              <span>{topAlbums.length} ranked albums</span>
+              <span>{periodDescription}</span>
+            </footer>
+          </article>
+
+          <aside className="homeSummaryPanel">
+            <header>
+              <span className="eyebrow">Selected period</span>
+              <h2>{periodLabel}</h2>
+            </header>
+            <div className="homeMetricGrid">
+              <span><small>Listen time</small><strong>{formatListenTime(listenTimeMs)}</strong></span>
+              <span><small>Track plays</small><strong>{playCount.toLocaleString()}</strong></span>
+              <span><small>Artists</small><strong>{topArtists.length.toLocaleString()}</strong></span>
+              <span><small>Albums</small><strong>{signalAlbums.length.toLocaleString()}</strong></span>
+            </div>
+            <section className="homeCompactDistribution">
+              <div><span>Album play distribution</span><small>{rankedAlbums.length} albums</small></div>
+              <div className="homeCompactBars">
+                {rankedAlbums.slice(0, 14).map((album) => (
+                  <i key={album.id} style={{ height: `${Math.max(5, (albumPlayCount(album.files) / maxAlbumPlays) * 100)}%` }} title={album.album} />
+                ))}
+              </div>
+            </section>
+            <dl className="homeSignalList">
+              <div><dt>Most played artist</dt><dd>{topArtist?.artist ?? "-"}</dd></div>
+              <div><dt>Most played album</dt><dd>{topAlbum?.album ?? "-"}</dd></div>
+              <div><dt>Lossless files</dt><dd>{losslessCount.toLocaleString()}</dd></div>
+              <div><dt>Rated or marked</dt><dd>{ratedCount.toLocaleString()}</dd></div>
+            </dl>
+          </aside>
+        </section>
+
+        <section className="homeAnalysisGrid">
+          <article className="homeDistributionPanel">
+            <header><div><span className="eyebrow">Ranked albums</span><h3>Play distribution</h3></div><small>{distributionAlbums.length} albums</small></header>
+            <div className="homeDistributionChart">
+              {distributionAlbums.map((album, index) => (
+                <button
+                  className={index < 5 ? "peak" : ""}
+                  key={album.id}
+                  style={{ height: `${Math.max(4, (albumPlayCount(album.files) / maxAlbumPlays) * 100)}%` }}
+                  title={`${album.album}: ${albumPlayCount(album.files)} plays`}
+                  type="button"
+                  onClick={() => onOpenAlbum(album)}
+                />
+              ))}
+            </div>
+            <footer><span>Highest</span><span>Lower activity</span></footer>
+          </article>
+
+          <article className="homeHeatmapPanel">
+            <header><div><span className="eyebrow">Track activity</span><h3>Listening intensity</h3></div><small>{heatmapFiles.length} tracks</small></header>
+            <div className="homeHistoryHeatmap">
+              {heatmapLevels.map((level, index) => <i className={`level${level}`} key={index} />)}
+            </div>
+            <footer><span>Less</span><span className="homeHeatLegend">{[0, 1, 2, 3, 4, 5].map((level) => <i className={`level${level}`} key={level} />)}</span><span>More</span></footer>
+          </article>
+
+          <article className="homeFormatPanel">
+            <header><div><span className="eyebrow">Library mix</span><h3>Formats played</h3></div><small>{signalFiles.length} files</small></header>
+            <div className="homeFormatRows">
+              {formatRows.map((row) => (
+                <div key={row.format}>
+                  <span>{row.format}</span>
+                  <i><b style={{ width: `${row.percent}%` }} /></i>
+                  <strong>{row.percent}%</strong>
+                </div>
+              ))}
+            </div>
+          </article>
+        </section>
+
+        <section className="homeAnalyticsBottom">
+          <article className="homeRecentListens">
+            <header><div><span className="eyebrow">Playback history</span><h3>Recently played</h3></div></header>
+            <div className="homeRecentHead"><span>When</span><span>Track</span><span>Album</span><span>Time</span><span /></div>
+            {recentFiles.map((file) => (
+              <div className={file.id === playback.currentFileId ? "homeRecentRow active" : "homeRecentRow"} key={file.id}>
+                <span>{file.lastPlayedAt ? formatDateTime(file.lastPlayedAt) : "-"}</span>
+                <span className="homeRecentTitle">
+                  <Artwork className="homeRecentThumb" src={artworkFileUrl(file.id)} />
+                  <span><strong>{file.displayTags.title ?? file.filename}</strong><small>{file.displayTags.artist ?? "Unknown artist"}</small></span>
+                </span>
+                <span>{file.displayTags.album ?? "Unknown album"}</span>
+                <span>{file.durationMs == null ? "-" : formatTime(file.durationMs)}</span>
+                <button
+                  aria-label={`Play ${file.displayTags.title ?? file.filename}`}
+                  disabled={playbackBusy}
+                  type="button"
+                  onClick={() => void onPlayFile(file.id, recentQueue)}
+                >
+                  <TransportIcon shape={file.id === playback.currentFileId && playback.status === "playing" ? "pause" : "play"} />
+                </button>
+              </div>
+            ))}
+            {recentFiles.length === 0 ? <div className="homeAnalyticsEmpty">No playback history yet.</div> : null}
+          </article>
+
+          <aside className="homeFingerprintPanel">
+            <header><span className="eyebrow">Habit signals</span><h3>Listening fingerprint</h3></header>
+            <div className="homeFingerprintTags">
+              {genreRows.map((row) => <button key={row.genre} style={{ flexBasis: `${row.width}%` }} type="button">{row.genre}</button>)}
+              {genreRows.length === 0 ? <span>No genre tags available.</span> : null}
+            </div>
+            <div className="homeHabitFacts">
+              <button disabled={!topArtist} type="button" onClick={() => topArtist ? onOpenArtistPage(topArtist.artist) : undefined}>
+                <strong>{topArtist?.artist ?? "No artist signal"}</strong>
+                <span>{topArtist ? `${artistPlayCount(topArtist.albums)} plays across ${topArtist.albums.length} albums` : "Play music to build this view"}</span>
+              </button>
+              <button disabled={!topAlbum} type="button" onClick={() => topAlbum ? onOpenAlbum(topAlbum) : undefined}>
+                <strong>{topAlbum?.album ?? "No album signal"}</strong>
+                <span>{topAlbum ? `${topAlbumPlays} plays / ${topAlbum.artist}` : "No ranked album yet"}</span>
+              </button>
+              <button disabled={!topAlbum || playbackBusy} type="button" onClick={() => topAlbum ? void onPlayAlbum(topAlbum.id) : undefined}>
+                <strong>Start top album</strong>
+                <span>{topAlbum ? topAlbum.album : "Nothing available"}</span>
+              </button>
+            </div>
+          </aside>
+        </section>
+
+        <footer className="homeAnalyticsFooter">
+          <span>{libraryTotal.toLocaleString()} indexed tracks</span>
+          <span>{files.length.toLocaleString()} loaded into analytics</span>
+        </footer>
+      </div>
+    </section>
   );
 }
 
@@ -9836,6 +10861,8 @@ function PlaylistsView({
   onProposeRemoveItem(playlistId: string, itemId: string): Promise<void>;
 }): ReactElement {
   const playlists = "playlists" in playlistsState ? playlistsState.playlists : [];
+  const playlistTrackCount = playlists.reduce((sum, playlist) => sum + playlist.items.length, 0);
+  const playlistDurationMs = playlists.reduce((sum, playlist) => sum + playlist.items.reduce((trackSum, item) => trackSum + (item.file.durationMs ?? 0), 0), 0);
 
   if (selectedPlaylist) {
     return (
@@ -9860,6 +10887,12 @@ function PlaylistsView({
 
   return (
     <section className="playlistsPage" aria-label="Playlists overview">
+      <header className="playlistsPageHeader">
+        <div>
+          <h1>Lists</h1>
+          <span>{playlists.length.toLocaleString()} playlists / {playlistTrackCount.toLocaleString()} tracks / {formatListenTime(playlistDurationMs)}</span>
+        </div>
+      </header>
       {playlistsState.status === "error" ? <div className="inlineError">{playlistsState.message}</div> : null}
       <section className="playlistList" aria-label="Playlists">
         {playlists.length === 0 ? (
@@ -10193,81 +11226,159 @@ function AgentView({
   onSelectThread(threadId: string): Promise<void>;
   onSubmit(event: FormEvent<HTMLFormElement>): Promise<void>;
 }): ReactElement {
-  const promptExamples = [
-    "make me a playlist for late night focus",
-    "make me a playlist like this song",
-    "find the album with green day when i come around",
-    "search soulseek city pop"
-  ];
+  const [threadQuery, setThreadQuery] = useState("");
+  const activeThread = threads.find((thread) => thread.id === activeThreadId) ?? null;
+  const threadGroups = useMemo(() => {
+    const now = Date.now();
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+    const query = threadQuery.trim().toLocaleLowerCase();
+    const groups: Array<{ label: string; threads: typeof threads }> = [
+      { label: "Today", threads: [] },
+      { label: "Previous 7 days", threads: [] },
+      { label: "Older", threads: [] }
+    ];
+
+    for (const thread of [...threads].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))) {
+      if (query && !thread.title.toLocaleLowerCase().includes(query)) {
+        continue;
+      }
+      const updatedAt = new Date(thread.updatedAt).getTime();
+      const groupIndex = updatedAt >= startOfToday.getTime() ? 0 : updatedAt >= weekAgo ? 1 : 2;
+      groups[groupIndex]!.threads.push(thread);
+    }
+
+    return groups.filter((group) => group.threads.length > 0);
+  }, [threadQuery, threads]);
 
   return (
     <section className="agentView" aria-label="Agent">
-      <div className="agentThreadBar">
-        <label>
-          <span>Thread</span>
-          <StyledSelect
-            ariaLabel="Thread"
-            disabled={agentBusy || threads.length === 0}
-            options={threads.map((thread) => ({ value: thread.id, label: thread.title }))}
-            value={activeThreadId ?? ""}
-            onChange={(threadId) => void onSelectThread(threadId)}
+      <aside className="agentThreadRail">
+        <header>
+          <div>
+            <NavIcon view="Agent" />
+            <h1>Agent</h1>
+          </div>
+          <button disabled={agentBusy} type="button" onClick={() => void onNewThread()}>
+            <span aria-hidden="true">+</span>
+            New chat
+          </button>
+        </header>
+        <label className="agentThreadSearch">
+          <UiIcon name="search" />
+          <input
+            aria-label="Search chats"
+            placeholder="Search chats"
+            value={threadQuery}
+            onChange={(event) => setThreadQuery(event.target.value)}
           />
         </label>
-        <button className="secondary" disabled={agentBusy} type="button" onClick={() => void onNewThread()}>
-          New Thread
-        </button>
-      </div>
-      <form className="agentComposer" onSubmit={(event) => void onSubmit(event)}>
-        <input
-          aria-label="Agent message"
-          placeholder="Ask for a researched playlist, similar music, Soulseek finds, or playback"
-          value={agentInput}
-          onChange={(event) => setAgentInput(event.target.value)}
-        />
-        <button disabled={agentBusy || !agentInput.trim()} type="submit">
-          Send
-        </button>
-      </form>
-      <div className="agentQuickPrompts" aria-label="Example prompts">
-        {promptExamples.map((prompt) => (
-          <button disabled={agentBusy} key={prompt} type="button" onClick={() => setAgentInput(prompt)}>
-            {prompt}
-          </button>
-        ))}
-      </div>
-      <div className="agentTranscript">
-        {messages.map((message) => (
-          <div className={`agentMessage ${message.role}`} key={message.id}>
-            <span>{message.role === "user" ? "You" : "Agent"}</span>
-            {message.role === "agent" && message.response?.playlistId ? (
-              <strong>
-                {message.text}{" "}
-                <button className="inlineTextButton" type="button" onClick={() => void onOpenPlaylist(message.response!.playlistId!)}>
-                  Open playlist
+        <div className="agentThreadList">
+          {threadGroups.map((group) => (
+            <section key={group.label}>
+              <div className="agentThreadGroupLabel">
+                <span>{group.label}</span>
+                <small>{group.threads.length}</small>
+              </div>
+              {group.threads.map((thread) => (
+                <button
+                  aria-current={thread.id === activeThreadId ? "true" : undefined}
+                  className={thread.id === activeThreadId ? "active" : ""}
+                  disabled={agentBusy}
+                  key={thread.id}
+                  type="button"
+                  onClick={() => void onSelectThread(thread.id)}
+                >
+                  <strong>{thread.title}</strong>
+                  <span>{formatDateTime(thread.updatedAt)}</span>
                 </button>
-              </strong>
-            ) : (
-              <strong>{message.text}</strong>
-            )}
-            {message.role === "agent" && message.response ? (
-              <AgentResultSummary
-                response={message.response}
-                run={message.run ?? null}
-                onApplyOperationBatch={onApplyOperationBatch}
-                onApproveOperationBatch={onApproveOperationBatch}
-                onOpenOperations={onOpenOperations}
-                onOpenPlaylist={onOpenPlaylist}
-              />
+              ))}
+            </section>
+          ))}
+          {threadGroups.length === 0 ? <div className="agentThreadEmpty">No matching chats.</div> : null}
+        </div>
+        <footer>
+          <span className="agentConnectionDot" aria-hidden="true" />
+          <span>Tools connected</span>
+        </footer>
+      </aside>
+
+      <section className="agentConversation">
+        <header className="agentConversationHeader">
+          <div>
+            <h2>{activeThread?.title ?? "New chat"}</h2>
+            <span>{activeThread ? `Updated ${formatDateTime(activeThread.updatedAt)}` : "No thread selected"}</span>
+          </div>
+          <button className="secondary" type="button" onClick={onOpenOperations}>
+            Operations
+          </button>
+        </header>
+
+        <div className="agentTranscript">
+          {messages.length === 0 && !agentBusy ? (
+            <div className="agentEmptyConversation">
+              <NavIcon view="Agent" />
+              <strong>New chat</strong>
+            </div>
+          ) : null}
+          <div className="agentMessageColumn">
+            {messages.map((message) => (
+              <article className={`agentMessage ${message.role}`} key={message.id}>
+                <header>
+                  <span className="agentAvatar" aria-hidden="true">{message.role === "user" ? "Y" : <NavIcon view="Agent" />}</span>
+                  <strong>{message.role === "user" ? "You" : "Agent"}</strong>
+                </header>
+                <div className="agentMessageBody">
+                  {message.role === "agent" && message.response?.playlistId ? (
+                    <p>
+                      {message.text}{" "}
+                      <button className="inlineTextButton" type="button" onClick={() => void onOpenPlaylist(message.response!.playlistId!)}>
+                        Open playlist
+                      </button>
+                    </p>
+                  ) : (
+                    <p>{message.text}</p>
+                  )}
+                  {message.role === "agent" && message.response ? (
+                    <AgentResultSummary
+                      response={message.response}
+                      run={message.run ?? null}
+                      onApplyOperationBatch={onApplyOperationBatch}
+                      onApproveOperationBatch={onApproveOperationBatch}
+                      onOpenOperations={onOpenOperations}
+                      onOpenPlaylist={onOpenPlaylist}
+                    />
+                  ) : null}
+                </div>
+              </article>
+            ))}
+            {agentBusy ? (
+              <article className="agentMessage agent">
+                <header>
+                  <span className="agentAvatar" aria-hidden="true"><NavIcon view="Agent" /></span>
+                  <strong>Agent</strong>
+                </header>
+                <div className="agentMessageBody"><p>Planning request...</p></div>
+              </article>
             ) : null}
           </div>
-        ))}
-        {agentBusy ? (
-          <div className="agentMessage agent">
-            <span>Agent</span>
-            <strong>Planning request.</strong>
+        </div>
+
+        <form className="agentComposer" onSubmit={(event) => void onSubmit(event)}>
+          <div className="agentComposerInner">
+            <input
+              aria-label="Agent message"
+              placeholder="Message the music agent"
+              value={agentInput}
+              onChange={(event) => setAgentInput(event.target.value)}
+            />
+            <button aria-label="Send message" disabled={agentBusy || !agentInput.trim()} type="submit">
+              Send
+            </button>
           </div>
-        ) : null}
-      </div>
+        </form>
+      </section>
     </section>
   );
 }
@@ -12727,6 +13838,10 @@ function getDarkThemeVariables(): Record<string, string> {
     "--center-bg-vignette": "rgba(11, 13, 16, 0.58)",
     "--line": "#1f2633",
     "--line2": "#2b3445",
+    "--scrollbar-track": "#090b0e",
+    "--scrollbar-thumb": "#344054",
+    "--scrollbar-thumb-hover": "#536178",
+    "--scrollbar-thumb-active": "#c3f53c",
     "--panel-bg0": "rgba(11, 13, 16, 0.68)",
     "--panel-bg1": "rgba(16, 19, 26, 0.7)",
     "--panel-bg2": "rgba(21, 25, 35, 0.64)",
@@ -12748,6 +13863,10 @@ function getLightThemeVariables(): Record<string, string> {
     "--center-bg-vignette": "rgba(238, 241, 237, 0.56)",
     "--line": "#d8dfd4",
     "--line2": "#c1ccbd",
+    "--scrollbar-track": "#e5eae3",
+    "--scrollbar-thumb": "#9aa79b",
+    "--scrollbar-thumb-hover": "#68766c",
+    "--scrollbar-thumb-active": "#5b721e",
     "--panel-bg0": "rgba(238, 241, 237, 0.66)",
     "--panel-bg1": "rgba(248, 250, 246, 0.68)",
     "--panel-bg2": "rgba(238, 242, 236, 0.62)",

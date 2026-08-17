@@ -14,6 +14,10 @@
   --center-bg-vignette: rgba(11, 13, 16, 0.58);
   --line: #1f2633;
   --line2: #2b3445;
+  --scrollbar-track: #0b0d10;
+  --scrollbar-thumb: #344054;
+  --scrollbar-thumb-hover: #536178;
+  --scrollbar-thumb-active: #c3f53c;
   --panel-bg0: rgba(11, 13, 16, 0.68);
   --panel-bg1: rgba(16, 19, 26, 0.7);
   --panel-bg2: rgba(21, 25, 35, 0.64);
@@ -50,6 +54,7 @@
 
   color: var(--tx0);
   background: var(--bg0);
+  color-scheme: dark;
   font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 16px;
   font-synthesis: none;
@@ -59,6 +64,8 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: thin;
 }
 
 html,
@@ -83,26 +90,41 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 0.625rem;
-  height: 0.625rem;
+  width: 0.6875rem;
+  height: 0.6875rem;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--line2);
-  border: 0.1875rem solid var(--bg0);
-  border-radius: 0.3125rem;
+  min-width: 2rem;
+  min-height: 2rem;
+  border: 0.125rem solid var(--scrollbar-track);
+  border-radius: 0;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--tx2);
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: var(--scrollbar-thumb-active);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 ::-webkit-scrollbar-corner {
-  background: transparent;
+  background: var(--scrollbar-track);
 }
 
 :focus-visible {
@@ -643,6 +665,14 @@ h2 {
   background: var(--bg0);
   color: var(--tx0);
   transition: grid-template-columns var(--med);
+}
+
+.appShell.theme-dark {
+  color-scheme: dark;
+}
+
+.appShell.theme-light {
+  color-scheme: light;
 }
 
 .appShell.inspectorCollapsed {
@@ -8668,4 +8698,2919 @@ img.playerArt {
   .importMetadataEditor {
     grid-template-columns: 1fr;
   }
+}
+
+/* ============================================================
+   Workbench shell migration
+   The approved prototype uses one top-level navigation bar,
+   a compact transport, and a persistent Now Playing inspector.
+   ============================================================ */
+
+.appShell {
+  grid-template-columns: minmax(36rem, 1fr) 19.5rem;
+  grid-template-rows: 3.25rem minmax(0, 1fr);
+  min-width: 58rem;
+  background: var(--bg0);
+}
+
+.appShell *,
+.appShell *::before,
+.appShell *::after {
+  border-radius: 0 !important;
+}
+
+.sidebar,
+.playerBar {
+  display: none !important;
+}
+
+.appTopbar {
+  position: relative;
+  z-index: 20;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg0);
+}
+
+.topBrand,
+.topNavigation button,
+.topTransport button,
+.nowPlayingInspectorHeader button {
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.topBrand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+  padding: 0 0.75rem 0 0.5rem;
+  border-right: 0.0625rem solid var(--line);
+  color: var(--tx0);
+  cursor: pointer;
+}
+
+.topBrand:hover {
+  background: var(--bg1);
+}
+
+.topBrandMark {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  background: var(--acc);
+  color: var(--acc-ink);
+  font-family: var(--font-head);
+  font-size: 1.125rem;
+  font-weight: 800;
+  transform: rotate(-3deg);
+}
+
+.topBrandCopy {
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  white-space: nowrap;
+}
+
+.topBrandCopy strong {
+  font-family: var(--font-head);
+  font-size: 0.9375rem;
+  letter-spacing: -0.02em;
+}
+
+.topBrandCopy small {
+  color: var(--tx2);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.topNavigation {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.topNavigation button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0 0.6875rem;
+  color: var(--tx1);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.topNavigation button:hover {
+  background: var(--bg1);
+  color: var(--tx0);
+}
+
+.topNavigation button.active {
+  color: var(--tx0);
+}
+
+.topNavigation button.active::after {
+  content: "";
+  position: absolute;
+  right: 0.625rem;
+  bottom: 0;
+  left: 0.625rem;
+  height: 0.125rem;
+  background: var(--acc);
+}
+
+.topNavigation svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  color: currentColor;
+}
+
+.topbarSpacer {
+  min-width: 0.75rem;
+  flex: 1 1 auto;
+}
+
+.topTransport {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  align-self: center;
+  height: 2rem;
+  padding: 0 0.375rem;
+  border: 0.0625rem solid var(--line);
+  background: var(--bg0);
+}
+
+.topTransport > button {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.625rem;
+  padding: 0;
+  color: var(--tx1);
+  cursor: pointer;
+}
+
+.topTransport > button:not(:disabled):hover {
+  background: var(--bg2);
+  color: var(--tx0);
+}
+
+.topTransport > button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.topTransport > button svg {
+  width: 0.8125rem;
+  height: 0.8125rem;
+}
+
+.topTransport .topPlay {
+  color: var(--acc);
+}
+
+.topAnalyzer {
+  display: block;
+  width: 4.75rem;
+  height: 1.625rem;
+  overflow: hidden;
+  border: 0.0625rem solid var(--line2);
+  background: #030604;
+}
+
+.topAnalyzerCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.topSeek {
+  width: clamp(4.5rem, 7vw, 7.5rem) !important;
+  padding: 0 0.25rem !important;
+}
+
+.topSeek > span {
+  display: block;
+  width: 100%;
+  height: 0.1875rem;
+  overflow: hidden;
+  background: var(--line2);
+}
+
+.topSeek i {
+  display: block;
+  height: 100%;
+  background: var(--acc);
+}
+
+.topTime {
+  min-width: 2.1rem;
+  color: var(--tx2);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.topVolume {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.topVolume svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  color: var(--tx1);
+}
+
+.topVolume input[type="range"] {
+  width: 3.75rem;
+  height: 0.75rem;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  background: transparent;
+}
+
+.topVolume input[type="range"]::-webkit-slider-runnable-track {
+  height: 0.1875rem;
+  background: var(--line2);
+}
+
+.topVolume input[type="range"]::-webkit-slider-thumb {
+  width: 0.4375rem;
+  height: 0.4375rem;
+  margin-top: -0.125rem;
+  border: 0;
+  appearance: none;
+  background: var(--acc);
+}
+
+.topVolume input[type="range"]::-moz-range-track {
+  height: 0.1875rem;
+  border: 0;
+  background: var(--line2);
+}
+
+.topVolume input[type="range"]::-moz-range-thumb {
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border: 0;
+  background: var(--acc);
+}
+
+.topSearch {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  align-self: center;
+  width: clamp(12rem, 18vw, 21rem);
+  height: 2rem;
+  margin: 0 0.5rem;
+  padding: 0 0.625rem;
+  border: 0.0625rem solid var(--line);
+  background: var(--bg0);
+}
+
+.topSearch:focus-within {
+  border-color: var(--acc-line);
+}
+
+.topSearch > svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex: 0 0 auto;
+  color: var(--tx2);
+}
+
+.topSearch input {
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--tx0);
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.topSearch input::placeholder {
+  color: var(--tx2);
+}
+
+.topSearch kbd {
+  padding: 0.125rem 0.25rem;
+  border: 0.0625rem solid var(--line2);
+  color: var(--tx2);
+  font-family: inherit;
+  font-size: 0.5625rem;
+  white-space: nowrap;
+}
+
+.topHealth {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  flex: 0 0 1.75rem;
+}
+
+.topHealth .health {
+  display: block;
+  width: 0.4375rem;
+  min-width: 0;
+  height: 0.4375rem;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: var(--warn);
+  color: transparent;
+}
+
+.topHealth .health.ready {
+  background: var(--acc);
+}
+
+.topHealth .health.error {
+  background: var(--danger);
+}
+
+.topHealth .health > * {
+  display: none;
+}
+
+.appBackground {
+  grid-column: 1;
+  grid-row: 2;
+  background: var(--bg0);
+}
+
+.appBackground::before,
+.appBackground::after {
+  display: none;
+}
+
+.centerPane {
+  grid-column: 1;
+  grid-row: 2;
+  padding: 1rem 1.125rem;
+  background: var(--bg0);
+}
+
+.nowPlayingInspector {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 0.0625rem solid var(--line);
+  background: var(--bg0);
+}
+
+.nowPlayingInspectorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 2.625rem;
+  padding: 0 0.75rem;
+  border-bottom: 0.0625rem solid var(--line);
+  color: var(--tx0);
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.nowPlayingInspectorHeader button {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  color: var(--tx2);
+  cursor: pointer;
+}
+
+.nowPlayingInspectorHeader button:not(:disabled):hover {
+  background: var(--bg2);
+  color: var(--tx0);
+}
+
+.nowPlayingInspectorScroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.nowPlayingInspectorArtworkButton {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg1);
+  cursor: pointer;
+}
+
+.nowPlayingInspectorArtwork {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.nowPlayingInspectorArtwork.placeholder {
+  color: var(--tx2);
+}
+
+.nowPlayingInspectorArtwork.placeholder svg {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.nowPlayingInspectorBody {
+  padding: 0.875rem;
+}
+
+.nowPlayingInspectorBody .eyebrow {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--acc);
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.nowPlayingInspectorBody h2 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--tx0);
+  font-family: var(--font-head);
+  font-size: 1.375rem;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  text-overflow: ellipsis;
+}
+
+.nowPlayingInspectorLinks {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  margin-top: 0.375rem;
+  color: var(--tx2);
+}
+
+.nowPlayingInspectorLinks button {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--tx1);
+  font: inherit;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.nowPlayingInspectorLinks button:not(:disabled):hover {
+  color: var(--acc);
+}
+
+.nowPlayingSpectrogram {
+  position: relative;
+  height: 8.25rem;
+  margin-top: 0.875rem;
+  overflow: hidden;
+  border: 0.0625rem solid var(--line);
+  background: #030708;
+}
+
+.nowPlayingSpectrogramCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+.nowPlayingSpectrogram > span,
+.nowPlayingSpectrogram > small {
+  position: absolute;
+  bottom: 0.25rem;
+  z-index: 1;
+  color: var(--acc);
+  font-size: 0.5rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.nowPlayingSpectrogram > span {
+  left: 0.375rem;
+}
+
+.nowPlayingSpectrogram > small {
+  right: 0.375rem;
+  color: var(--tx1);
+}
+
+.nowPlayingInspector .nowPlayingActions.bar {
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.375rem 0;
+  border-bottom: 0.0625rem solid var(--line);
+}
+
+.nowPlayingInspectorMetadata {
+  margin: 0.625rem 0 0;
+}
+
+.nowPlayingInspectorMetadata > div {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.4375rem 0;
+  border-bottom: 0.0625rem solid var(--line);
+  font-size: 0.6875rem;
+}
+
+.nowPlayingInspectorMetadata dt {
+  color: var(--tx2);
+  font-size: 0.5625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nowPlayingInspectorMetadata dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--tx1);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nowPlayingMetadataAction {
+  display: block;
+  margin: 0.75rem auto 0;
+  padding: 0.375rem;
+  border: 0;
+  background: transparent;
+  color: var(--acc);
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.nowPlayingMetadataAction:disabled {
+  color: var(--tx2);
+  cursor: default;
+}
+
+@media (max-width: 76rem) {
+  .appShell {
+    grid-template-columns: minmax(32rem, 1fr) 17rem;
+  }
+
+  .topBrandCopy small,
+  .topNavigation button span,
+  .topTime,
+  .topVolume svg,
+  .topHealth {
+    display: none;
+  }
+
+  .topNavigation button {
+    padding: 0 0.625rem;
+  }
+
+  .topSearch {
+    width: 12rem;
+  }
+}
+
+/* Three-pane library workbench -------------------------------- */
+
+.centerPane:has(.libraryWorkbench) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.libraryWorkbench {
+  display: grid;
+  grid-template-columns: 13.5rem 16rem minmax(23rem, 1fr);
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg0);
+}
+
+.libraryBrowserPane,
+.libraryTrackPane {
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg0);
+}
+
+.libraryBrowserPane {
+  display: grid;
+  grid-template-rows: 2.5rem auto minmax(0, 1fr) 1.75rem;
+  border-right: 0.0625rem solid var(--line);
+}
+
+.albumBrowserPane {
+  grid-template-rows: 2.5rem minmax(0, 1fr) 1.75rem;
+}
+
+.libraryPaneHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.625rem;
+  border-bottom: 0.0625rem solid var(--line);
+  color: var(--tx0);
+}
+
+.libraryPaneHeader strong {
+  font-family: var(--font-head);
+  font-size: 0.8125rem;
+}
+
+.libraryPaneHeader span {
+  color: var(--tx2);
+  font-size: 0.625rem;
+}
+
+.libraryFilter {
+  display: flex;
+  align-items: center;
+  gap: 0.4375rem;
+  min-height: 2rem;
+  padding: 0 0.625rem;
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg0);
+}
+
+.libraryFilter svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: 0 0 auto;
+  color: var(--tx2);
+}
+
+.libraryFilter input {
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--tx0);
+  font: inherit;
+  font-size: 0.6875rem;
+}
+
+.libraryFilter input::placeholder {
+  color: var(--tx2);
+}
+
+.libraryArtistList,
+.libraryAlbumList,
+.libraryTrackList {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.libraryArtistList > button,
+.libraryAlbumList > button {
+  position: relative;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--tx1);
+  text-align: left;
+  cursor: pointer;
+}
+
+.libraryArtistList > button {
+  display: grid;
+  gap: 0.1875rem;
+  min-height: 3rem;
+  padding: 0.4375rem 1.125rem 0.4375rem 0.625rem;
+}
+
+.libraryArtistList > button:hover,
+.libraryAlbumList > button:hover {
+  background: var(--bg1);
+  color: var(--tx0);
+}
+
+.libraryArtistList > button.active,
+.libraryAlbumList > button.active {
+  background: var(--bg2);
+  color: var(--tx0);
+}
+
+.libraryArtistList > button.active::after,
+.libraryAlbumList > button.active::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0.4375rem;
+  width: 0.5625rem;
+  height: 0.125rem;
+  background: var(--acc);
+  transform: translateY(-50%);
+}
+
+.libraryArtistList strong,
+.libraryAlbumList strong {
+  overflow: hidden;
+  color: currentColor;
+  font-family: var(--font-head);
+  font-size: 0.75rem;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.libraryArtistList > button.active strong,
+.libraryAlbumList > button.active strong {
+  color: var(--acc);
+}
+
+.libraryArtistList span {
+  color: var(--tx2);
+  font-size: 0.625rem;
+}
+
+.libraryBrowserPane > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0 0.625rem;
+  border-top: 0.0625rem solid var(--line);
+  color: var(--tx2);
+  font-size: 0.5625rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.libraryBrowserPane > footer button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--tx2);
+  font: inherit;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.libraryBrowserPane > footer button:hover {
+  color: var(--acc);
+}
+
+.libraryAlbumList > button {
+  display: grid;
+  grid-template-columns: 2.75rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 3.625rem;
+  padding: 0.375rem 1.125rem 0.375rem 0.625rem;
+}
+
+.libraryAlbumThumb {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  object-fit: cover;
+  background: var(--bg2);
+}
+
+.libraryAlbumList > button > span {
+  display: grid;
+  min-width: 0;
+}
+
+.libraryAlbumList small,
+.libraryAlbumList em {
+  overflow: hidden;
+  color: var(--tx2);
+  font-size: 0.59375rem;
+  font-style: normal;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.libraryTrackPane {
+  display: flex;
+  flex-direction: column;
+}
+
+.libraryAlbumTitlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 6.25rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg0);
+}
+
+.libraryAlbumTitlebar > div:first-child {
+  min-width: 0;
+}
+
+.libraryAlbumTitlebar .eyebrow {
+  color: var(--acc);
+  font-size: 0.5625rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.libraryAlbumTitlebar h1 {
+  margin: 0.1875rem 0 0;
+  overflow: hidden;
+  color: var(--tx0);
+  font-family: var(--font-head);
+  font-size: 1.625rem;
+  line-height: 1;
+  letter-spacing: -0.045em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.libraryAlbumTitlebar p {
+  margin: 0.35rem 0 0;
+  overflow: hidden;
+  color: var(--tx2);
+  font-size: 0.625rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.libraryAlbumActions {
+  display: flex;
+  align-items: center;
+  gap: 0.3125rem;
+  flex: 0 0 auto;
+}
+
+.libraryAlbumActions button {
+  display: flex;
+  align-items: center;
+  gap: 0.3125rem;
+  min-height: 1.875rem;
+  padding: 0 0.625rem;
+  border: 0.0625rem solid var(--line2);
+  background: var(--bg0);
+  color: var(--tx1);
+  font: inherit;
+  font-size: 0.625rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.libraryAlbumActions button.primary {
+  border-color: var(--acc);
+  background: var(--acc);
+  color: var(--acc-ink);
+}
+
+.libraryAlbumActions button svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.libraryTrackHeader,
+.libraryTrackRow {
+  display: grid;
+  grid-template-columns: 2rem 2.5rem minmax(10rem, 1fr) 3.75rem 3.5rem 5.75rem 7rem;
+  align-items: center;
+}
+
+.libraryTrackHeader {
+  min-height: 2rem;
+  padding: 0 0.5rem;
+  border-bottom: 0.0625rem solid var(--line);
+  color: var(--tx2);
+  font-size: 0.5625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.libraryTrackRow {
+  position: relative;
+  min-height: 2.625rem;
+  padding: 0 0.5rem;
+  border-bottom: 0.0625rem solid var(--line);
+  color: var(--tx1);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.libraryTrackRow:hover {
+  background: var(--bg1);
+}
+
+.libraryTrackRow.selected {
+  background: var(--bg2);
+  color: var(--tx0);
+}
+
+.libraryTrackRow.selected::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0.4375rem;
+  width: 0.5625rem;
+  height: 0.125rem;
+  background: var(--acc);
+  transform: translateY(-50%);
+}
+
+.libraryTrackRow.playing .libraryTrackTitle strong {
+  color: var(--acc);
+}
+
+.libraryTrackPlay {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--tx2);
+  cursor: pointer;
+}
+
+.libraryTrackPlay:hover {
+  background: var(--bg3);
+  color: var(--tx0);
+}
+
+.libraryTrackPlay svg {
+  width: 0.6875rem;
+  height: 0.6875rem;
+}
+
+.libraryTrackTitle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+  padding: 0 0.5rem 0 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.libraryTrackTitle strong {
+  overflow: hidden;
+  font-family: var(--font-head);
+  font-size: 0.75rem;
+  letter-spacing: -0.015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.libraryTrackTitle .miniTrackWaveform {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.125rem;
+  left: 0;
+  height: 0.375rem;
+  opacity: 0.42;
+}
+
+.libraryTrackRating {
+  display: flex;
+  gap: 0.0625rem;
+  color: var(--line2);
+}
+
+.libraryTrackRating i {
+  display: grid;
+  place-items: center;
+  width: 0.6875rem;
+  height: 0.6875rem;
+}
+
+.libraryTrackRating i.active {
+  color: var(--acc);
+}
+
+.libraryTrackRating svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+.libraryTrackFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 1.75rem;
+  margin-top: auto;
+  padding: 0 0.625rem;
+  border-top: 0.0625rem solid var(--line);
+  color: var(--tx2);
+  font-size: 0.5625rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 76rem) {
+  .libraryWorkbench {
+    grid-template-columns: 11rem 13rem minmax(20rem, 1fr);
+  }
+
+  .libraryTrackHeader,
+  .libraryTrackRow {
+    grid-template-columns: 1.75rem 2rem minmax(9rem, 1fr) 3.5rem 4.75rem;
+  }
+
+  .libraryTrackHeader > span:nth-child(5),
+  .libraryTrackHeader > span:nth-child(6),
+  .libraryTrackRow > span:nth-of-type(3),
+  .libraryTrackRow .libraryTrackRating {
+    display: none;
+  }
+}
+
+/* Discovery transfer workbench -------------------------------- */
+
+.centerPane:has(.discoveryPage) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.discoveryPage {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg0);
+}
+
+.discoveryHero {
+  display: grid;
+  grid-template-columns: minmax(11rem, 0.42fr) minmax(24rem, 1fr);
+  align-items: end;
+  gap: 1rem;
+  flex: 0 0 auto;
+  min-height: 5.5rem;
+  padding: 0.75rem 1rem;
+  border: 0;
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg0);
+  background-image: none;
+}
+
+.discoveryHeroCopy {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.discoveryHeroCopy h2 {
+  margin: 0;
+  font-family: var(--font-head);
+  font-size: 1.5rem;
+  line-height: 1;
+  letter-spacing: -0.045em;
+}
+
+.discoveryHero .segmentedControl button,
+.discoverySearchForm button,
+.discoveryListParser button {
+  min-height: 2rem;
+  font-size: 0.6875rem;
+}
+
+.discoverySearchForm {
+  display: grid;
+  grid-template-columns: 7rem minmax(12rem, 1fr) auto auto;
+  align-items: end;
+  gap: 0.375rem;
+}
+
+.discoverySearchForm label > span,
+.discoveryRefiners label > span {
+  font-size: 0.5625rem;
+}
+
+.discoverySearchForm input {
+  min-height: 2rem;
+  font-size: 0.75rem;
+}
+
+.discoveryWorkspaceTabs {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 2.625rem;
+  padding: 0 1rem;
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg0);
+}
+
+.discoveryWorkspaceTabs button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4375rem;
+  min-width: 9.75rem;
+  padding: 0 0.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--tx1);
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.discoveryWorkspaceTabs button:hover {
+  background: var(--bg1);
+  color: var(--tx0);
+}
+
+.discoveryWorkspaceTabs button.active {
+  color: var(--tx0);
+}
+
+.discoveryWorkspaceTabs button.active::after {
+  content: "";
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0;
+  left: 0.75rem;
+  height: 0.125rem;
+  background: var(--acc);
+}
+
+.discoveryWorkspaceTabs svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.discoveryWorkspaceTabs strong {
+  margin-left: auto;
+  color: var(--acc);
+  font-size: 0.625rem;
+}
+
+.discoveryPage > .inlineError,
+.discoveryPage > .inlineNotice {
+  flex: 0 0 auto;
+  margin: 0;
+  border-right: 0;
+  border-left: 0;
+}
+
+.discoveryWorkspace {
+  display: grid;
+  grid-template-columns: minmax(30rem, 1fr) minmax(18rem, 0.44fr);
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  background: var(--bg0);
+}
+
+.discoveryMainColumn,
+.discoverySideColumn {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.discoveryMainColumn {
+  border-right: 0.0625rem solid var(--line);
+}
+
+.discoverySideColumn {
+  padding: 0.75rem;
+}
+
+.discoveryFilterPanel,
+.discoveryDownloadAction,
+.discoveryResults,
+.discoveryStatus,
+.discoveryCandidateDetail,
+.parsedDiscoveryList,
+.downloadJobsCompact,
+.savedDiscoveryLists {
+  border-color: var(--line);
+  border-left-width: 0.0625rem;
+  background: var(--bg0);
+  background-image: none;
+  box-shadow: none;
+}
+
+.discoveryStatus.ready {
+  border-left-color: var(--line);
+}
+
+.discoveryFilterPanel {
+  margin: 0;
+  border-width: 0 0 0.0625rem;
+}
+
+.discoveryDownloadAction {
+  margin: 0;
+  border-width: 0 0 0.0625rem;
+}
+
+.discoveryResults {
+  margin: 0;
+  border: 0;
+}
+
+.discoveryDownloadsWorkspace,
+.discoveryReadyWorkspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg0);
+}
+
+.discoveryTabHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex: 0 0 auto;
+  min-height: 5.25rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 0.0625rem solid var(--line);
+}
+
+.discoveryTabHeader .eyebrow {
+  color: var(--acc);
+  font-size: 0.5625rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.discoveryTabHeader h2 {
+  margin: 0.1875rem 0 0;
+  font-family: var(--font-head);
+  font-size: 1.5rem;
+  letter-spacing: -0.04em;
+}
+
+.discoveryTabHeader p {
+  margin: 0.3125rem 0 0;
+  color: var(--tx2);
+  font-size: 0.6875rem;
+}
+
+.discoveryDownloadRows,
+.discoveryReadyBatches {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.discoveryDownloadRow {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(16rem, 1fr) 7rem 9rem;
+  align-items: center;
+  min-height: 5.25rem;
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg0);
+}
+
+.discoveryDownloadRow:hover {
+  background: var(--bg1);
+}
+
+.discoveryDownloadIndex {
+  color: var(--tx2);
+  font-size: 0.625rem;
+  text-align: center;
+}
+
+.discoveryDownloadMain {
+  display: grid;
+  gap: 0.625rem;
+  min-width: 0;
+  padding: 0.625rem;
+}
+
+.discoveryDownloadMain > div:first-child {
+  display: grid;
+  gap: 0.1875rem;
+}
+
+.discoveryDownloadMain strong {
+  overflow: hidden;
+  font-family: var(--font-head);
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discoveryDownloadMain span {
+  color: var(--tx2);
+  font-size: 0.625rem;
+}
+
+.discoveryDownloadProgress {
+  height: 0.3125rem;
+  overflow: hidden;
+  background: var(--line2);
+}
+
+.discoveryDownloadProgress i {
+  display: block;
+  height: 100%;
+  background: var(--acc);
+}
+
+.discoveryDownloadStatus {
+  display: grid;
+  justify-items: end;
+  gap: 0.3125rem;
+  padding: 0.625rem;
+}
+
+.discoveryDownloadStatus > strong {
+  color: var(--acc);
+  font-size: 0.875rem;
+}
+
+.discoveryDownloadActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3125rem;
+  padding: 0.625rem;
+}
+
+.discoveryDownloadActions button,
+.discoveryTabHeader > button {
+  min-height: 1.875rem;
+  padding: 0 0.625rem;
+  font-size: 0.625rem;
+}
+
+.discoveryDownloadActions span {
+  color: var(--acc);
+  font-size: 0.5625rem;
+}
+
+.discoveryReadyBatch {
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg0);
+}
+
+.discoveryReadyBatch > header {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(13rem, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 5rem;
+  padding: 0.625rem 1rem;
+}
+
+.discoveryReadyArtwork {
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border: 0.0625rem solid var(--line);
+  background: var(--bg2);
+  color: var(--tx2);
+}
+
+.discoveryReadyArtwork svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.discoveryReadyBatch h3 {
+  margin: 0.125rem 0 0;
+  font-family: var(--font-head);
+  font-size: 1rem;
+  letter-spacing: -0.025em;
+}
+
+.discoveryReadyBatch p {
+  margin: 0.25rem 0 0;
+  color: var(--tx2);
+  font-size: 0.625rem;
+}
+
+.discoveryReadyActions {
+  display: flex;
+  align-items: center;
+  gap: 0.3125rem;
+}
+
+.discoveryReadyActions button {
+  min-height: 1.875rem;
+  padding: 0 0.625rem;
+  font-size: 0.625rem;
+}
+
+.discoveryReadySummary {
+  display: flex;
+  gap: 1rem;
+  padding: 0.4375rem 1rem;
+  border-top: 0.0625rem solid var(--line);
+  border-bottom: 0.0625rem solid var(--line);
+  color: var(--tx2);
+  font-size: 0.5625rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.discoveryReadyFiles {
+  max-height: 17rem;
+  overflow-y: auto;
+}
+
+.discoveryReadyFiles > button {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(12rem, 1fr) minmax(8rem, 0.6fr) 7rem 6rem;
+  align-items: center;
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0 1rem;
+  border: 0;
+  border-bottom: 0.0625rem solid var(--line);
+  background: transparent;
+  color: var(--tx1);
+  font: inherit;
+  font-size: 0.625rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.discoveryReadyFiles > button:hover {
+  background: var(--bg1);
+  color: var(--tx0);
+}
+
+.discoveryReadyFiles strong {
+  overflow: hidden;
+  font-family: var(--font-head);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discoveryReadyFiles span {
+  overflow: hidden;
+  color: var(--tx2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 76rem) {
+  .discoveryHero {
+    grid-template-columns: 10rem minmax(22rem, 1fr);
+  }
+
+  .discoverySearchForm {
+    grid-template-columns: 6.5rem minmax(10rem, 1fr) auto;
+  }
+
+  .discoverySearchForm > button.secondary {
+    display: none;
+  }
+
+  .discoveryWorkspace {
+    grid-template-columns: minmax(25rem, 1fr) 17rem;
+  }
+
+  .discoveryReadyBatch > header {
+    grid-template-columns: 3rem minmax(10rem, 1fr);
+  }
+
+  .discoveryReadyArtwork {
+    width: 3rem;
+    height: 3rem;
+  }
+
+  .discoveryReadyActions {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ------------------------------------------------------------
+   Agent workbench migration
+   ------------------------------------------------------------ */
+
+.centerPane:has(.agentView) {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.agentView {
+  display: grid;
+  grid-template-columns: 18.75rem minmax(0, 1fr);
+  gap: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg0);
+}
+
+.agentThreadRail {
+  display: grid;
+  grid-template-rows: 3.625rem 3rem minmax(0, 1fr) 2.75rem;
+  min-width: 0;
+  min-height: 0;
+  border-right: 0.0625rem solid var(--line);
+  background: var(--bg1);
+}
+
+.agentThreadRail > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0 0.75rem;
+  border-bottom: 0.0625rem solid var(--line);
+}
+
+.agentThreadRail > header > div {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.agentThreadRail > header svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--acc);
+}
+
+.agentThreadRail h1 {
+  margin: 0;
+  color: var(--tx0);
+  font-family: var(--font-head);
+  font-size: 1.25rem;
+  font-weight: 760;
+  letter-spacing: -0.035em;
+}
+
+.agentThreadRail > header > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2rem;
+  padding: 0 0.625rem;
+  border-color: var(--acc);
+  background: var(--acc);
+  color: var(--acc-ink);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.agentThreadRail > header > button > span {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.agentThreadSearch {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0.625rem;
+  border: 0.0625rem solid var(--line);
+  background: var(--bg0);
+  color: var(--tx2);
+  padding: 0 0.625rem;
+}
+
+.agentThreadSearch svg {
+  flex: 0 0 auto;
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.agentThreadSearch input {
+  width: 100%;
+  min-width: 0;
+  height: 2rem;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--tx0);
+  font: 0.8125rem var(--font-data);
+  padding: 0;
+}
+
+.agentThreadList {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.375rem 0;
+}
+
+.agentThreadList > section {
+  display: grid;
+}
+
+.agentThreadGroupLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 2rem;
+  padding: 0 0.75rem;
+  color: var(--tx2);
+  font: 0.6875rem var(--font-data);
+  letter-spacing: 0.065em;
+  text-transform: uppercase;
+}
+
+.agentThreadGroupLabel small {
+  font: inherit;
+}
+
+.agentThreadList > section > button {
+  position: relative;
+  display: grid;
+  justify-items: start;
+  gap: 0.25rem;
+  width: 100%;
+  min-height: 3.625rem;
+  padding: 0.625rem 0.75rem;
+  border: 0;
+  border-bottom: 0.0625rem solid var(--line);
+  background: transparent;
+  color: var(--tx1);
+  text-align: left;
+}
+
+.agentThreadList > section > button:first-of-type {
+  border-top: 0.0625rem solid var(--line);
+}
+
+.agentThreadList > section > button:hover {
+  background: var(--bg2);
+  color: var(--tx0);
+}
+
+.agentThreadList > section > button.active {
+  background: var(--bg2);
+  color: var(--tx0);
+}
+
+.agentThreadList > section > button.active::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 0.125rem;
+  background: var(--acc);
+}
+
+.agentThreadList > section > button strong,
+.agentThreadList > section > button span {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentThreadList > section > button strong {
+  color: inherit;
+  font-family: var(--font-head);
+  font-size: 0.8125rem;
+  font-weight: 680;
+}
+
+.agentThreadList > section > button span {
+  color: var(--tx2);
+  font: 0.6875rem var(--font-data);
+}
+
+.agentThreadEmpty {
+  padding: 1rem 0.75rem;
+  color: var(--tx2);
+  font-size: 0.8125rem;
+}
+
+.agentThreadRail > footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.75rem;
+  border-top: 0.0625rem solid var(--line);
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.agentConnectionDot {
+  width: 0.4375rem;
+  height: 0.4375rem;
+  background: var(--acc);
+}
+
+.agentConversation {
+  display: grid;
+  grid-template-rows: 3.625rem minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.agentConversationHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 1rem;
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg1);
+}
+
+.agentConversationHeader > div {
+  display: grid;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+
+.agentConversationHeader h2 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--tx0);
+  font-family: var(--font-head);
+  font-size: 1rem;
+  font-weight: 720;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentConversationHeader span {
+  color: var(--tx2);
+  font-size: 0.6875rem;
+}
+
+.agentConversationHeader button {
+  min-height: 2rem;
+  font-size: 0.75rem;
+}
+
+.agentTranscript {
+  position: relative;
+  display: block;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 0;
+  background: transparent;
+  backdrop-filter: none;
+  padding: 0;
+}
+
+.agentMessageColumn {
+  display: grid;
+  gap: 0;
+  width: min(58rem, calc(100% - 4rem));
+  margin: 0 auto;
+  padding: 1.5rem 0 2rem;
+}
+
+.agentMessage {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 1rem;
+  width: 100%;
+  max-width: none;
+  padding: 1.125rem 0;
+  border: 0;
+  border-bottom: 0.0625rem solid var(--line);
+  background: transparent;
+}
+
+.agentMessage.user {
+  justify-self: stretch;
+  border-color: var(--line);
+  background: transparent;
+}
+
+.agentMessage > header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  align-self: start;
+  min-width: 0;
+}
+
+.agentMessage > header > strong {
+  color: var(--tx1);
+  font-family: var(--font-head);
+  font-size: 0.75rem;
+  font-weight: 680;
+}
+
+.agentAvatar {
+  display: grid;
+  place-items: center;
+  width: 1.625rem;
+  height: 1.625rem;
+  border: 0.0625rem solid var(--line2);
+  color: var(--tx1);
+  font: 0.6875rem var(--font-data);
+}
+
+.agentMessage.agent .agentAvatar {
+  border-color: var(--acc-line);
+  color: var(--acc);
+}
+
+.agentAvatar svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.agentMessageBody {
+  min-width: 0;
+  color: var(--tx0);
+}
+
+.agentMessageBody > p {
+  margin: 0;
+  color: var(--tx0);
+  font-size: 0.875rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.agentMessageBody .agentResultSummary {
+  margin-top: 0.875rem;
+}
+
+.agentResultSummary > span,
+.agentResultSummary .agentResults {
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.agentEmptyConversation {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.625rem;
+  color: var(--tx2);
+}
+
+.agentEmptyConversation svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.agentEmptyConversation strong {
+  color: var(--tx0);
+  font-family: var(--font-head);
+  font-size: 1rem;
+}
+
+.agentComposer {
+  display: block;
+  border: 0;
+  border-top: 0.0625rem solid var(--line);
+  background: var(--bg0);
+  backdrop-filter: none;
+  padding: 0;
+}
+
+.agentComposerInner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  width: min(58rem, calc(100% - 4rem));
+  margin: 0 auto;
+  padding: 0.75rem 0;
+}
+
+.agentComposerInner input {
+  height: 2.75rem;
+  border: 0;
+  border-bottom: 0.0625rem solid var(--line2);
+  outline: 0;
+  background: transparent;
+  color: var(--tx0);
+  font: 0.875rem var(--font-data);
+  padding: 0 0.25rem;
+}
+
+.agentComposerInner input:focus {
+  border-bottom-color: var(--acc);
+}
+
+.agentComposerInner button {
+  min-width: 4.5rem;
+  height: 2.375rem;
+  border-color: var(--acc);
+  background: var(--acc);
+  color: var(--acc-ink);
+  font-size: 0.75rem;
+  font-weight: 720;
+}
+
+@media (max-width: 70rem) {
+  .agentView {
+    grid-template-columns: 15.5rem minmax(0, 1fr);
+  }
+
+  .agentMessageColumn,
+  .agentComposerInner {
+    width: calc(100% - 2rem);
+  }
+
+  .agentMessage {
+    grid-template-columns: 5.5rem minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+}
+
+/* ------------------------------------------------------------
+   Home analytics migration
+   ------------------------------------------------------------ */
+
+.centerPane:has(.homeAnalyticsView) {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.homeAnalyticsView {
+  display: grid;
+  grid-template-rows: 4rem minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg0);
+}
+
+.homeAnalyticsHeader {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+  padding: 0.625rem 0.875rem;
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg1);
+}
+
+.homeAnalyticsHeader > div:first-child {
+  display: grid;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+
+.homeAnalyticsHeader h1 {
+  margin: 0;
+  color: var(--tx0);
+  font-family: var(--font-head);
+  font-size: 1.375rem;
+  font-weight: 760;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.homeAnalyticsHeader > div:first-child > span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.homePeriodTabs {
+  display: flex;
+  height: 2.25rem;
+  border: 0.0625rem solid var(--line2);
+}
+
+.homePeriodTabs button {
+  min-width: 4.75rem;
+  height: 100%;
+  border: 0;
+  border-right: 0.0625rem solid var(--line);
+  background: var(--bg0);
+  color: var(--tx1);
+  font-size: 0.75rem;
+  padding: 0 0.75rem;
+}
+
+.homePeriodTabs button:last-child {
+  border-right: 0;
+}
+
+.homePeriodTabs button:hover {
+  background: var(--bg2);
+  color: var(--tx0);
+}
+
+.homePeriodTabs button.active {
+  background: var(--bg2);
+  color: var(--acc);
+}
+
+.homeAnalyticsScroll {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.homeAnalyticsScroll > .inlineError,
+.homeAnalyticsScroll > .emptyState {
+  margin: 0.75rem;
+}
+
+.homeAnalyticsTop {
+  display: grid;
+  grid-template-columns: minmax(35rem, 1.45fr) minmax(20rem, 0.72fr);
+  min-width: 0;
+  border-bottom: 0.0625rem solid var(--line);
+}
+
+.homeCollagePanel,
+.homeSummaryPanel,
+.homeAnalysisGrid > article,
+.homeAnalyticsBottom > article,
+.homeAnalyticsBottom > aside {
+  min-width: 0;
+  background: var(--bg0);
+}
+
+.homeCollagePanel {
+  border-right: 0.0625rem solid var(--line);
+}
+
+.homeCollagePanel > header,
+.homeAnalysisGrid > article > header,
+.homeRecentListens > header,
+.homeFingerprintPanel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 3.5rem;
+  padding: 0 0.875rem;
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg1);
+}
+
+.homeCollagePanel > header > div,
+.homeAnalysisGrid > article > header > div,
+.homeRecentListens > header > div {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.homeAnalyticsView .eyebrow {
+  color: var(--tx2);
+  font-size: 0.6875rem;
+  font-weight: 760;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.homeCollagePanel h2,
+.homeSummaryPanel h2 {
+  margin: 0;
+  color: var(--tx0);
+  font-family: var(--font-head);
+  font-size: 1.125rem;
+  font-weight: 740;
+  letter-spacing: -0.03em;
+}
+
+.homeAnalysisGrid h3,
+.homeAnalyticsBottom h3 {
+  margin: 0;
+  color: var(--tx0);
+  font-family: var(--font-head);
+  font-size: 0.9375rem;
+  font-weight: 720;
+  letter-spacing: -0.02em;
+}
+
+.homeCollagePanel > header > button {
+  min-height: 2rem;
+  border-color: var(--line2);
+  background: transparent;
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.homeCollagePanel > header > button.active {
+  border-color: var(--acc-line);
+  background: var(--acc-dim);
+  color: var(--acc);
+}
+
+.homeCollageGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  background: var(--bg0);
+}
+
+.homeCollageTile {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 0;
+  border-right: 0.0625rem solid var(--bg0);
+  border-bottom: 0.0625rem solid var(--bg0);
+  background: var(--bg2);
+  padding: 0;
+  text-align: left;
+}
+
+.homeCollageTile:nth-child(5n) {
+  border-right: 0;
+}
+
+.homeCollageTile:hover {
+  outline: 0.125rem solid var(--acc);
+  outline-offset: -0.125rem;
+  z-index: 1;
+}
+
+.homeCollageArtwork,
+img.homeCollageArtwork,
+.homeCollageArtwork.artFallback {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  object-fit: cover;
+}
+
+.homeCollageRank {
+  position: absolute;
+  top: 0.375rem;
+  left: 0.375rem;
+  min-width: 1.75rem;
+  padding: 0.25rem 0.3125rem;
+  background: rgb(3 7 8 / 84%);
+  color: #edf2ef;
+  font: 0.6875rem var(--font-data);
+  text-align: center;
+}
+
+.homeCollageLabel {
+  position: absolute;
+  inset: auto 0 0;
+  display: grid;
+  gap: 0.125rem;
+  padding: 0.5rem;
+  background: rgb(3 7 8 / 90%);
+  color: #edf2ef;
+  opacity: 0;
+  transform: translateY(0.25rem);
+  transition: opacity var(--fast), transform var(--fast);
+}
+
+.homeCollageGrid.showLabels .homeCollageLabel,
+.homeCollageTile:hover .homeCollageLabel {
+  opacity: 1;
+  transform: none;
+}
+
+.homeCollageLabel strong,
+.homeCollageLabel small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.homeCollageLabel strong {
+  font-family: var(--font-head);
+  font-size: 0.75rem;
+  font-weight: 680;
+}
+
+.homeCollageLabel small {
+  color: #b8c2c0;
+  font: 0.6875rem var(--font-data);
+}
+
+.homeCollagePanel > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 2.125rem;
+  padding: 0 0.75rem;
+  border-top: 0.0625rem solid var(--line);
+  color: var(--tx2);
+  font-size: 0.6875rem;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.homeSummaryPanel > header {
+  display: grid;
+  gap: 0.25rem;
+  min-height: 4.75rem;
+  align-content: center;
+  padding: 0 0.875rem;
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg1);
+}
+
+.homeMetricGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.homeMetricGrid > span {
+  display: grid;
+  gap: 0.25rem;
+  align-content: center;
+  min-height: 5rem;
+  padding: 0.75rem;
+  border-right: 0.0625rem solid var(--line);
+  border-bottom: 0.0625rem solid var(--line);
+}
+
+.homeMetricGrid > span:nth-child(even) {
+  border-right: 0;
+}
+
+.homeMetricGrid small {
+  color: var(--tx2);
+  font-size: 0.6875rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.homeMetricGrid strong {
+  color: var(--tx0);
+  font-family: var(--font-head);
+  font-size: 1.375rem;
+  font-weight: 740;
+}
+
+.homeCompactDistribution {
+  padding: 0.75rem;
+  border-bottom: 0.0625rem solid var(--line);
+}
+
+.homeCompactDistribution > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.homeCompactDistribution small {
+  color: var(--tx2);
+  font-size: 0.6875rem;
+}
+
+.homeCompactBars {
+  display: flex;
+  align-items: end;
+  gap: 0.25rem;
+  height: 6.5rem;
+  padding-top: 0.75rem;
+}
+
+.homeCompactBars i {
+  flex: 1;
+  min-width: 0.1875rem;
+  background: var(--acc);
+  opacity: 0.75;
+}
+
+.homeSignalList {
+  margin: 0;
+}
+
+.homeSignalList > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 2.5rem;
+  padding: 0 0.75rem;
+  border-bottom: 0.0625rem solid var(--line);
+  font-size: 0.75rem;
+}
+
+.homeSignalList dt {
+  color: var(--tx2);
+}
+
+.homeSignalList dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--tx1);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.homeAnalysisGrid {
+  display: grid;
+  grid-template-columns: minmax(25rem, 1.2fr) minmax(17rem, 0.7fr) minmax(17rem, 0.7fr);
+  min-width: 0;
+  border-bottom: 0.0625rem solid var(--line);
+}
+
+.homeAnalysisGrid > article {
+  border-right: 0.0625rem solid var(--line);
+}
+
+.homeAnalysisGrid > article:last-child {
+  border-right: 0;
+}
+
+.homeAnalysisGrid > article > header > small {
+  color: var(--tx2);
+  font-size: 0.6875rem;
+}
+
+.homeDistributionChart {
+  display: flex;
+  align-items: end;
+  gap: 0.1875rem;
+  height: 9rem;
+  padding: 1rem 0.875rem 0;
+}
+
+.homeDistributionChart button {
+  flex: 1;
+  min-width: 0.1875rem;
+  min-height: 0.25rem;
+  border: 0;
+  background: var(--bg3);
+  padding: 0;
+}
+
+.homeDistributionChart button.peak {
+  background: var(--acc);
+}
+
+.homeDistributionChart button:hover {
+  background: var(--acc);
+}
+
+.homeDistributionPanel > footer {
+  display: flex;
+  justify-content: space-between;
+  min-height: 2rem;
+  align-items: center;
+  padding: 0 0.875rem;
+  color: var(--tx2);
+  font-size: 0.6875rem;
+}
+
+.homeHistoryHeatmap {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 0.25rem;
+  padding: 1rem 0.875rem 0.75rem;
+}
+
+.homeHistoryHeatmap i,
+.homeHeatLegend i {
+  aspect-ratio: 1;
+  border: 0.0625rem solid var(--line);
+  background: var(--bg1);
+}
+
+.homeHistoryHeatmap .level1,
+.homeHeatLegend .level1 { background: color-mix(in srgb, var(--acc) 18%, var(--bg1)); }
+.homeHistoryHeatmap .level2,
+.homeHeatLegend .level2 { background: color-mix(in srgb, var(--acc) 34%, var(--bg1)); }
+.homeHistoryHeatmap .level3,
+.homeHeatLegend .level3 { background: color-mix(in srgb, var(--acc) 52%, var(--bg1)); }
+.homeHistoryHeatmap .level4,
+.homeHeatLegend .level4 { background: color-mix(in srgb, var(--acc) 72%, var(--bg1)); }
+.homeHistoryHeatmap .level5,
+.homeHeatLegend .level5 { background: var(--acc); }
+
+.homeHeatmapPanel > footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.375rem;
+  min-height: 2.25rem;
+  padding: 0 0.875rem;
+  color: var(--tx2);
+  font-size: 0.6875rem;
+}
+
+.homeHeatLegend {
+  display: flex;
+  gap: 0.1875rem;
+}
+
+.homeHeatLegend i {
+  width: 0.625rem;
+  height: 0.625rem;
+}
+
+.homeFormatRows > div {
+  display: grid;
+  grid-template-columns: 5rem minmax(4rem, 1fr) 3rem;
+  align-items: center;
+  gap: 0.625rem;
+  min-height: 2.75rem;
+  padding: 0 0.75rem;
+  border-bottom: 0.0625rem solid var(--line);
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.homeFormatRows i {
+  position: relative;
+  height: 0.375rem;
+  background: var(--bg3);
+}
+
+.homeFormatRows i b {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--acc);
+}
+
+.homeFormatRows strong {
+  color: var(--tx2);
+  font-weight: 550;
+  text-align: right;
+}
+
+.homeAnalyticsBottom {
+  display: grid;
+  grid-template-columns: minmax(38rem, 1.45fr) minmax(20rem, 0.7fr);
+  min-width: 0;
+}
+
+.homeRecentListens {
+  border-right: 0.0625rem solid var(--line);
+}
+
+.homeRecentHead,
+.homeRecentRow {
+  display: grid;
+  grid-template-columns: 8rem minmax(14rem, 1fr) minmax(9rem, 0.75fr) 4rem 2rem;
+  gap: 0.625rem;
+  align-items: center;
+}
+
+.homeRecentHead {
+  min-height: 2rem;
+  padding: 0 0.75rem;
+  border-bottom: 0.0625rem solid var(--line);
+  color: var(--tx2);
+  font-size: 0.6875rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.homeRecentRow {
+  min-height: 3.25rem;
+  padding: 0 0.75rem;
+  border-bottom: 0.0625rem solid var(--line);
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.homeRecentRow:hover,
+.homeRecentRow.active {
+  background: var(--bg1);
+}
+
+.homeRecentRow.active {
+  box-shadow: inset -0.125rem 0 var(--acc);
+}
+
+.homeRecentRow > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.homeRecentTitle {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  gap: 0.625rem;
+  align-items: center;
+}
+
+.homeRecentThumb,
+img.homeRecentThumb,
+.homeRecentThumb.artFallback {
+  width: 2.25rem;
+  height: 2.25rem;
+  object-fit: cover;
+}
+
+.homeRecentTitle > span {
+  display: grid;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.homeRecentTitle strong,
+.homeRecentTitle small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.homeRecentTitle strong {
+  color: var(--tx0);
+  font-family: var(--font-head);
+  font-size: 0.8125rem;
+}
+
+.homeRecentTitle small {
+  color: var(--tx2);
+  font-size: 0.6875rem;
+}
+
+.homeRecentRow > button {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+}
+
+.homeRecentRow > button svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  fill: currentColor;
+}
+
+.homeFingerprintPanel > header {
+  display: grid;
+  justify-content: start;
+  gap: 0.125rem;
+}
+
+.homeFingerprintTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  padding: 0.875rem;
+  border-bottom: 0.0625rem solid var(--line);
+}
+
+.homeFingerprintTags button,
+.homeFingerprintTags > span {
+  min-width: 5rem;
+  min-height: 2.125rem;
+  border: 0.0625rem solid var(--line);
+  background: var(--bg1);
+  color: var(--tx1);
+  font-size: 0.75rem;
+  padding: 0 0.625rem;
+  text-align: left;
+}
+
+.homeFingerprintTags > span {
+  display: flex;
+  align-items: center;
+}
+
+.homeHabitFacts {
+  display: grid;
+}
+
+.homeHabitFacts button {
+  display: grid;
+  justify-items: start;
+  gap: 0.25rem;
+  min-height: 4rem;
+  padding: 0.75rem;
+  border: 0;
+  border-bottom: 0.0625rem solid var(--line);
+  background: transparent;
+  text-align: left;
+}
+
+.homeHabitFacts button:hover:not(:disabled) {
+  background: var(--bg1);
+}
+
+.homeHabitFacts strong {
+  color: var(--tx0);
+  font-family: var(--font-head);
+  font-size: 0.8125rem;
+}
+
+.homeHabitFacts span {
+  color: var(--tx2);
+  font-size: 0.75rem;
+}
+
+.homeAnalyticsEmpty {
+  min-height: 4rem;
+  display: grid;
+  place-items: center;
+  color: var(--tx2);
+  font-size: 0.8125rem;
+}
+
+.homeAnalyticsFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 2.25rem;
+  padding: 0 0.75rem;
+  border-top: 0.0625rem solid var(--line);
+  color: var(--tx2);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 78rem) {
+  .homeAnalyticsTop {
+    grid-template-columns: minmax(31rem, 1.3fr) minmax(18rem, 0.7fr);
+  }
+
+  .homeAnalysisGrid {
+    grid-template-columns: minmax(24rem, 1fr) minmax(17rem, 0.7fr);
+  }
+
+  .homeFormatPanel {
+    display: none;
+  }
+
+  .homeAnalyticsBottom {
+    grid-template-columns: 1fr;
+  }
+
+  .homeFingerprintPanel {
+    display: none;
+  }
+}
+
+@media (max-width: 64rem) {
+  .homeAnalyticsTop {
+    grid-template-columns: 1fr;
+  }
+
+  .homeSummaryPanel {
+    display: none;
+  }
+
+  .homePeriodTabs button {
+    min-width: 3.75rem;
+    padding: 0 0.5rem;
+  }
+}
+
+/* ------------------------------------------------------------
+   Settings, Lists, and readability pass
+   ------------------------------------------------------------ */
+
+.centerPane:has(.settingsView),
+.centerPane:has(.playlistsPage) {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.settingsView {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 1rem;
+}
+
+.settingsPageHeader,
+.playlistsPageHeader {
+  display: flex;
+  align-items: center;
+  min-height: 4rem;
+  padding: 0.625rem 0.875rem;
+  border-bottom: 0.0625rem solid var(--line);
+  background: var(--bg1);
+}
+
+.settingsPageHeader {
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.875rem;
+}
+
+.settingsPageHeader h1,
+.playlistsPageHeader h1 {
+  margin: 0;
+  color: var(--tx0);
+  font-family: var(--font-head);
+  font-size: 1.375rem;
+  font-weight: 760;
+  letter-spacing: -0.04em;
+}
+
+.settingsPageHeader > span,
+.playlistsPageHeader span {
+  color: var(--tx1);
+  font-size: 0.75rem;
+}
+
+.settingsView > .inlineError,
+.settingsView > .settingsHeader,
+.settingsView > .settingsPanel,
+.settingsView > .settingsGrid {
+  margin-left: 0.875rem;
+  margin-right: 0.875rem;
+}
+
+.settingsView .settingsHeader,
+.settingsView .settingsPanel {
+  border-color: var(--line);
+  background: var(--bg0);
+  backdrop-filter: none;
+}
+
+.settingsView .settingsHeader span,
+.settingsView .settingsPanel span,
+.settingsView .settingsField small,
+.settingsView .settingsCheck {
+  font-size: 0.8125rem;
+}
+
+.settingsView .settingsField > span {
+  font-size: 0.75rem;
+}
+
+.settingsView input,
+.settingsView textarea,
+.settingsView button {
+  font-size: 0.8125rem;
+}
+
+.settingsView textarea {
+  line-height: 1.5;
+}
+
+.playlistsPage {
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.playlistsPageHeader > div {
+  display: grid;
+  gap: 0.1875rem;
+}
+
+.playlistList {
+  max-height: none;
+  min-height: 0;
+  padding: 0.875rem;
+}
+
+.playlistItem {
+  border-color: var(--line);
+  background: var(--bg0);
+  backdrop-filter: none;
+}
+
+.playlistMain strong {
+  font-family: var(--font-head);
+  font-size: 1rem;
+}
+
+.playlistMain span,
+.playlistPreviewTracks span {
+  font-size: 0.8125rem;
+}
+
+.playlistMain .playlistKicker {
+  font-size: 0.6875rem;
+}
+
+.playlistDetailView {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.875rem;
+}
+
+.playlistDetailInfo,
+.playlistDetailPanel {
+  background: var(--bg0);
+  backdrop-filter: none;
+}
+
+.playlistDetailInfo p,
+.playlistTrackRow strong {
+  font-size: 0.875rem;
+}
+
+.playlistTrackRow small,
+.playlistEditForm label span {
+  font-size: 0.75rem;
+}
+
+.discoveryPage {
+  font-size: 0.8125rem;
+}
+
+.discoveryPage button,
+.discoveryPage input,
+.discoveryPage select,
+.discoveryPage textarea {
+  font-size: 0.75rem;
+}
+
+.discoverySearchForm label > span,
+.discoveryRefiners label > span,
+.discoveryTabHeader .eyebrow {
+  font-size: 0.6875rem;
+}
+
+.discoveryHero .segmentedControl button,
+.discoverySearchForm button,
+.discoveryListParser button,
+.discoveryWorkspaceTabs button,
+.discoveryWorkspaceTabs strong,
+.discoveryTabHeader p,
+.discoveryDownloadIndex,
+.discoveryDownloadMain span,
+.discoveryDownloadActions button,
+.discoveryTabHeader > button,
+.discoveryDownloadActions span,
+.discoveryReadyBatch p,
+.discoveryReadyActions button,
+.discoveryReadySummary,
+.discoveryReadyFiles > button,
+.discoveryReadyFiles span {
+  font-size: 0.75rem;
+}
+
+.discoveryDownloadMain strong,
+.discoveryReadyFiles strong {
+  font-size: 0.875rem;
+}
+
+.discoveryDownloadRow {
+  min-height: 4.75rem;
+}
+
+.discoveryReadyFiles > button {
+  min-height: 3rem;
+}
+
+.discoveryReadySummary {
+  min-height: 2.25rem;
+  align-items: center;
 }
