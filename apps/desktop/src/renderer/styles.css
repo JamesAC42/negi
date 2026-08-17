@@ -11614,3 +11614,10 @@ img.homeRecentThumb,
   min-height: 2.25rem;
   align-items: center;
 }
+
+/* Flat means flat: legacy views may define decorative gradients, but the
+   workbench shell never renders them. Artwork and analyzer canvases are
+   regular media elements and remain unaffected. */
+.appShell * {
+  background-image: none !important;
+}
