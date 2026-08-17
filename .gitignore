@@ -16,3 +16,6 @@ dist/
 
 .DS_Store
 Thumbs.db
+
+# The UI mockup is a separate local repository used as a visual reference.
+prototypes/negi-workbench/

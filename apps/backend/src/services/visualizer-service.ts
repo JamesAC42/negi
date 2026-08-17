@@ -14,7 +14,7 @@ import type { WaveformService } from "./waveform-service.js";
 const MODE_INTERVAL_MS: Record<VisualizerStreamMode, number> = {
   meter: 33,
   spectrum: 33,
-  spectrogram: 50
+  spectrogram: 33
 };
 
 const MODE_BANDS: Record<VisualizerStreamMode, number> = {

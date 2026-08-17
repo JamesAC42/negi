@@ -191,11 +191,23 @@ export class AgentPlaylistWorkflowService {
     this.operations.approveBatch(batch.id);
     const applied = await this.operations.applyBatch(batch.id);
     this.updateLinks(row.id, { importOperationBatchId: applied.id });
+    if (applied.status !== "applied") {
+      const failedOperations = applied.operations.filter((operation) => operation.status === "failed");
+      const firstError = failedOperations.map((operation) => operationErrorMessage(operation.error)).find(Boolean);
+      const failedCount = failedOperations.length || reviewableIds.length;
+      const detail = firstError ? `: ${firstError}` : `; import batch ended with ${applied.status}`;
+      throw new Error(`Failed to import ${failedCount} downloaded playlist track${failedCount === 1 ? "" : "s"}${detail}`);
+    }
 
-    return this.imports
+    const importedFileIds = this.imports
       .getImport(job.imported.id)
-      .items.map((item) => item.fileId)
+      .items.filter((item) => item.status === "imported")
+      .map((item) => item.fileId)
       .filter((fileId): fileId is string => Boolean(fileId));
+    if (importedFileIds.length === 0) {
+      throw new Error("Import approval completed without promoting any downloaded playlist tracks into the library.");
+    }
+    return importedFileIds;
   }
 
   private async createOrUpdatePlaylist(row: WorkflowRow, playlistId: string | null, importedFileIds: string[]): Promise<void> {
@@ -476,6 +488,17 @@ function stringValue(value: unknown): string | null {
 
 function nullableStringValue(value: unknown): string | null {
   return value == null ? null : stringValue(value);
+}
+
+function operationErrorMessage(error: unknown): string | null {
+  if (typeof error === "string" && error.trim()) {
+    return error.trim();
+  }
+  if (typeof error !== "object" || error == null || !("message" in error)) {
+    return null;
+  }
+  const message = (error as { message?: unknown }).message;
+  return typeof message === "string" && message.trim() ? message.trim() : null;
 }
 
 function stringArrayValue(value: unknown): string[] {

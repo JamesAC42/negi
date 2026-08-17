@@ -136,6 +136,12 @@ try {
   assert(playlist.items[1].file.displayTags.artist === "Owned Artist", `expected owned artist second, got ${playlist.items[1].file.displayTags.artist}`);
   assert(playlist.items[2].file.displayTags.artist === "Second Remote", `expected second imported artist third, got ${playlist.items[2].file.displayTags.artist}`);
   assert(app.library.countPlayableFiles() === 3, `expected owned plus imported playable files, got ${app.library.countPlayableFiles()}`);
+  const importedPlaylistFiles = playlist.items.filter((item) => item.file.id !== workflow.ownedFileIds[0]).map((item) => item.file);
+  assert(importedPlaylistFiles.every((file) => file.staged === false), "downloaded playlist files should be promoted out of staging");
+  assert(
+    importedPlaylistFiles.every((file) => file.libraryRootId === root.id && file.path.startsWith(libraryPath)),
+    "downloaded playlist files should be indexed under the selected library root"
+  );
   const thread = app.agentThreads.getThread(run.threadId!);
   const threadMessageTexts = thread.messages.map((message) => `${message.role}: ${message.text}`);
   assert(

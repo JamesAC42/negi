@@ -24,6 +24,7 @@ export class PlaybackService {
   private volumePercent = 100;
   private repeatMode: PlaybackRepeatMode = "none";
   private interruptGeneration = 0;
+  private pendingEndFileLoadToken: number | null = null;
 
   constructor(
     private readonly config: BackendConfig,
@@ -368,7 +369,9 @@ export class PlaybackService {
     });
 
     const onEvent = (event: MpvIpcEvent) => this.handleMpvEvent(event, generation);
-    this.ipcReady = windowsMpv ? MpvIpcClient.connectWindowsPipe(ipcId, onEvent) : MpvIpcClient.connectUnixSocket(ipcServerPath, onEvent);
+    this.ipcReady = windowsMpv
+      ? MpvIpcClient.connectWindowsPipe(ipcId, onEvent, this.config.windowsNodePath ?? "node.exe")
+      : MpvIpcClient.connectUnixSocket(ipcServerPath, onEvent);
     this.ipc = await this.ipcReady;
   }
 
@@ -378,19 +381,32 @@ export class PlaybackService {
     }
 
     // Newer mpv builds tag end-file with reason "eof". mpv 0.29 omits the
-    // reason, but emits "idle" only when playback genuinely ran out, so both
-    // signals route to the same guarded advance. The load token ignores
-    // signals that raced with an explicit track change.
-    const trackEnded = (event.event === "end-file" && isEofReason(event.reason)) || event.event === "idle";
-    if (trackEnded) {
+    // reason and follows end-file with "idle". Keep idle associated with the
+    // load that emitted end-file: it can arrive after the next file starts,
+    // and treating it as a signal for that new load would skip a second song.
+    if (event.event === "end-file") {
       const loadToken = this.loadGeneration;
-      void this.runPlaybackOperation(async () => {
-        if (loadToken !== this.loadGeneration) {
-          return this.state;
-        }
-        return this.advanceAfterTrackEnd();
-      }).catch(() => undefined);
+      this.pendingEndFileLoadToken = loadToken;
+      if (isEofReason(event.reason)) {
+        this.queueTrackEndAdvance(loadToken);
+      }
+      return;
     }
+
+    if (event.event === "idle" && this.pendingEndFileLoadToken != null) {
+      const loadToken = this.pendingEndFileLoadToken;
+      this.pendingEndFileLoadToken = null;
+      this.queueTrackEndAdvance(loadToken);
+    }
+  }
+
+  private queueTrackEndAdvance(loadToken: number): void {
+    void this.runPlaybackOperation(async () => {
+      if (loadToken !== this.loadGeneration) {
+        return this.state;
+      }
+      return this.advanceAfterTrackEnd();
+    }).catch(() => undefined);
   }
 
   private async advanceAfterTrackEnd(): Promise<PlaybackState> {
@@ -476,6 +492,7 @@ export class PlaybackService {
 
   private killProcessFallback(): void {
     this.processGeneration += 1;
+    this.pendingEndFileLoadToken = null;
     this.ipc?.close();
     this.ipc = null;
     this.ipcReady = null;

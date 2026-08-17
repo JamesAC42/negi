@@ -40,7 +40,11 @@ export class MpvIpcClient {
     private readonly onEvent: (event: MpvIpcEvent) => void
   ) {}
 
-  static async connectWindowsPipe(pipeName: string, onEvent: (event: MpvIpcEvent) => void): Promise<MpvIpcClient> {
+  static async connectWindowsPipe(
+    pipeName: string,
+    onEvent: (event: MpvIpcEvent) => void,
+    windowsNodePath = "node.exe"
+  ): Promise<MpvIpcClient> {
     const pipePath = `\\\\.\\pipe\\${pipeName}`;
     const script = `
 const net = require("net");
@@ -66,7 +70,7 @@ function tryConnect() {
 }
 tryConnect();
 `;
-    const relay = spawn("node.exe", ["-e", script], {
+    const relay = spawn(windowsNodePath, ["-e", script], {
       stdio: ["pipe", "pipe", "pipe"]
     });
 

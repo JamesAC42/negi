@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
-import { copyFile, mkdir, readdir, rename, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { copyFile, mkdir, readdir, rename, stat, unlink } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import type { DuplicateCandidate, ImportBatch, ImportItem, LibraryRoot, MetadataCandidate } from "@music-os/core";
 import type { BackendConfig } from "../config.js";
@@ -100,7 +101,7 @@ export class ImportService {
     await mkdir(dirname(destination), { recursive: true });
 
     const finalPath = await uniqueDestination(destination);
-    await rename(item.stagingPath, finalPath);
+    await moveImportedFile(item.stagingPath, finalPath);
 
     let importedFileId = item.fileId;
     if (importedFileId) {
@@ -483,6 +484,26 @@ async function uniqueDestination(path: string): Promise<string> {
     counter += 1;
   }
   return candidate;
+}
+
+async function moveImportedFile(sourcePath: string, destinationPath: string): Promise<void> {
+  try {
+    await rename(sourcePath, destinationPath);
+    return;
+  } catch (error) {
+    if (!isCrossDeviceError(error)) {
+      throw error;
+    }
+  }
+
+  await copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL);
+  await unlink(sourcePath);
+}
+
+function isCrossDeviceError(error: unknown): boolean {
+  return (
+    typeof error === "object" && error != null && "code" in error && (error as { code?: unknown }).code === "EXDEV"
+  );
 }
 
 async function exists(path: string): Promise<boolean> {

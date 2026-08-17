@@ -20,13 +20,16 @@ try {
 
   const pathA = join(fixtureDir, "track-a.wav");
   const pathB = join(fixtureDir, "track-b.wav");
+  const pathC = join(fixtureDir, "track-c.wav");
   await writeFile(pathA, createSilentWav(trackDurationSeconds));
   await writeFile(pathB, createSilentWav(trackDurationSeconds));
+  await writeFile(pathC, createSilentWav(trackDurationSeconds));
 
   const fileA = createLibraryFile("smoke-track-a", pathA, "Track A");
   const fileB = createLibraryFile("smoke-track-b", pathB, "Track B");
+  const fileC = createLibraryFile("smoke-track-c", pathC, "Track C");
 
-  const started = await playback.playQueue([fileA, fileB], 0);
+  const started = await playback.playQueue([fileA, fileB, fileC], 0);
   assert(started.status === "playing", `expected playing state, got ${started.status}`);
   assert(started.currentFileId === fileA.id, `expected first track, got ${started.currentFileId}`);
 
@@ -39,6 +42,23 @@ try {
     "auto-advance to the second queued track"
   );
   assert(advanced.queueIndex === 1, `expected queue index 1 after advance, got ${advanced.queueIndex}`);
+
+  await delay(500);
+  const stillPlayingSecondTrack = await playback.getState();
+  assert(
+    stillPlayingSecondTrack.currentFileId === fileB.id && stillPlayingSecondTrack.queueIndex === 1,
+    `expected second track not to be skipped, got ${stillPlayingSecondTrack.currentFileId} at index ${stillPlayingSecondTrack.queueIndex}`
+  );
+
+  const advancedAgain = await waitFor(
+    async () => {
+      const state = await playback.getState();
+      return state.currentFileId === fileC.id && state.status === "playing" ? state : null;
+    },
+    (trackDurationSeconds + 20) * 1000,
+    "auto-advance to the third queued track"
+  );
+  assert(advancedAgain.queueIndex === 2, `expected queue index 2 after second advance, got ${advancedAgain.queueIndex}`);
 
   const stoppedAtEnd = await waitFor(
     async () => {
@@ -56,6 +76,7 @@ try {
       {
         ok: true,
         advancedTo: advanced.currentDisplayName,
+        advancedAgainTo: advancedAgain.currentDisplayName,
         finalStatus: stoppedAtEnd.status
       },
       null,

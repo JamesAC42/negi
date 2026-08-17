@@ -4,6 +4,8 @@ import type { BackendConfig } from "../config.js";
 
 const SAMPLE_RATE = 8000;
 const ANALYSIS_WINDOW_MS = 64;
+const ANALYZER_READ_RATE = 4;
+const INITIAL_ANALYSIS_BURST_SECONDS = 0.5;
 const DECODE_LOOKAHEAD_SECONDS = 90;
 const RESTART_LOOKAHEAD_MS = 1500;
 const MAX_WINDOW_SAMPLES = 512;
@@ -87,6 +89,11 @@ export class LiveAnalyzerService {
       "-hide_banner",
       "-loglevel",
       "error",
+      // Pace decoding ahead of playback without flooding the backend event loop.
+      "-readrate",
+      String(ANALYZER_READ_RATE),
+      "-readrate_initial_burst",
+      String(INITIAL_ANALYSIS_BURST_SECONDS),
       "-ss",
       Math.max(0, input.positionMs / 1000).toFixed(3),
       "-i",
@@ -165,8 +172,8 @@ export class LiveAnalyzerService {
       MAX_WINDOW_SAMPLES,
       Math.max(64, Math.floor((ANALYSIS_WINDOW_MS / 1000) * SAMPLE_RATE))
     );
-    const start = Math.max(0, centerSample - windowSize);
-    const end = Math.min(this.decodedSamples.length, centerSample + Math.floor(windowSize / 2));
+    const start = Math.max(0, centerSample - Math.floor(windowSize / 2));
+    const end = Math.min(this.decodedSamples.length, centerSample + Math.ceil(windowSize / 2));
     const samples = this.decodedSamples.slice(start, end);
     if (samples.length === 0) {
       return this.latestFrame;

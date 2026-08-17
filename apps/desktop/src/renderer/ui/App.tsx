@@ -379,6 +379,7 @@ export function App(): ReactElement {
   const [alternateEditionsState, setAlternateEditionsState] = useState<AlternateEditionsState>({ status: "idle" });
   const [operationsState, setOperationsState] = useState<OperationsState>({ status: "loading" });
   const [albumsState, setAlbumsState] = useState<AlbumsState>({ status: "loading" });
+  const [homeRecentAlbums, setHomeRecentAlbums] = useState<AlbumGroupItem[]>([]);
   const [playlistsState, setPlaylistsState] = useState<PlaylistsState>({ status: "loading" });
   const [jobsState, setJobsState] = useState<JobsState>({ status: "loading", jobs: [] });
   const [tasteProfileState, setTasteProfileState] = useState<TasteProfileState>({ status: "loading" });
@@ -702,6 +703,15 @@ export function App(): ReactElement {
         message: getErrorMessage(error),
         albums: "albums" in current ? current.albums : emptyAlbums
       }));
+    }
+  }
+
+  async function refreshHomeRecentAlbums(): Promise<void> {
+    try {
+      const result = await listAlbums(0, 6, "recent");
+      setHomeRecentAlbums(result.albums);
+    } catch {
+      // Keep the existing shelf if this supplementary Home request fails.
     }
   }
 
@@ -1050,7 +1060,14 @@ export function App(): ReactElement {
       }
       return;
     }
-    if ((activeView === "Home" || activeView === "Albums" || activeView === "Artists") && albumsState.status === "loading") {
+    if (activeView === "Home") {
+      if (albumsState.status === "loading") {
+        void refreshAlbums();
+      }
+      void refreshHomeRecentAlbums();
+      return;
+    }
+    if ((activeView === "Albums" || activeView === "Artists") && albumsState.status === "loading") {
       void refreshAlbums();
       return;
     }
@@ -2740,6 +2757,7 @@ export function App(): ReactElement {
             albumsState={albumsState}
             currentPlaybackFile={currentPlaybackFile}
             currentWaveform={currentWaveform.waveform}
+            recentAlbums={homeRecentAlbums}
             libraryTotal={library.status === "ready" ? library.total : total}
             playback={playback}
             playbackBusy={playbackBusy}
@@ -8016,6 +8034,7 @@ function HomeView({
   albumsState,
   currentPlaybackFile,
   currentWaveform,
+  recentAlbums,
   libraryTotal,
   playback,
   playbackBusy,
@@ -8029,6 +8048,7 @@ function HomeView({
   albumsState: AlbumsState;
   currentPlaybackFile: LibraryFile | null;
   currentWaveform: WaveformSummaryResponse | null;
+  recentAlbums: AlbumGroupItem[];
   libraryTotal: number;
   playback: PlaybackStateResponse;
   playbackBusy: boolean;
@@ -8063,7 +8083,6 @@ function HomeView({
         .slice(0, 5),
     [albums]
   );
-  const recentAlbums = useMemo(() => sortAlbumsByMode(albums, "recent").slice(0, 6), [albums]);
   const favoriteArtists = useMemo(() => sortArtistSections(artists, "likes").slice(0, 5), [artists]);
   const topSongs = useMemo(
     () =>
@@ -10447,10 +10466,13 @@ async function listAlternateEditions() {
   return getJson("/library/alternate-editions", alternateEditionGroupsResponseSchema);
 }
 
-async function listAlbums(offset = 0, limit = albumPageSize) {
+async function listAlbums(offset = 0, limit = albumPageSize, sort?: "recent") {
   const params = new URLSearchParams();
   params.set("offset", String(offset));
   params.set("limit", String(limit));
+  if (sort) {
+    params.set("sort", sort);
+  }
   return getJson(`/library/albums?${params.toString()}`, albumGroupsResponseSchema);
 }
 
@@ -12175,8 +12197,8 @@ function SpectrumCanvas({
       for (let index = 0; index < levels.length; index += 1) {
         const rawNext = playing ? incoming[Math.floor((index / levels.length) * incoming.length)] ?? 0 : 0;
         const next = mode === "spectrum" ? Math.min(1, Math.pow(rawNext, 0.78) * 1.18) : rawNext;
-        const attack = mode === "meter" ? 0.92 : 0.82;
-        const decay = mode === "meter" ? 0.68 : 0.78;
+        const attack = mode === "meter" ? 0.94 : 0.9;
+        const decay = mode === "meter" ? 0.64 : 0.72;
         levels[index] = next > levels[index]
           ? levels[index] + (next - levels[index]) * attack
           : Math.max(next, levels[index] * decay);
@@ -12220,8 +12242,8 @@ function LevelMeterCanvas({
       const incoming = playing
         ? Math.max(frame?.rms ?? 0, bands[bandIndex] ?? 0, frame?.peak ? frame.peak * 0.72 : 0)
         : 0;
-      level = incoming > level ? level + (incoming - level) * 0.88 : Math.max(incoming, level * 0.72);
-      peak = Math.max(level, peak * 0.93);
+      level = incoming > level ? level + (incoming - level) * 0.94 : Math.max(incoming, level * 0.68);
+      peak = Math.max(level, peak * 0.9);
       drawLevelMeter(canvas, level, peak);
       animationFrame = window.requestAnimationFrame(draw);
     };

@@ -5,6 +5,7 @@ import { createBackendApp } from "../app.js";
 import { inspectImportItem, inspectLibraryFile } from "../services/metadata-diagnostics.js";
 
 const fixtureDir = await mkdtemp(join(tmpdir(), "music-os-import-"));
+const crossDeviceLibraryPath = await createCrossDeviceLibrary(fixtureDir);
 const databasePath = join(fixtureDir, "music-os.sqlite");
 const sourceDir = join(fixtureDir, "source");
 const libraryPath = join(fixtureDir, "library");
@@ -70,10 +71,45 @@ try {
   app.library.removeRoot(root.id);
   assert(app.library.countFiles() === 0, `root removal should clear imported file rows, got ${app.library.countFiles()}`);
 
+  if (crossDeviceLibraryPath) {
+    const crossDeviceRoot = app.library.addRoot(crossDeviceLibraryPath, "cross-device-library");
+    const crossDeviceSourcePath = join(sourceDir, "cross-device.mp3");
+    await writeFile(crossDeviceSourcePath, makeId3Fixture());
+    const crossDeviceImport = await app.imports.createFromPaths([crossDeviceSourcePath], crossDeviceRoot.id);
+    const crossDeviceApproved = await app.imports.approveItem(crossDeviceImport.items[0].id, crossDeviceRoot.id);
+    assert(crossDeviceApproved.status === "imported", `expected cross-device import, got ${crossDeviceApproved.status}`);
+    assert(crossDeviceApproved.fileId != null, "cross-device import should have a file id");
+    const crossDeviceFile = app.library.getFile(crossDeviceApproved.fileId);
+    assert(crossDeviceFile.staged === false, "cross-device import should promote the staged file");
+    assert(crossDeviceFile.libraryRootId === crossDeviceRoot.id, "cross-device import should belong to its library root");
+    assert(crossDeviceFile.path.startsWith(crossDeviceLibraryPath), "cross-device import should move into its library root");
+    await stat(crossDeviceFile.path);
+  }
+
   app.close();
   console.log(JSON.stringify({ ok: true, approved }, null, 2));
 } finally {
   await rm(fixtureDir, { recursive: true, force: true });
+  if (crossDeviceLibraryPath) {
+    await rm(crossDeviceLibraryPath, { recursive: true, force: true });
+  }
+}
+
+async function createCrossDeviceLibrary(sourceDirectory: string): Promise<string | null> {
+  if (process.platform !== "linux") {
+    return null;
+  }
+  try {
+    const candidate = await mkdtemp(join("/dev/shm", "music-os-import-library-"));
+    const [sourceStats, candidateStats] = await Promise.all([stat(sourceDirectory), stat(candidate)]);
+    if (sourceStats.dev !== candidateStats.dev) {
+      return candidate;
+    }
+    await rm(candidate, { recursive: true, force: true });
+  } catch {
+    // Cross-device coverage is opportunistic on hosts without a writable /dev/shm.
+  }
+  return null;
 }
 
 function assert(condition: boolean, message: string): asserts condition {

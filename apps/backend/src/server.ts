@@ -310,6 +310,22 @@ const server = createServer(async (request, response) => {
       const limit = parseOptionalPositiveInteger(url.searchParams.get("limit"));
       const offset = parseOptionalPositiveInteger(url.searchParams.get("offset")) ?? 0;
       const allAlbums = app.library.listAlbumGroups();
+      if (url.searchParams.get("sort") === "recent") {
+        const recentTimestamp = (album: (typeof allAlbums)[number]): number =>
+          Math.max(
+            0,
+            ...album.files.map((file) => {
+              const timestamp = Date.parse(file.ctime ?? file.mtime);
+              return Number.isFinite(timestamp) ? timestamp : 0;
+            })
+          );
+        allAlbums.sort(
+          (left, right) =>
+            recentTimestamp(right) - recentTimestamp(left) ||
+            left.artist.localeCompare(right.artist) ||
+            left.album.localeCompare(right.album)
+        );
+      }
       const albums = limit == null ? allAlbums.slice(offset) : allAlbums.slice(offset, offset + limit);
       writeJson(response, 200, albumGroupsResponseSchema.parse({ albums, total: allAlbums.length }));
       return;
