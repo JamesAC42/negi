@@ -277,7 +277,7 @@ type AlbumViewTarget = { key: number; albumId: string };
 type ArtistSongSortMode = "listens" | "ranking" | "albumYear";
 type AppearanceMode = "dark" | "light";
 type AccentColorId = "lime" | "cyan" | "amber" | "rose" | "violet";
-type DisplayFontId = "space" | "mono" | "system" | "wide";
+type DisplayFontId = "space" | "grotesk" | "mono" | "system" | "wide";
 type SelectedBackgroundImage = { path: string; url: string };
 type SavedBackgroundImage = { id: string; name: string; path: string; url: string; addedAt: string };
 type AppearanceBackgrounds = Record<AppearanceMode, SelectedBackgroundImage | null>;
@@ -368,11 +368,32 @@ const accentPalettes: Record<AccentColorId, { label: string; dark: AccentPalette
     light: { acc: "#6954bb", accDim: "rgba(105, 84, 187, 0.12)", accInk: "#f7f4ff", accLine: "rgba(105, 84, 187, 0.34)", okLine: "#b1a8db" }
   }
 };
-const displayFonts: Record<DisplayFontId, { label: string; value: string }> = {
-  space: { label: "Space Grotesk", value: "\"Space Grotesk Variable\", \"Space Grotesk\", \"JetBrains Mono Variable\", sans-serif" },
-  mono: { label: "JetBrains Mono", value: "\"JetBrains Mono Variable\", \"JetBrains Mono\", ui-monospace, monospace" },
-  system: { label: "System Sans", value: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif" },
-  wide: { label: "Wide System", value: "\"Arial Black\", \"Arial\", ui-sans-serif, system-ui, sans-serif" }
+const displayFonts: Record<DisplayFontId, { label: string; head: string; body: string }> = {
+  space: {
+    label: "Workbench - Space Grotesk + JetBrains Mono",
+    head: "\"Space Grotesk Variable\", \"Space Grotesk\", sans-serif",
+    body: "\"JetBrains Mono Variable\", \"JetBrains Mono\", ui-monospace, monospace"
+  },
+  grotesk: {
+    label: "Space Grotesk",
+    head: "\"Space Grotesk Variable\", \"Space Grotesk\", sans-serif",
+    body: "\"Space Grotesk Variable\", \"Space Grotesk\", sans-serif"
+  },
+  mono: {
+    label: "JetBrains Mono",
+    head: "\"JetBrains Mono Variable\", \"JetBrains Mono\", ui-monospace, monospace",
+    body: "\"JetBrains Mono Variable\", \"JetBrains Mono\", ui-monospace, monospace"
+  },
+  system: {
+    label: "System Sans",
+    head: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    body: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+  },
+  wide: {
+    label: "Wide headings",
+    head: "\"Arial Black\", \"Arial\", ui-sans-serif, system-ui, sans-serif",
+    body: "\"JetBrains Mono Variable\", \"JetBrains Mono\", ui-monospace, monospace"
+  }
 };
 
 type AccentPalette = { acc: string; accDim: string; accInk: string; accLine: string; okLine: string };
@@ -453,6 +474,8 @@ export function App(): ReactElement {
   const [agentThreads, setAgentThreads] = useState<AgentThreadsResponse["threads"]>([]);
   const [agentBusy, setAgentBusy] = useState(false);
   const [search, setSearch] = useState("");
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
   const [loadedLibraryQuery, setLoadedLibraryQuery] = useState("");
   const [libraryFormatFilter, setLibraryFormatFilter] = useState<LibraryFormatFilter>("all");
   const [libraryMissingFilter, setLibraryMissingFilter] = useState<LibraryMissingFilter>("present");
@@ -713,7 +736,7 @@ export function App(): ReactElement {
 
   async function refreshAlbums(): Promise<void> {
     try {
-      const result = await listAlbums(0, albumPageSize);
+      const result = await listAlbums(0, Number.MAX_SAFE_INTEGER);
       setAlbumsState({ status: "ready", albums: result });
     } catch (error) {
       setAlbumsState((current) => ({
@@ -1175,8 +1198,13 @@ export function App(): ReactElement {
     function onKeyDown(event: KeyboardEvent): void {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        globalSearchRef.current?.focus();
-        globalSearchRef.current?.select();
+        setCommandPaletteOpen(true);
+        window.requestAnimationFrame(() => globalSearchRef.current?.focus());
+        return;
+      }
+      if (event.key === "Escape" && commandPaletteOpen) {
+        event.preventDefault();
+        setCommandPaletteOpen(false);
         return;
       }
       if (event.code !== "Space" || event.repeat) {
@@ -1201,7 +1229,7 @@ export function App(): ReactElement {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [playback.status]);
+  }, [commandPaletteOpen, playback.status]);
 
   useEffect(() => {
     if (!discoveryDownloadJobs.some((job) => job.status === "queued" || job.status === "running")) {
@@ -2852,29 +2880,35 @@ export function App(): ReactElement {
           </label>
         </div>
 
-        <form
+        <button
           className="topSearch"
-          role="search"
-          onSubmit={(event) => {
-            event.preventDefault();
-            navigateToView("Library");
-            void refreshLibrary(search);
-          }}
+          type="button"
+          onClick={() => setCommandPaletteOpen(true)}
         >
           <UiIcon name="search" />
-          <input
-            aria-label="Search library"
-            placeholder="Search or command"
-            ref={globalSearchRef}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
+          <span className="topSearchText">Search or command</span>
           <kbd>Ctrl K</kbd>
-        </form>
+        </button>
         <div className="topHealth">
           <BackendHealth state={health} />
         </div>
       </header>
+
+      {commandPaletteOpen ? (
+        <CommandPalette
+          albums={albums.albums}
+          inputRef={globalSearchRef}
+          playlists={playlists}
+          query={commandQuery}
+          onClose={() => setCommandPaletteOpen(false)}
+          onNavigate={navigateToView}
+          onOpenAlbum={openAlbumDetailPage}
+          onOpenArtist={openArtistPage}
+          onOpenPlaylist={(playlistId) => void openPlaylist(playlistId)}
+          onPlayFile={(fileId, queueFileIds) => void handlePlayFile(fileId, queueFileIds)}
+          onQueryChange={setCommandQuery}
+        />
+      ) : null}
 
       <div className="appBackground" aria-hidden="true" />
 
@@ -3756,7 +3790,15 @@ function ActionIcon({ shape }: { shape: "like" | "dislike" | "tags" | "edit" | "
 
 function TransportIcon({ shape }: { shape: "play" | "pause" | "stop" | "next" | "previous" | "shuffle" }): ReactElement {
   return (
-    <svg aria-hidden="true" viewBox="0 0 16 16">
+    <svg
+      aria-hidden="true"
+      fill={shape === "shuffle" ? "none" : "currentColor"}
+      stroke={shape === "shuffle" ? "currentColor" : "none"}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={shape === "shuffle" ? 1.5 : undefined}
+      viewBox="0 0 16 16"
+    >
       {shape === "play" ? (
         <path d="M4 2.5v11l9-5.5z" />
       ) : shape === "pause" ? (
@@ -4331,6 +4373,183 @@ function IndeterminateCheckbox({
   );
 }
 
+function CommandPalette({
+  albums,
+  inputRef,
+  playlists,
+  query,
+  onClose,
+  onNavigate,
+  onOpenAlbum,
+  onOpenArtist,
+  onOpenPlaylist,
+  onPlayFile,
+  onQueryChange
+}: {
+  albums: AlbumGroupItem[];
+  inputRef: MutableRefObject<HTMLInputElement | null>;
+  playlists: Playlist[];
+  query: string;
+  onClose(): void;
+  onNavigate(view: string): void;
+  onOpenAlbum(album: AlbumGroupItem): void;
+  onOpenArtist(artist: string): void;
+  onOpenPlaylist(playlistId: string): void;
+  onPlayFile(fileId: string, queueFileIds: string[]): void;
+  onQueryChange(query: string): void;
+}): ReactElement {
+  const normalized = query.trim().toLocaleLowerCase();
+  const pageMatches = topNavigationItems.filter((item) => {
+    const label = item === "Playlists" ? "lists playlists" : item;
+    return !normalized || label.toLocaleLowerCase().includes(normalized);
+  });
+  const artistMatches = useMemo(() => {
+    const artists = [...new Set(albums.map((album) => album.artist))];
+    return artists
+      .filter((artist) => normalized && artist.toLocaleLowerCase().includes(normalized))
+      .slice(0, 5);
+  }, [albums, normalized]);
+  const albumMatches = useMemo(
+    () =>
+      albums
+        .filter((album) => !normalized || `${album.album} ${album.artist}`.toLocaleLowerCase().includes(normalized))
+        .slice(0, normalized ? 6 : 4),
+    [albums, normalized]
+  );
+  const playlistMatches = useMemo(
+    () =>
+      playlists
+        .filter((playlist) => normalized && `${playlist.name} ${playlist.description ?? ""}`.toLocaleLowerCase().includes(normalized))
+        .slice(0, 4),
+    [normalized, playlists]
+  );
+  const trackMatches = useMemo(
+    () =>
+      normalized.length < 2
+        ? []
+        : albums
+            .flatMap((album) =>
+              album.files.map((file) => ({
+                album,
+                file,
+                label: file.displayTags.title ?? file.filename
+              }))
+            )
+            .filter(({ album, file, label }) =>
+              `${label} ${file.displayTags.artist ?? album.artist} ${album.album}`.toLocaleLowerCase().includes(normalized)
+            )
+            .slice(0, 6),
+    [albums, normalized]
+  );
+  const hasResults =
+    pageMatches.length + artistMatches.length + albumMatches.length + playlistMatches.length + trackMatches.length > 0;
+
+  function choose(action: () => void): void {
+    onClose();
+    action();
+  }
+
+  return createPortal(
+    <div
+      className="commandPaletteBackdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) {
+          onClose();
+        }
+      }}
+    >
+      <section aria-label="Search or command" aria-modal="true" className="commandPalette" role="dialog">
+        <label className="commandPaletteSearch">
+          <UiIcon name="search" />
+          <input
+            autoFocus
+            aria-label="Search pages, artists, albums, tracks, and playlists"
+            placeholder="Type a page, artist, album, track, or playlist"
+            ref={inputRef}
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+          />
+          <kbd>Esc</kbd>
+        </label>
+        <div className="commandPaletteResults">
+          {pageMatches.length > 0 ? (
+            <section>
+              <h2>Go to</h2>
+              {pageMatches.map((item) => (
+                <button key={item} type="button" onClick={() => choose(() => onNavigate(item))}>
+                  <NavIcon view={item} />
+                  <span><strong>{item === "Playlists" ? "Lists" : item}</strong><small>Workspace</small></span>
+                  <em>Open</em>
+                </button>
+              ))}
+            </section>
+          ) : null}
+          {artistMatches.length > 0 ? (
+            <section>
+              <h2>Artists</h2>
+              {artistMatches.map((artist) => (
+                <button key={artist} type="button" onClick={() => choose(() => onOpenArtist(artist))}>
+                  <UiIcon name="artist" />
+                  <span><strong>{artist}</strong><small>Artist</small></span>
+                  <em>Browse</em>
+                </button>
+              ))}
+            </section>
+          ) : null}
+          {albumMatches.length > 0 ? (
+            <section>
+              <h2>{normalized ? "Albums" : "Library shortcuts"}</h2>
+              {albumMatches.map((album) => (
+                <button key={album.id} type="button" onClick={() => choose(() => onOpenAlbum(album))}>
+                  <Artwork className="commandPaletteArtwork" src={artworkAlbumUrl(album.id)} />
+                  <span><strong>{album.album}</strong><small>{album.artist} - {album.fileCount} tracks</small></span>
+                  <em>Open</em>
+                </button>
+              ))}
+            </section>
+          ) : null}
+          {trackMatches.length > 0 ? (
+            <section>
+              <h2>Tracks</h2>
+              {trackMatches.map(({ album, file, label }) => (
+                <button
+                  key={file.id}
+                  type="button"
+                  onClick={() => choose(() => onPlayFile(file.id, album.files.map((item) => item.id)))}
+                >
+                  <UiIcon name="format" />
+                  <span><strong>{label}</strong><small>{file.displayTags.artist ?? album.artist} - {album.album}</small></span>
+                  <em>Play</em>
+                </button>
+              ))}
+            </section>
+          ) : null}
+          {playlistMatches.length > 0 ? (
+            <section>
+              <h2>Lists</h2>
+              {playlistMatches.map((playlist) => (
+                <button key={playlist.id} type="button" onClick={() => choose(() => onOpenPlaylist(playlist.id))}>
+                  <UiIcon name="playlist" />
+                  <span><strong>{playlist.name}</strong><small>{playlist.items.length} tracks</small></span>
+                  <em>Open</em>
+                </button>
+              ))}
+            </section>
+          ) : null}
+          {!hasResults ? <div className="commandPaletteEmpty">No matching page or library item.</div> : null}
+        </div>
+        <footer>
+          <span>Tab to move</span>
+          <span>Enter to open</span>
+          <span>Esc to close</span>
+        </footer>
+      </section>
+    </div>,
+    document.body
+  );
+}
+
 function LibraryWorkbenchView({
   albumsState,
   currentWaveform,
@@ -4355,6 +4574,7 @@ function LibraryWorkbenchView({
   const [selectedArtistName, setSelectedArtistName] = useState<string | null>(null);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const artistListRef = useRef<HTMLDivElement | null>(null);
   const artistGroups = useMemo(
     () => groupAlbumsByArtist(sortAlbumsByArtistAlbum(albums)),
     [albums]
@@ -4393,6 +4613,13 @@ function LibraryWorkbenchView({
     setSelectedFileId(null);
   }
 
+  function jumpToArtistLetter(letter: string): void {
+    const target = artistListRef.current?.querySelector<HTMLButtonElement>(
+      `button[data-start-letter="${letter}"]`
+    );
+    target?.scrollIntoView({ block: "start" });
+  }
+
   if (albumsState.status === "loading" && albums.length === 0) {
     return <div className="emptyState">Loading library.</div>;
   }
@@ -4424,23 +4651,42 @@ function LibraryWorkbenchView({
             onChange={(event) => setArtistQuery(event.target.value)}
           />
         </label>
-        <div className="libraryArtistList">
-          {visibleArtists.map((section) => {
-            const fileCount = section.albums.reduce((sum, album) => sum + album.files.length, 0);
-            return (
-              <button
-                className={section.artist === selectedArtist?.artist ? "active" : ""}
-                key={section.artist}
-                type="button"
-                onClick={() => selectArtist(section.artist)}
-              >
-                <strong>{section.artist}</strong>
-                <span>
-                  {section.albums.length} album{section.albums.length === 1 ? "" : "s"} - {fileCount} track{fileCount === 1 ? "" : "s"}
-                </span>
-              </button>
-            );
-          })}
+        <div className="libraryArtistBrowser">
+          <nav className="artistLetterRail" aria-label="Jump to artist letter">
+            {["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"].map((letter) => {
+              const available = visibleArtists.some((section) => getArtistStartLetter(section.artist) === letter);
+              return (
+                <button
+                  aria-label={letter === "#" ? "Jump to numeric artists" : `Jump to artists beginning with ${letter}`}
+                  disabled={!available}
+                  key={letter}
+                  type="button"
+                  onClick={() => jumpToArtistLetter(letter)}
+                >
+                  {letter}
+                </button>
+              );
+            })}
+          </nav>
+          <div className="libraryArtistList" ref={artistListRef}>
+            {visibleArtists.map((section) => {
+              const fileCount = section.albums.reduce((sum, album) => sum + album.files.length, 0);
+              return (
+                <button
+                  className={section.artist === selectedArtist?.artist ? "active" : ""}
+                  data-start-letter={getArtistStartLetter(section.artist)}
+                  key={section.artist}
+                  type="button"
+                  onClick={() => selectArtist(section.artist)}
+                >
+                  <strong>{section.artist}</strong>
+                  <span>
+                    {section.albums.length} album{section.albums.length === 1 ? "" : "s"} - {fileCount} track{fileCount === 1 ? "" : "s"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
         <footer>
           <span>A-Z</span>
@@ -4577,6 +4823,11 @@ function LibraryWorkbenchView({
       </section>
     </section>
   );
+}
+
+function getArtistStartLetter(artist: string): string {
+  const letter = artist.trim().charAt(0).toLocaleUpperCase();
+  return /^[A-Z]$/.test(letter) ? letter : "#";
 }
 
 function LibraryView({
@@ -6986,13 +7237,34 @@ function SettingsView({
   const fontOptions = Object.entries(displayFonts) as Array<[DisplayFontId, (typeof displayFonts)[DisplayFontId]]>;
 
   return (
-    <section className="settingsView" aria-label="Settings">
+    <section className="settingsWorkbench" aria-label="Settings">
+      <aside className="settingsNavigator">
+        <header>
+          <UiIcon name="settings" />
+          <div>
+            <strong>Settings</strong>
+            <span>Application preferences</span>
+          </div>
+        </header>
+        <nav aria-label="Settings sections">
+          <a href="#settings-appearance"><UiIcon name="preference" /><span>Appearance</span></a>
+          <a href="#settings-taste"><UiIcon name="artist" /><span>Taste profile</span></a>
+          <a href="#settings-quality"><UiIcon name="format" /><span>Discovery quality</span></a>
+          <a href="#settings-workflows"><UiIcon name="operations" /><span>Workflows</span></a>
+        </nav>
+        <div className="settingsNavigatorSummary">
+          <span>Typography</span>
+          <strong>{displayFonts[appearance.displayFont].label}</strong>
+          <small>{appearance.mode} / {accentPalettes[appearance.accent].label}</small>
+        </div>
+      </aside>
+      <div className="settingsView">
       <header className="settingsPageHeader">
         <h1>Settings</h1>
         <span>Appearance, library behavior, and agent preferences</span>
       </header>
       {state.status === "error" ? <div className="inlineError">{state.message}</div> : null}
-      <section className="settingsPanel appearancePanel" aria-label="Appearance preferences">
+      <section className="settingsPanel appearancePanel" id="settings-appearance" aria-label="Appearance preferences">
         <div>
           <strong>Appearance</strong>
           <span>Customize the app theme, highlight color, display type, and main background.</span>
@@ -7123,7 +7395,7 @@ function SettingsView({
         ) : null}
       </section>
 
-      <section className="settingsHeader">
+      <section className="settingsHeader" id="settings-taste">
         <div>
           <strong>Taste Profile</strong>
           <span>
@@ -7148,7 +7420,7 @@ function SettingsView({
         ))}
       </section>
 
-      <section className="settingsPanel" aria-label="Quality preferences">
+      <section className="settingsPanel" id="settings-quality" aria-label="Quality preferences">
         <div>
           <strong>Quality Preferences</strong>
           <span>Used by future discovery ranking and cleanup suggestions.</span>
@@ -7199,7 +7471,7 @@ function SettingsView({
         </label>
       </section>
 
-      <section className="settingsGrid" aria-label="Workflow preferences">
+      <section className="settingsGrid" id="settings-workflows" aria-label="Workflow preferences">
         <label className="settingsField wide">
           <span>Tagging preferences</span>
           <textarea
@@ -7226,6 +7498,7 @@ function SettingsView({
           <textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
         </label>
       </section>
+      </div>
     </section>
   );
 }
@@ -7531,8 +7804,15 @@ function DiscoveryView({
       </nav>
 
       {discoveryWorkspaceTab === "results" ? (
-        <div className="discoveryWorkspace">
+        <div className={`discoveryWorkspace mode-${discoverySearchMode}`}>
         <div className="discoveryMainColumn">
+          {discoverySearchMode === "search" ? (
+            <div className={discoveryState.health?.reachable ? "discoveryInlineStatus ready" : "discoveryInlineStatus"}>
+              <span><i />{discoveryState.health?.reachable ? "slskd connected" : "slskd not confirmed"}</span>
+              <span>{discoveryStatusDetail}</span>
+              {!downloadsConfigured ? <strong>Download staging is not configured</strong> : null}
+            </div>
+          ) : null}
           {discoveryState.results.length > 0 ? (
             <section className="discoveryFilterPanel" aria-label="Discovery filters">
               <div className="discoverySummary">
@@ -7635,6 +7915,19 @@ function DiscoveryView({
                 <span>{downloadButtonLabel}</span>
               </button>
             </section>
+          ) : null}
+
+          {discoverySearchMode === "search" && inspectedGroup ? (
+            <div className="discoveryInlineCandidate">
+              <DiscoveryCandidateDetail
+                group={inspectedGroup}
+                libraryMatch={getDiscoveryLibraryMatch(inspectedGroup, libraryMatches)}
+                selectedFileCount={inspectedGroup.files.filter((file) => !file.isLocked && isAudioDiscoveryResult(file) && selectedFileIds.has(file.id)).length}
+                saved={savedCandidates.some((candidate) => candidate.candidateKey === inspectedGroup.id)}
+                onSave={() => onSaveCandidate(inspectedGroup)}
+                onSelect={() => onGroupSelect(inspectedGroup)}
+              />
+            </div>
           ) : null}
 
           <section className="discoveryResults" aria-label="Discovery results">
@@ -7944,12 +8237,22 @@ function DiscoveryDownloadsWorkspace({
   onOpenJobs(): void;
   onRetry(jobId: string): Promise<void>;
 }): ReactElement {
+  const [downloadFilter, setDownloadFilter] = useState<"all" | "active" | "completed" | "attention">("all");
   const sortedJobs = useMemo(
     () => [...jobs].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)),
     [jobs]
   );
   const activeJobs = sortedJobs.filter((job) => job.status === "queued" || job.status === "running");
   const completedJobs = sortedJobs.filter((job) => job.status === "succeeded");
+  const attentionJobs = sortedJobs.filter((job) => job.status === "failed" || job.status === "cancelled");
+  const visibleJobs =
+    downloadFilter === "active"
+      ? activeJobs
+      : downloadFilter === "completed"
+        ? completedJobs
+        : downloadFilter === "attention"
+          ? attentionJobs
+          : sortedJobs;
   const totalRemaining = activeJobs.reduce(
     (total, job) => total + Math.max(0, job.selectedCount - job.completedCount),
     0
@@ -7966,16 +8269,22 @@ function DiscoveryDownloadsWorkspace({
             {completedJobs.length.toLocaleString()} completed
           </p>
         </div>
-        <button className="secondary" type="button" onClick={onOpenJobs}>
-          All jobs
-        </button>
+        <div className="discoveryDownloadHeaderActions">
+          <div className="segmentedControl" aria-label="Filter downloads">
+            <button className={downloadFilter === "all" ? "active" : ""} type="button" onClick={() => setDownloadFilter("all")}>All</button>
+            <button className={downloadFilter === "active" ? "active" : ""} type="button" onClick={() => setDownloadFilter("active")}>Active {activeJobs.length}</button>
+            <button className={downloadFilter === "completed" ? "active" : ""} type="button" onClick={() => setDownloadFilter("completed")}>Complete {completedJobs.length}</button>
+            <button className={downloadFilter === "attention" ? "active" : ""} type="button" onClick={() => setDownloadFilter("attention")}>Attention {attentionJobs.length}</button>
+          </div>
+          <button className="secondary" type="button" onClick={onOpenJobs}>Job log</button>
+        </div>
       </header>
 
       <div className="discoveryDownloadRows">
-        {sortedJobs.length === 0 ? (
-          <div className="emptyState">No Discovery downloads yet.</div>
+        {visibleJobs.length === 0 ? (
+          <div className="emptyState">No downloads match this filter.</div>
         ) : (
-          sortedJobs.map((job, index) => {
+          visibleJobs.map((job, index) => {
             const percent = Math.round(job.progress * 100);
             const cancellable = job.status === "queued" || job.status === "running";
             const retryable = job.status === "failed" || job.status === "cancelled";
@@ -10477,55 +10786,197 @@ function PlaylistsView({
   const playlistTrackCount = playlists.reduce((sum, playlist) => sum + playlist.items.length, 0);
   const playlistDurationMs = playlists.reduce((sum, playlist) => sum + playlist.items.reduce((trackSum, item) => trackSum + (item.file.durationMs ?? 0), 0), 0);
 
-  if (selectedPlaylist) {
-    return (
-      <PlaylistDetailView
-        currentWaveform={currentWaveform}
-        playback={playback}
-        playbackBusy={playbackBusy}
-        playlist={selectedPlaylist}
-        onBack={onBack}
-        onEnqueuePlayback={onEnqueuePlayback}
-        onOpenAlbumPage={onOpenAlbumPage}
-        onOpenArtistPage={onOpenArtistPage}
-        onPlayFile={onPlayFile}
-        onPlayFileIdsShuffled={onPlayFileIdsShuffled}
-        onPlayPlaylist={onPlayPlaylist}
-        onProposeDeletePlaylist={onProposeDeletePlaylist}
-        onProposeUpdatePlaylist={onProposeUpdatePlaylist}
-        onProposeRemoveItem={onProposeRemoveItem}
-      />
-    );
+  const [playlistQuery, setPlaylistQuery] = useState("");
+  const [editingPlaylist, setEditingPlaylist] = useState(false);
+  const [playlistNameDraft, setPlaylistNameDraft] = useState("");
+  const [playlistDescriptionDraft, setPlaylistDescriptionDraft] = useState("");
+  const visiblePlaylists = playlists.filter((playlist) =>
+    `${playlist.name} ${playlist.description ?? ""}`.toLocaleLowerCase().includes(playlistQuery.trim().toLocaleLowerCase())
+  );
+  const activePlaylist =
+    selectedPlaylist ??
+    visiblePlaylists[0] ??
+    playlists[0] ??
+    null;
+  const activeQueue = useMemo(
+    () => activePlaylist?.items.map((item) => item.file.id) ?? [],
+    [activePlaylist]
+  );
+
+  useEffect(() => {
+    setPlaylistNameDraft(activePlaylist?.name ?? "");
+    setPlaylistDescriptionDraft(activePlaylist?.description ?? "");
+    setEditingPlaylist(false);
+  }, [activePlaylist?.description, activePlaylist?.id, activePlaylist?.name]);
+
+  async function submitPlaylistEdit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!activePlaylist || !playlistNameDraft.trim()) {
+      return;
+    }
+    await onProposeUpdatePlaylist(activePlaylist.id, {
+      name: playlistNameDraft.trim(),
+      description: playlistDescriptionDraft.trim() || null
+    });
+    setEditingPlaylist(false);
   }
 
   return (
-    <section className="playlistsPage" aria-label="Playlists overview">
-      <header className="playlistsPageHeader">
-        <div>
-          <h1>Lists</h1>
-          <span>{playlists.length.toLocaleString()} playlists / {playlistTrackCount.toLocaleString()} tracks / {formatListenTime(playlistDurationMs)}</span>
-        </div>
-      </header>
-      {playlistsState.status === "error" ? <div className="inlineError">{playlistsState.message}</div> : null}
-      <section className="playlistList" aria-label="Playlists">
-        {playlists.length === 0 ? (
-          <div className="emptyState">
-            {playlistsState.status === "loading"
-              ? "Loading playlists."
-              : "No playlists yet. Ask the agent to propose one, then approve and apply the operation batch."}
+    <section className="playlistsWorkbench" aria-label="Playlists">
+      <aside className="playlistBrowser">
+        <header>
+          <div>
+            <h1>Lists</h1>
+            <span>{playlists.length.toLocaleString()} lists - {playlistTrackCount.toLocaleString()} tracks</span>
           </div>
+        </header>
+        <label className="playlistBrowserSearch">
+          <UiIcon name="search" />
+          <input
+            aria-label="Filter playlists"
+            placeholder="Filter lists"
+            value={playlistQuery}
+            onChange={(event) => setPlaylistQuery(event.target.value)}
+          />
+        </label>
+        <div className="playlistBrowserRows">
+          {visiblePlaylists.map((playlist) => {
+            const preview = playlist.items.slice(0, 2);
+            const duration = playlist.items.reduce((sum, item) => sum + (item.file.durationMs ?? 0), 0);
+            return (
+              <button
+                className={playlist.id === activePlaylist?.id ? "active" : ""}
+                key={playlist.id}
+                type="button"
+                onClick={() => onOpenPlaylist(playlist.id)}
+              >
+                <span className="playlistBrowserArt" aria-hidden="true">
+                  {preview.map((item, index) => (
+                    <Artwork className={`slot${index + 1}`} key={item.id} src={artworkFileUrl(item.file.id)} />
+                  ))}
+                  {preview.length === 0 ? <UiIcon name="playlist" /> : null}
+                </span>
+                <span>
+                  <strong>{playlist.name}</strong>
+                  <small>{playlist.items.length} tracks - {duration > 0 ? formatTime(duration) : "-"}</small>
+                </span>
+              </button>
+            );
+          })}
+          {visiblePlaylists.length === 0 ? (
+            <div className="playlistBrowserEmpty">
+              {playlistsState.status === "loading" ? "Loading lists." : "No matching lists."}
+            </div>
+          ) : null}
+        </div>
+        <footer>
+          <span>{formatListenTime(playlistDurationMs)} total</span>
+          <button type="button" onClick={onBack}>Clear selection</button>
+        </footer>
+      </aside>
+
+      <section className="playlistWorkspace">
+        {playlistsState.status === "error" ? <div className="inlineError">{playlistsState.message}</div> : null}
+        {activePlaylist ? (
+          <>
+            <header className="playlistWorkspaceHeader">
+              <span className="playlistWorkspaceArt" aria-hidden="true">
+                {activePlaylist.items.slice(0, 3).map((item, index) => (
+                  <Artwork className={`slot${index + 1}`} key={item.id} src={artworkFileUrl(item.file.id)} />
+                ))}
+                {activePlaylist.items.length === 0 ? <UiIcon name="playlist" /> : null}
+              </span>
+              <div className="playlistWorkspaceCopy">
+                <span className="eyebrow">{activePlaylist.createdBy} - {activePlaylist.type}</span>
+                <h2>{activePlaylist.name}</h2>
+                <p>{activePlaylist.description ?? "No description."}</p>
+                <span>{activePlaylist.items.length} tracks - {formatListenTime(activePlaylist.items.reduce((sum, item) => sum + (item.file.durationMs ?? 0), 0))}</span>
+              </div>
+              <div className="playlistWorkspaceActions">
+                <button
+                  className="primary"
+                  disabled={playbackBusy || activeQueue.length === 0}
+                  type="button"
+                  onClick={() => void onPlayPlaylist(activePlaylist.id)}
+                >
+                  <TransportIcon shape="play" /> Play
+                </button>
+                <button
+                  disabled={playbackBusy || activeQueue.length === 0}
+                  type="button"
+                  onClick={() => void onPlayFileIdsShuffled(activeQueue)}
+                >
+                  <TransportIcon shape="shuffle" /> Shuffle
+                </button>
+                <button disabled={playbackBusy || activeQueue.length === 0} type="button" onClick={() => void onEnqueuePlayback(activeQueue, "end")}>
+                  Queue
+                </button>
+                <button type="button" onClick={() => setEditingPlaylist((current) => !current)}>Edit</button>
+                <button className="dangerButton" type="button" onClick={() => void onProposeDeletePlaylist(activePlaylist)}>Delete</button>
+              </div>
+            </header>
+
+            {editingPlaylist ? (
+              <form className="playlistWorkspaceEdit" onSubmit={(event) => void submitPlaylistEdit(event)}>
+                <label>
+                  <span>Name</span>
+                  <input value={playlistNameDraft} onChange={(event) => setPlaylistNameDraft(event.target.value)} />
+                </label>
+                <label>
+                  <span>Description</span>
+                  <input value={playlistDescriptionDraft} onChange={(event) => setPlaylistDescriptionDraft(event.target.value)} />
+                </label>
+                <button disabled={!playlistNameDraft.trim()} type="submit">Propose changes</button>
+              </form>
+            ) : null}
+
+            <div className="playlistWorkspaceTrackHeader" aria-hidden="true">
+              <span />
+              <span>#</span>
+              <span>Title</span>
+              <span>Album</span>
+              <span>Time</span>
+              <span>Format</span>
+              <span />
+            </div>
+            <div className="playlistWorkspaceTracks">
+              {activePlaylist.items.map((item, index) => {
+                const tags = item.file.displayTags;
+                const isCurrent = playback.currentFileId === item.file.id;
+                const artist = tags.artist ?? tags.albumartist ?? "Unknown artist";
+                return (
+                  <div className={isCurrent ? "playlistWorkspaceTrack playing" : "playlistWorkspaceTrack"} key={item.id}>
+                    <button
+                      aria-label={`Play ${tags.title ?? item.file.filename}`}
+                      className="rowPlay"
+                      disabled={playbackBusy}
+                      type="button"
+                      onClick={() => void onPlayFile(item.file.id, activeQueue)}
+                    >
+                      <TransportIcon shape={isCurrent && playback.status === "playing" ? "pause" : "play"} />
+                    </button>
+                    <span>{String(index + 1).padStart(2, "0")}</span>
+                    <span className="playlistWorkspaceTitle">
+                      <strong>{tags.title ?? item.file.filename}</strong>
+                      <button type="button" onClick={() => onOpenArtistPage(artist)}>{artist}</button>
+                      {isCurrent ? <MiniTrackWaveform playback={playback} waveform={currentWaveform} /> : null}
+                    </span>
+                    <span>{tags.album ?? "-"}</span>
+                    <span>{item.file.durationMs == null ? "-" : formatTime(item.file.durationMs)}</span>
+                    <span>{formatFileFormat(item.file)}</span>
+                    <button className="secondary" type="button" onClick={() => void onProposeRemoveItem(activePlaylist.id, item.id)}>Remove</button>
+                  </div>
+                );
+              })}
+              {activePlaylist.items.length === 0 ? <div className="emptyState">This list has no tracks.</div> : null}
+            </div>
+            <footer className="playlistWorkspaceFooter">
+              <span>{activePlaylist.items.length} tracks</span>
+              <span>{activePlaylist.createdBy}</span>
+            </footer>
+          </>
         ) : (
-          playlists.map((playlist) => (
-            <PlaylistOverviewCard
-              key={playlist.id}
-              playbackBusy={playbackBusy}
-              playlist={playlist}
-              onOpenPlaylist={onOpenPlaylist}
-              onPlayFileIdsShuffled={onPlayFileIdsShuffled}
-              onPlayPlaylist={onPlayPlaylist}
-              onProposeDeletePlaylist={onProposeDeletePlaylist}
-            />
-          ))
+          <div className="emptyState">No playlists yet.</div>
         )}
       </section>
     </section>
@@ -13435,7 +13886,8 @@ function getAppearanceStyle(settings: AppearanceSettings): CSSProperties {
     "--acc-ink": accent.accInk,
     "--acc-line": accent.accLine,
     "--app-bg-image": backgroundUrl ? `url("${backgroundUrl}")` : "none",
-    "--font-head": displayFonts[settings.displayFont].value,
+    "--font-body": displayFonts[settings.displayFont].body,
+    "--font-head": displayFonts[settings.displayFont].head,
     "--ok-line": accent.okLine
   } as CSSProperties;
 }
