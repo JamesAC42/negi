@@ -1,5 +1,27 @@
 import { Fragment, memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import {
+  ArrowDownWideNarrow as LucideSort,
+  Bot as LucideBot,
+  BriefcaseBusiness as LucideJobs,
+  CheckCircle2 as LucideStatus,
+  Copy as LucideCopy,
+  Disc3 as LucideDisc,
+  Download as LucideDownload,
+  FileAudio as LucideFormat,
+  Heart as LucideHeart,
+  House as LucideHome,
+  LibraryBig as LucideLibrary,
+  ListMusic as LucidePlaylist,
+  Menu as LucideMenu,
+  Play as LucidePlay,
+  Search as LucideSearch,
+  Settings as LucideSettings,
+  SlidersHorizontal as LucideOperations,
+  Star as LucideStar,
+  UserRound as LucideArtist,
+  Volume2 as LucideVolume
+} from "lucide-react";
 import type {
   CSSProperties,
   Dispatch,
@@ -4117,51 +4139,48 @@ function NavIcon({ view }: { view: string }): ReactElement {
 }
 
 function UiIcon({ name }: { name: string }): ReactElement {
-  return (
-    <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.55" viewBox="0 0 16 16">
-      {name === "home" ? (
-        <path d="M2.8 7.3 8 3l5.2 4.3M4.2 6.4v6h7.6v-6M6.5 12.4V9h3v3.4" />
-      ) : name === "library" ? (
-        <path d="M2.5 3.5h3v9h-3zm4 0h3v9h-3zm4 0h3v9h-3z" />
-      ) : name === "artist" ? (
-        <path d="M8 8.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM3.5 13c.8-2 2.3-3 4.5-3s3.7 1 4.5 3" />
-      ) : name === "album" ? (
-        <path d="M8 13.5A5.5 5.5 0 1 0 8 2.5a5.5 5.5 0 0 0 0 11zM8 9.5A1.5 1.5 0 1 0 8 6.5a1.5 1.5 0 0 0 0 3z" />
-      ) : name === "duplicate" ? (
-        <path d="M5.5 5.5h7v7h-7zM3.5 10.5v-7h7" />
-      ) : name === "import" ? (
-        <path d="M8 2.5v7m0 0 2.5-2.5M8 9.5 5.5 7M3 12.5h10" />
-      ) : name === "operations" ? (
-        <path d="M3 4h10M3 8h10M3 12h10M5 2.8v2.4M11 6.8v2.4M7 10.8v2.4" />
-      ) : name === "search" ? (
-        <path d="M7 11.5A4.5 4.5 0 1 0 7 2.5a4.5 4.5 0 0 0 0 9zM10.5 10.5 13.5 13.5" />
-      ) : name === "playlist" ? (
-        <path d="M3 4h6M3 8h6M3 12h4M11 5v5.5a1.5 1.5 0 1 0 1.5 1.5V6.5L14 6" />
-      ) : name === "agent" ? (
-        <path d="M4 6.5h8v5H4zM6 6.5V4h4v2.5M6.5 9h.1M9.4 9h.1M7 12.5h2" />
-      ) : name === "jobs" ? (
-        <path d="M3 4.5h10M3 8h10M3 11.5h10M3 4.5l1.3-2h7.4l1.3 2" />
-      ) : name === "settings" ? (
-        <path d="M8 10.2A2.2 2.2 0 1 0 8 5.8a2.2 2.2 0 0 0 0 4.4zM8 2.5v1.3m0 8.4v1.3M3.2 4.4l.9.9m7.8 5.4.9.9m0-7.2-.9.9m-7.8 5.4-.9.9M2.5 8h1.3m8.4 0h1.3" />
-      ) : name === "volume" ? (
-        <path d="M2.5 6.5h2.2L8 3.8v8.4L4.7 9.5H2.5zM10.2 5.6a3.2 3.2 0 0 1 0 4.8M12 4a5.6 5.6 0 0 1 0 8" />
-      ) : name === "format" ? (
-        <path d="M3 3.5h10v9H3zM5 6h6M5 9h4" />
-      ) : name === "status" ? (
-        <path d="M8 13.5A5.5 5.5 0 1 0 8 2.5a5.5 5.5 0 0 0 0 11zM5.8 8.1l1.4 1.4 3-3" />
-      ) : name === "preference" ? (
-        <path d="M8 13 3.6 8.6a3 3 0 0 1 4.2-4.2l.2.2.2-.2a3 3 0 0 1 4.2 4.2z" />
-      ) : name === "rating" ? (
-        <path d="m8 2.7 1.5 3 3.3.5-2.4 2.3.6 3.3L8 10.2l-3 1.6.6-3.3-2.4-2.3 3.3-.5z" />
-      ) : name === "plays" ? (
-        <path d="M4.5 3.5v9l7-4.5z" />
-      ) : name === "sort" ? (
-        <path d="M3 4h7M3 8h5M3 12h3M12 3v9m0 0-2-2m2 2 2-2" />
-      ) : (
-        <path d="M3.5 4.5h9M3.5 8h9M3.5 11.5h9" />
-      )}
-    </svg>
-  );
+  const Icon =
+    name === "home"
+      ? LucideHome
+      : name === "library"
+        ? LucideLibrary
+        : name === "artist"
+          ? LucideArtist
+          : name === "album"
+            ? LucideDisc
+            : name === "duplicate"
+              ? LucideCopy
+              : name === "import"
+                ? LucideDownload
+                : name === "operations"
+                  ? LucideOperations
+                  : name === "search"
+                    ? LucideSearch
+                    : name === "playlist"
+                      ? LucidePlaylist
+                      : name === "agent"
+                        ? LucideBot
+                        : name === "jobs"
+                          ? LucideJobs
+                          : name === "settings"
+                            ? LucideSettings
+                            : name === "volume"
+                              ? LucideVolume
+                              : name === "format"
+                                ? LucideFormat
+                                : name === "status"
+                                  ? LucideStatus
+                                  : name === "preference"
+                                    ? LucideHeart
+                                    : name === "rating"
+                                      ? LucideStar
+                                      : name === "plays"
+                                        ? LucidePlay
+                                        : name === "sort"
+                                          ? LucideSort
+                                          : LucideMenu;
+
+  return <Icon aria-hidden="true" focusable="false" size={16} strokeWidth={1.55} />;
 }
 
 type StyledSelectOption<T extends string> = { value: T; label: string };
