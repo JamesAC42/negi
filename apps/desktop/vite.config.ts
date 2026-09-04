@@ -18,6 +18,7 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5173,
+    strictPort: true,
     watch: {
       // WSL gets no file events for edits made from Windows on /mnt/*,
       // so fall back to polling to keep HMR working in this setup.

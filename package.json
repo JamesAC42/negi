@@ -9,7 +9,11 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace @music-os/desktop",
+    "dev:app": "node scripts/dev-app.mjs start",
     "dev:backend": "npm run dev --workspace @music-os/backend",
+    "dev:doctor": "node scripts/dev-app.mjs doctor",
+    "dev:stop": "node scripts/dev-app.mjs stop",
+    "dev:sync": "node scripts/dev-app.mjs sync",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"

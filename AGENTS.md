@@ -9,33 +9,52 @@
 
 ## Starting development
 
-Use separate WSL terminals. Load NVM before running Node commands:
+Run the managed development stack from the authoritative WSL checkout:
 
 ```bash
 source ~/.nvm/nvm.sh
 cd ~/code/musicplayer
+npm run dev:app
 ```
 
-Backend:
+This single foreground command:
+
+- starts the backend in WSL with `tsx watch`;
+- starts the renderer in WSL at `http://127.0.0.1:5173`;
+- builds Electron main and preload from this checkout;
+- synchronizes those bundles into the Windows `negi-dev-shell`;
+- launches native Windows Electron against the WSL Vite server; and
+- rebuilds, synchronizes, and restarts only Electron after main/preload changes.
+
+Press Ctrl+C once in the managed terminal to stop every process it owns. These
+commands are also available from another WSL terminal:
 
 ```bash
-npm run dev --workspace @music-os/backend
+npm run dev:doctor
+npm run dev:stop
+npm run dev:sync
 ```
 
-Renderer/client:
+`dev:doctor` reports managed PIDs, commands, cwd values, port listeners,
+service health, and whether the Windows Electron bundle matches the WSL build.
+`dev:stop` touches only PIDs recorded by the managed stack. `dev:sync`
+rebuilds and copies Electron main/preload without starting or stopping anything.
 
-```bash
-npm run dev --workspace @music-os/desktop
-```
+Do not manually launch the Windows `negi-dev-shell` for normal development,
+because it can retain an old copied main bundle. If an unmanaged legacy backend
+or Vite process owns a fixed port, `dev:app` stops with a clear error; inspect
+it with `dev:doctor`, stop it once, and rerun `dev:app`.
 
-The backend command runs `tsx src/server.ts` without watch mode. After backend source, configuration, or environment changes, stop it with Ctrl+C and run the backend command again. Vite normally hot-reloads renderer changes; restart it after dependency or Vite configuration changes.
+The Windows shell defaults to `%LOCALAPPDATA%\\negi-dev-shell`. Override it
+with `MUSIC_OS_ELECTRON_SHELL` when necessary.
 
 ## Playback environment
 
 - Playback is owned by the backend under `apps/backend`.
 - mpv is a Windows executable launched from WSL. Its path is configured by `MUSIC_OS_MPV_PATH`.
 - Windows named-pipe IPC uses `MUSIC_OS_WINDOWS_NODE_PATH` when configured.
-- For playback bugs, restart the backend; a renderer restart alone cannot load backend changes.
+- Under `dev:app`, backend source changes restart automatically. A renderer
+  refresh alone still cannot load backend changes.
 
 ## Validation
 

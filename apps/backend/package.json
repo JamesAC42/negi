@@ -7,6 +7,7 @@
   "types": "src/index.ts",
   "scripts": {
     "dev": "tsx src/server.ts",
+    "dev:watch": "tsx watch src/server.ts",
     "health": "tsx src/scripts/health-smoke.ts",
     "import:smoke": "tsx src/scripts/import-smoke.ts",
     "incomplete-albums:smoke": "tsx src/scripts/incomplete-albums-smoke.ts",
@@ -20,6 +21,7 @@
     "agent-model-provider:smoke": "tsx src/scripts/agent-model-provider-smoke.ts",
     "agent-thread:smoke": "tsx src/scripts/agent-thread-smoke.ts",
     "album-playback:smoke": "tsx src/scripts/album-playback-smoke.ts",
+    "album-artwork-override:smoke": "tsx src/scripts/album-artwork-override-smoke.ts",
     "artwork:smoke": "tsx src/scripts/artwork-smoke.ts",
     "alternate-editions:smoke": "tsx src/scripts/alternate-editions-smoke.ts",
     "album-merge:smoke": "tsx src/scripts/album-merge-smoke.ts",
