@@ -25,6 +25,7 @@ export class PlaybackService {
   private repeatMode: PlaybackRepeatMode = "none";
   private interruptGeneration = 0;
   private pendingEndFileLoadToken: number | null = null;
+  private acceptObservedState = false;
 
   constructor(
     private readonly config: BackendConfig,
@@ -61,6 +62,22 @@ export class PlaybackService {
 
       const insertAt = position === "up_next" ? this.queueIndex + 1 : this.queue.length;
       this.queue.splice(insertAt, 0, ...files);
+      this.state = {
+        ...this.state,
+        queue: this.queue.map((item) => item.id),
+        queueIndex: this.queueIndex
+      };
+      return this.state;
+    });
+  }
+
+  async replaceUpNext(files: LibraryFile[]): Promise<PlaybackState> {
+    return this.runPlaybackOperation(() => {
+      if (this.queueIndex == null || this.state.status === "stopped" || this.queue.length === 0) {
+        return this.state;
+      }
+
+      this.queue = [...this.queue.slice(0, this.queueIndex + 1), ...files];
       this.state = {
         ...this.state,
         queue: this.queue.map((item) => item.id),
@@ -116,6 +133,7 @@ export class PlaybackService {
     this.recordCurrentListen("replaced");
     const loadToken = ++this.loadGeneration;
     const translatedPath = translatePathForPlayer(file.path, this.config.mpvPath);
+    this.acceptObservedState = false;
     this.state = {
       status: "playing",
       currentFileId: file.id,
@@ -148,11 +166,14 @@ export class PlaybackService {
       if (!this.isActiveLoad(loadToken)) {
         return this.state;
       }
+      this.state = { ...this.state, status: "playing", positionMs: 0, error: null };
+      this.acceptObservedState = true;
       this.recordListenStarted(file.id);
       this.positionUpdatedAt = Date.now();
       return this.state;
     } catch (error) {
       if (this.isActiveLoad(loadToken)) {
+        this.acceptObservedState = false;
         this.positionUpdatedAt = null;
         this.state = { ...this.state, status: "error", error: error instanceof Error ? error.message : String(error) };
       }
@@ -250,29 +271,39 @@ export class PlaybackService {
     this.queue = [];
     this.queueIndex = null;
     this.positionUpdatedAt = null;
+    this.acceptObservedState = false;
     this.state = createStoppedState(this.volumePercent, this.repeatMode);
     return this.state;
   }
 
   async getState(): Promise<PlaybackState> {
-    if (!this.process || !this.ipc || this.state.status === "stopped" || this.state.status === "error") {
+    if (!this.process || !this.ipc || !this.acceptObservedState || this.state.status === "stopped" || this.state.status === "error") {
       return this.state;
     }
 
     try {
-      const positionSeconds = await this.getMpvProperty("time-pos").catch(() => null);
-      const durationSeconds = await this.getMpvProperty("duration").catch(() => null);
-      const paused = await this.getMpvProperty("pause").catch(() => null);
-      const volume = await this.getMpvProperty("volume").catch(() => null);
+      const [positionSample, durationSeconds, paused, volume] = await Promise.all([
+        this.getMpvProperty("time-pos")
+          .then((value) => ({ value, receivedAt: Date.now() }))
+          .catch(() => ({ value: null, receivedAt: Date.now() })),
+        this.getMpvProperty("duration").catch(() => null),
+        this.getMpvProperty("pause").catch(() => null),
+        this.getMpvProperty("volume").catch(() => null)
+      ]);
       const volumePercent = normalizeVolumePercent(volume) ?? this.volumePercent;
       this.volumePercent = volumePercent;
 
       const nextStatus = paused == null ? this.state.status : paused === true ? "paused" : "playing";
+      const durationMs = numberToMilliseconds(durationSeconds) ?? this.state.durationMs;
+      const sampledPositionMs = numberToMilliseconds(positionSample.value);
+      const positionMs = sampledPositionMs == null
+        ? this.getEstimatedPositionMs()
+        : sampledPositionMs + (nextStatus === "playing" ? Math.max(0, Date.now() - positionSample.receivedAt) : 0);
       this.state = {
         ...this.state,
         status: nextStatus,
-        positionMs: numberToMilliseconds(positionSeconds) ?? this.getEstimatedPositionMs(),
-        durationMs: numberToMilliseconds(durationSeconds) ?? this.state.durationMs,
+        positionMs: durationMs == null ? positionMs : Math.min(positionMs, durationMs),
+        durationMs,
         volumePercent,
         error: null
       };
@@ -310,6 +341,7 @@ export class PlaybackService {
     this.queue = [];
     this.queueIndex = null;
     this.positionUpdatedAt = null;
+    this.acceptObservedState = false;
     this.state = createStoppedState(this.volumePercent, this.repeatMode);
   }
 
@@ -364,6 +396,7 @@ export class PlaybackService {
         this.queue = [];
         this.queueIndex = null;
         this.positionUpdatedAt = null;
+        this.acceptObservedState = false;
         this.state = createStoppedState(this.volumePercent, this.repeatMode);
       }
     });
@@ -373,10 +406,21 @@ export class PlaybackService {
       ? MpvIpcClient.connectWindowsPipe(ipcId, onEvent, this.config.windowsNodePath ?? "node.exe")
       : MpvIpcClient.connectUnixSocket(ipcServerPath, onEvent);
     this.ipc = await this.ipcReady;
+    await Promise.all([
+      this.sendMpvCommand(["observe_property", 1, "time-pos"]).catch(() => undefined),
+      this.sendMpvCommand(["observe_property", 2, "duration"]).catch(() => undefined),
+      this.sendMpvCommand(["observe_property", 3, "pause"]).catch(() => undefined),
+      this.sendMpvCommand(["observe_property", 4, "volume"]).catch(() => undefined)
+    ]);
   }
 
   private handleMpvEvent(event: MpvIpcEvent, generation: number): void {
     if (generation !== this.processGeneration) {
+      return;
+    }
+
+    if (event.event === "property-change") {
+      this.applyObservedProperty(event.name, event.data);
       return;
     }
 
@@ -397,6 +441,42 @@ export class PlaybackService {
       const loadToken = this.pendingEndFileLoadToken;
       this.pendingEndFileLoadToken = null;
       this.queueTrackEndAdvance(loadToken);
+    }
+  }
+
+  private applyObservedProperty(name: unknown, value: unknown): void {
+    if (!this.acceptObservedState) {
+      return;
+    }
+    if (name === "time-pos") {
+      const positionMs = numberToMilliseconds(value);
+      if (positionMs != null && this.state.status !== "stopped") {
+        this.state = {
+          ...this.state,
+          positionMs: this.state.durationMs == null ? positionMs : Math.min(positionMs, this.state.durationMs)
+        };
+        this.positionUpdatedAt = this.state.status === "playing" ? Date.now() : null;
+      }
+      return;
+    }
+    if (name === "duration") {
+      const durationMs = numberToMilliseconds(value);
+      if (durationMs != null && this.state.status !== "stopped") {
+        this.state = { ...this.state, durationMs };
+      }
+      return;
+    }
+    if (name === "pause" && typeof value === "boolean" && this.state.status !== "stopped" && this.state.status !== "error") {
+      this.state = { ...this.state, status: value ? "paused" : "playing" };
+      this.positionUpdatedAt = value ? null : Date.now();
+      return;
+    }
+    if (name === "volume") {
+      const volumePercent = normalizeVolumePercent(value);
+      if (volumePercent != null) {
+        this.volumePercent = volumePercent;
+        this.state = { ...this.state, volumePercent };
+      }
     }
   }
 
@@ -432,6 +512,7 @@ export class PlaybackService {
       this.queue = [];
       this.queueIndex = null;
       this.positionUpdatedAt = null;
+      this.acceptObservedState = false;
       this.state = createStoppedState(this.volumePercent, this.repeatMode);
       return this.state;
     }
@@ -496,6 +577,7 @@ export class PlaybackService {
     this.ipc?.close();
     this.ipc = null;
     this.ipcReady = null;
+    this.acceptObservedState = false;
     this.process?.kill();
     this.killWindowsMpv();
   }

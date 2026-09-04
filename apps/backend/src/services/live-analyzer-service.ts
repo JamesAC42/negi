@@ -2,13 +2,15 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { VisualizerStreamMode } from "@music-os/core";
 import type { BackendConfig } from "../config.js";
 
-const SAMPLE_RATE = 8000;
-const ANALYSIS_WINDOW_MS = 64;
+const SAMPLE_RATE = 16000;
+const ANALYSIS_WINDOW_MS = 42;
 const ANALYZER_READ_RATE = 4;
-const INITIAL_ANALYSIS_BURST_SECONDS = 0.5;
+const INITIAL_ANALYSIS_BURST_SECONDS = 2;
 const DECODE_LOOKAHEAD_SECONDS = 90;
-const RESTART_LOOKAHEAD_MS = 1500;
-const MAX_WINDOW_SAMPLES = 512;
+const RESTART_LOOKAHEAD_MS = 900;
+const DECODER_CATCHUP_GRACE_MS = 1200;
+const MAX_WINDOW_SAMPLES = 1024;
+const MAX_BAND_KERNELS = 8;
 const MODE_BANDS: Record<VisualizerStreamMode, number> = {
   meter: 8,
   spectrum: 32,
@@ -37,7 +39,6 @@ export class LiveAnalyzerService {
   private current: AnalyzerInput | null = null;
   private latestFrame: AnalyzerFrame | null = null;
   private decodedSamples: number[] = [];
-  private startedAt = 0;
 
   constructor(private readonly config: BackendConfig) {}
 
@@ -51,10 +52,20 @@ export class LiveAnalyzerService {
       return;
     }
     if (this.current && this.current.fileId === input.fileId && this.current.path === input.path && this.current.mode === input.mode) {
-      const positionIsClose = Math.abs(this.getEstimatedPositionMs() - input.positionMs) < 1200;
-      if (positionIsClose && (this.process || this.hasLookahead())) {
+      this.current.durationMs = input.durationMs;
+      const decodedUntilMs = this.current.positionMs + (this.decodedSamples.length / SAMPLE_RATE) * 1000;
+      const positionIsDecoded = input.positionMs >= this.current.positionMs && input.positionMs <= decodedUntilMs;
+      const decoderCanCatchUp = Boolean(
+        this.process
+        && input.positionMs >= this.current.positionMs
+        && input.positionMs <= decodedUntilMs + DECODER_CATCHUP_GRACE_MS
+      );
+
+      if ((positionIsDecoded || decoderCanCatchUp) && (this.process || this.hasLookahead(input.positionMs))) {
         return;
       }
+      this.start(input, true);
+      return;
     }
     this.start(input);
   }
@@ -70,19 +81,20 @@ export class LiveAnalyzerService {
     this.decodedSamples = [];
   }
 
-  getFrame(): AnalyzerFrame | null {
+  getFrame(positionMs: number): AnalyzerFrame | null {
     if (this.current) {
-      this.latestFrame = this.createFrameAtPlaybackPosition();
+      this.latestFrame = this.createFrameAtPlaybackPosition(positionMs);
     }
     return this.latestFrame;
   }
 
-  private start(input: AnalyzerInput): void {
+  private start(input: AnalyzerInput, preserveLatestFrame = false): void {
     this.stopProcess();
     this.current = input;
-    this.latestFrame = null;
+    if (!preserveLatestFrame) {
+      this.latestFrame = null;
+    }
     this.decodedSamples = [];
-    this.startedAt = Date.now() - input.positionMs;
 
     const args = [
       "-nostdin",
@@ -107,6 +119,10 @@ export class LiveAnalyzerService {
       String(SAMPLE_RATE),
       "-f",
       "s16le",
+      "-flush_packets",
+      "1",
+      "-blocksize",
+      "4096",
       "pipe:1"
     ];
     const child = spawn(this.config.ffmpegPath!, args);
@@ -138,30 +154,24 @@ export class LiveAnalyzerService {
     }
   }
 
-  private getEstimatedPositionMs(): number {
-    if (!this.current) {
-      return 0;
-    }
-    const estimated = Math.max(0, Date.now() - this.startedAt);
-    return this.current.durationMs == null ? estimated : Math.min(estimated, this.current.durationMs);
-  }
-
-  private hasLookahead(): boolean {
+  private hasLookahead(positionMs: number): boolean {
     if (!this.current) {
       return false;
     }
-    const relativePositionMs = Math.max(0, this.getEstimatedPositionMs() - this.current.positionMs);
+    const relativePositionMs = Math.max(0, positionMs - this.current.positionMs);
     const decodedUntilMs = (this.decodedSamples.length / SAMPLE_RATE) * 1000;
     return decodedUntilMs - relativePositionMs > RESTART_LOOKAHEAD_MS;
   }
 
-  private createFrameAtPlaybackPosition(): AnalyzerFrame | null {
+  private createFrameAtPlaybackPosition(requestedPositionMs: number): AnalyzerFrame | null {
     const input = this.current;
     if (!input || this.decodedSamples.length === 0) {
       return this.latestFrame;
     }
 
-    const playbackPositionMs = this.getEstimatedPositionMs();
+    const playbackPositionMs = input.durationMs == null
+      ? Math.max(0, requestedPositionMs)
+      : Math.max(0, Math.min(requestedPositionMs, input.durationMs));
     const relativePositionMs = Math.max(0, playbackPositionMs - input.positionMs);
     const centerSample = Math.floor((relativePositionMs / 1000) * SAMPLE_RATE);
     if (centerSample >= this.decodedSamples.length) {
@@ -188,19 +198,31 @@ export class LiveAnalyzerService {
     }
     const rms = Math.min(1, Math.sqrt(sumSquares / Math.max(1, samples.length)) * 1.15);
     const normalizedPeak = Math.min(1, peak * 1.05);
+    const fftBins = input.mode === "spectrogram" ? computeBands(samples, 128) : undefined;
     const bands = input.mode === "meter"
       ? computeMeterBands(samples, MODE_BANDS[input.mode], rms, normalizedPeak)
-      : computeBands(samples, MODE_BANDS[input.mode]);
+      : fftBins
+        ? downsampleBands(fftBins, MODE_BANDS[input.mode])
+        : computeBands(samples, MODE_BANDS[input.mode]);
     return {
       fileId: input.fileId,
       analyzerPositionMs: playbackPositionMs,
       rms,
       peak: normalizedPeak,
       bands,
-      fftBins: input.mode === "spectrogram" ? computeBands(samples, 128) : undefined
+      fftBins
     };
   }
 }
+
+type BandKernel = {
+  cosines: Float32Array[];
+  sines: Float32Array[];
+  window: Float32Array;
+  windowSum: number;
+};
+
+const bandKernels = new Map<string, BandKernel>();
 
 function computeMeterBands(samples: number[], bandCount: number, rms: number, peak: number): number[] {
   const segmentSize = Math.max(1, Math.floor(samples.length / Math.max(1, bandCount)));
@@ -223,21 +245,68 @@ function computeBands(samples: number[], bandCount: number): number[] {
   if (samples.length === 0 || bandCount <= 0) {
     return new Array(Math.max(0, bandCount)).fill(0);
   }
-  const step = Math.max(1, Math.floor(samples.length / MAX_WINDOW_SAMPLES));
-  const compact = samples.filter((_, index) => index % step === 0).slice(-MAX_WINDOW_SAMPLES);
+  const compact = samples.slice(-MAX_WINDOW_SAMPLES);
+  const kernel = getBandKernel(compact.length, bandCount);
   const result: number[] = [];
   for (let band = 0; band < bandCount; band += 1) {
-    const cycles = 1 + band * 0.65;
     let real = 0;
     let imaginary = 0;
+    const cosines = kernel.cosines[band];
+    const sines = kernel.sines[band];
     for (let index = 0; index < compact.length; index += 1) {
-      const angle = (Math.PI * 2 * cycles * index) / compact.length;
-      real += compact[index] * Math.cos(angle);
-      imaginary -= compact[index] * Math.sin(angle);
+      const sample = compact[index] * kernel.window[index];
+      real += sample * cosines[index];
+      imaginary -= sample * sines[index];
     }
-    result.push(Math.min(0.94, Math.pow(Math.sqrt(real * real + imaginary * imaginary) / Math.max(1, compact.length) * 8.5, 0.82)));
+    const magnitude = (Math.sqrt(real * real + imaginary * imaginary) * 2) / kernel.windowSum;
+    result.push(Math.min(0.96, Math.pow(Math.max(0, magnitude * 2.35), 0.78)));
   }
   return result;
+}
+
+function getBandKernel(sampleCount: number, bandCount: number): BandKernel {
+  const key = `${sampleCount}:${bandCount}`;
+  const cached = bandKernels.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const window = Float32Array.from({ length: sampleCount }, (_, index) =>
+    sampleCount <= 1 ? 1 : 0.5 - 0.5 * Math.cos((Math.PI * 2 * index) / (sampleCount - 1))
+  );
+  const windowSum = Math.max(1, window.reduce((sum, value) => sum + value, 0));
+  const minimumFrequency = 45;
+  const maximumFrequency = SAMPLE_RATE * 0.48;
+  const cosines: Float32Array[] = [];
+  const sines: Float32Array[] = [];
+  for (let band = 0; band < bandCount; band += 1) {
+    const position = bandCount <= 1 ? 0 : band / (bandCount - 1);
+    const frequency = minimumFrequency * Math.pow(maximumFrequency / minimumFrequency, position);
+    const radiansPerSample = (Math.PI * 2 * frequency) / SAMPLE_RATE;
+    cosines.push(Float32Array.from({ length: sampleCount }, (_, index) => Math.cos(radiansPerSample * index)));
+    sines.push(Float32Array.from({ length: sampleCount }, (_, index) => Math.sin(radiansPerSample * index)));
+  }
+  const kernel = { cosines, sines, window, windowSum };
+  if (bandKernels.size >= MAX_BAND_KERNELS) {
+    const oldestKey = bandKernels.keys().next().value;
+    if (oldestKey) {
+      bandKernels.delete(oldestKey);
+    }
+  }
+  bandKernels.set(key, kernel);
+  return kernel;
+}
+
+function downsampleBands(bands: number[], count: number): number[] {
+  return Array.from({ length: count }, (_, index) => {
+    const start = Math.floor((index / count) * bands.length);
+    const end = Math.max(start + 1, Math.floor(((index + 1) / count) * bands.length));
+    let total = 0;
+    for (let sourceIndex = start; sourceIndex < Math.min(end, bands.length); sourceIndex += 1) {
+      total += bands[sourceIndex] ?? 0;
+    }
+    return total / Math.max(1, Math.min(end, bands.length) - start);
+  });
 }
 
 function translatePathForAnalyzer(path: string, analyzerPath: string): string {

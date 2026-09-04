@@ -12,9 +12,9 @@ import type { PlaybackService } from "./playback-service.js";
 import type { WaveformService } from "./waveform-service.js";
 
 const MODE_INTERVAL_MS: Record<VisualizerStreamMode, number> = {
-  meter: 33,
-  spectrum: 33,
-  spectrogram: 33
+  meter: 25,
+  spectrum: 25,
+  spectrogram: 25
 };
 
 const MODE_BANDS: Record<VisualizerStreamMode, number> = {
@@ -33,6 +33,7 @@ export class VisualizerService {
   private cachedWaveform: { fileId: string; peaks: number[] } | null = null;
   private nextWaveformLookupAt = 0;
   private activeMode: VisualizerStreamMode | null = null;
+  private emitting = false;
 
   constructor(
     private readonly playback: PlaybackService,
@@ -68,6 +69,8 @@ export class VisualizerService {
       "cache-control": "no-cache, no-transform",
       connection: "keep-alive"
     });
+    response.socket?.setNoDelay(true);
+    response.flushHeaders?.();
     response.write(": connected\n\n");
     if (this.lastFrame) {
       this.writeFrame({ id, mode, response }, this.lastFrame);
@@ -139,14 +142,24 @@ export class VisualizerService {
   }
 
   private async emitFrame(mode: VisualizerStreamMode): Promise<void> {
-    if (this.subscribers.size === 0) {
+    if (this.subscribers.size === 0 || this.emitting) {
       return;
     }
-    const state = this.playback.getSnapshot();
-    const frame = visualizerFrameSchema.parse(await this.createFrame(state, mode));
-    this.lastFrame = frame;
-    for (const subscriber of this.subscribers.values()) {
-      this.writeFrame(subscriber, frameForSubscriber(frame, subscriber.mode));
+    this.emitting = true;
+    try {
+      const state = this.playback.getSnapshot();
+      const frame = visualizerFrameSchema.parse(await this.createFrame(state, mode));
+      if (this.activeMode !== mode || this.subscribers.size === 0) {
+        return;
+      }
+      this.lastFrame = frame;
+      for (const subscriber of this.subscribers.values()) {
+        this.writeFrame(subscriber, frameForSubscriber(frame, subscriber.mode));
+      }
+    } catch {
+      // Visual telemetry is best-effort and must never interfere with playback.
+    } finally {
+      this.emitting = false;
     }
   }
 
@@ -168,7 +181,7 @@ export class VisualizerService {
         mode
       });
     }
-    const analyzerFrame = this.analyzer.getFrame();
+    const analyzerFrame = this.analyzer.getFrame(state.positionMs);
     if (analyzerFrame?.fileId === state.currentFileId) {
       return {
         version: 1,

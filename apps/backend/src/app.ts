@@ -83,7 +83,7 @@ export function createBackendApp(config: BackendConfig): BackendApp {
     config.agentAutoStartResearchPlaylists === true
   );
   const jobs = new JobService(db);
-  const artwork = new ArtworkService(library, config);
+  const artwork = new ArtworkService(db, library, config);
   const waveforms = new WaveformService(config);
   const liveAnalyzer = new LiveAnalyzerService(config);
   const visualizer = new VisualizerService(playback, waveforms, liveAnalyzer);

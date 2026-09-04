@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
 import {
   addLibraryRootRequestSchema,
+  albumArtworkCandidatesResponseSchema,
+  albumArtworkOverrideResponseSchema,
   albumGroupsResponseSchema,
   alternateEditionGroupsResponseSchema,
   albumMergeSuggestionsResponseSchema,
@@ -73,6 +75,7 @@ import {
   playPlaylistRequestSchema,
   playQueueRequestSchema,
   enqueuePlaybackRequestSchema,
+  replacePlaybackUpNextRequestSchema,
   playbackStateSchema,
   visualizerCapabilitiesSchema,
   waveformResponseSchema,
@@ -82,6 +85,7 @@ import {
   rejectImportItemRequestSchema,
   scanLibraryRootRequestSchema,
   setPlaybackRepeatModeRequestSchema,
+  setAlbumArtworkRequestSchema,
   savedDiscoveryCandidateResponseSchema,
   savedDiscoveryCandidatesResponseSchema,
   savedDiscoveryListResponseSchema,
@@ -107,7 +111,7 @@ const server = createServer(async (request, response) => {
   if (allowedOrigin) {
     response.setHeader("access-control-allow-origin", allowedOrigin);
   }
-  response.setHeader("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
+  response.setHeader("access-control-allow-methods", "GET, POST, PUT, DELETE, OPTIONS");
   response.setHeader("access-control-allow-headers", "content-type");
 
   if (request.method === "OPTIONS") {
@@ -267,6 +271,38 @@ const server = createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/library/scan-watched") {
       const result = await app.scanner.scanRoots(app.library.listWatchedRoots());
       writeJson(response, 200, watchedLibraryScanResultSchema.parse(result));
+      return;
+    }
+
+    const albumArtworkCandidatesMatch = url.pathname.match(/^\/artwork\/album\/([^/]+)\/candidates$/);
+    if (request.method === "GET" && albumArtworkCandidatesMatch) {
+      const albumId = decodeURIComponent(albumArtworkCandidatesMatch[1]);
+      const candidates = await app.artwork.searchAlbumArtwork(
+        albumId,
+        url.searchParams.get("query") ?? undefined,
+        url.searchParams.get("source") ?? undefined
+      );
+      writeJson(response, 200, albumArtworkCandidatesResponseSchema.parse({ candidates }));
+      return;
+    }
+
+    const albumArtworkOverrideMatch = url.pathname.match(/^\/artwork\/album\/([^/]+)\/override$/);
+    if (request.method === "PUT" && albumArtworkOverrideMatch) {
+      const albumId = decodeURIComponent(albumArtworkOverrideMatch[1]);
+      const body = setAlbumArtworkRequestSchema.parse(await readJson(request));
+      if (body.source === "local") {
+        await app.artwork.setAlbumArtworkFromPath(albumId, body.path);
+      } else {
+        await app.artwork.setAlbumArtworkFromUrl(albumId, body.url);
+      }
+      writeJson(response, 200, albumArtworkOverrideResponseSchema.parse({ albumId, overridden: true }));
+      return;
+    }
+
+    if (request.method === "DELETE" && albumArtworkOverrideMatch) {
+      const albumId = decodeURIComponent(albumArtworkOverrideMatch[1]);
+      app.artwork.removeAlbumArtworkOverride(albumId);
+      writeJson(response, 200, albumArtworkOverrideResponseSchema.parse({ albumId, overridden: false }));
       return;
     }
 
@@ -785,6 +821,14 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/playback/queue/up-next") {
+      const body = replacePlaybackUpNextRequestSchema.parse(await readJson(request));
+      const files = body.fileIds.map((fileId) => app.library.getFile(fileId));
+      const state = await app.playback.replaceUpNext(files);
+      writeJson(response, 200, playbackStateSchema.parse(state));
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/playback/repeat") {
       const body = setPlaybackRepeatModeRequestSchema.parse(await readJson(request));
       writeJson(response, 200, playbackStateSchema.parse(await app.playback.setRepeatMode(body.repeatMode)));
@@ -957,7 +1001,7 @@ function writeArtwork(
   artwork: { data: Buffer; mimeType: string } | null
 ): void {
   if (!artwork) {
-    response.writeHead(404, { "content-type": "text/plain", "cache-control": "public, max-age=30" });
+    response.writeHead(404, { "content-type": "text/plain", "cache-control": "no-store" });
     response.end("no artwork");
     return;
   }

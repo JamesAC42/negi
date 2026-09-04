@@ -213,6 +213,10 @@ export const enqueuePlaybackRequestSchema = z.object({
   position: z.enum(["up_next", "end"])
 });
 
+export const replacePlaybackUpNextRequestSchema = z.object({
+  fileIds: z.array(z.string().min(1))
+});
+
 export const setPlaybackRepeatModeRequestSchema = z.object({
   repeatMode: z.enum(["none", "song", "queue"])
 });
@@ -422,6 +426,28 @@ export const albumGroupSchema = z.object({
 export const albumGroupsResponseSchema = z.object({
   albums: z.array(albumGroupSchema),
   total: z.number().int().nonnegative()
+});
+
+export const albumArtworkCandidateSchema = z.object({
+  id: z.string().min(1),
+  source: z.enum(["apple_music", "deezer", "cover_art_archive"]),
+  artist: z.string().min(1),
+  album: z.string().min(1),
+  imageUrl: z.string().url()
+});
+
+export const albumArtworkCandidatesResponseSchema = z.object({
+  candidates: z.array(albumArtworkCandidateSchema)
+});
+
+export const setAlbumArtworkRequestSchema = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("local"), path: z.string().min(1) }),
+  z.object({ source: z.literal("remote"), url: z.string().url() })
+]);
+
+export const albumArtworkOverrideResponseSchema = z.object({
+  albumId: z.string().min(1),
+  overridden: z.boolean()
 });
 
 export const playAlbumRequestSchema = z.object({
@@ -1034,6 +1060,7 @@ export type VisualizerCapabilitiesResponse = z.infer<typeof visualizerCapabiliti
 export type PlayFileRequest = z.infer<typeof playFileRequestSchema>;
 export type PlayQueueRequest = z.infer<typeof playQueueRequestSchema>;
 export type EnqueuePlaybackRequest = z.infer<typeof enqueuePlaybackRequestSchema>;
+export type ReplacePlaybackUpNextRequest = z.infer<typeof replacePlaybackUpNextRequestSchema>;
 export type SetPlaybackRepeatModeRequest = z.infer<typeof setPlaybackRepeatModeRequestSchema>;
 export type ImportItem = z.infer<typeof importItemSchema>;
 export type ImportBatch = z.infer<typeof importBatchSchema>;
@@ -1064,6 +1091,10 @@ export type PlaylistsResponse = z.infer<typeof playlistsResponseSchema>;
 export type PlaylistResponse = z.infer<typeof playlistResponseSchema>;
 export type AlbumGroup = z.infer<typeof albumGroupSchema>;
 export type AlbumGroupsResponse = z.infer<typeof albumGroupsResponseSchema>;
+export type AlbumArtworkCandidate = z.infer<typeof albumArtworkCandidateSchema>;
+export type AlbumArtworkCandidatesResponse = z.infer<typeof albumArtworkCandidatesResponseSchema>;
+export type SetAlbumArtworkRequest = z.infer<typeof setAlbumArtworkRequestSchema>;
+export type AlbumArtworkOverrideResponse = z.infer<typeof albumArtworkOverrideResponseSchema>;
 export type PlayPlaylistRequest = z.infer<typeof playPlaylistRequestSchema>;
 export type DiscoveryHealthResponse = z.infer<typeof discoveryHealthResponseSchema>;
 export type DiscoverySource = z.infer<typeof discoverySourceSchema>;

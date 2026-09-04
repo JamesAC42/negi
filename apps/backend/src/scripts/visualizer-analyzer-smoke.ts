@@ -17,7 +17,7 @@ if (!ffmpegPath) {
     durationMs: null,
     mode: "meter"
   });
-  assert.equal(unavailable.getFrame(), null);
+  assert.equal(unavailable.getFrame(0), null);
   console.log("visualizer analyzer smoke skipped: ffmpeg unavailable");
   process.exit(0);
 }
@@ -35,10 +35,10 @@ analyzer.ensure({
   mode: "spectrogram"
 });
 
-let frame = analyzer.getFrame();
+let frame = analyzer.getFrame(0);
 for (let attempt = 0; attempt < 20 && frame == null; attempt += 1) {
   await delay(150);
-  frame = analyzer.getFrame();
+  frame = analyzer.getFrame(0);
 }
 
 assert(frame, "analyzer should emit a frame for a readable wav fixture");
@@ -46,9 +46,28 @@ assert.equal(frame.fileId, "analyzer-fixture");
 assert(frame.bands.length > 0, "analyzer should emit bands");
 assert(frame.fftBins && frame.fftBins.length > 0, "spectrogram mode should emit fft bins");
 
+// Normal playback position observations arrive in discrete jumps. Reading a
+// decoded position must use that authoritative clock and retain the live frame.
+await delay(100);
+analyzer.ensure({
+  fileId: "analyzer-fixture",
+  path: wavPath,
+  positionMs: 550,
+  durationMs: 600,
+  mode: "spectrogram"
+});
+let resynchronizedFrame = analyzer.getFrame(550);
+for (let attempt = 0; attempt < 20 && resynchronizedFrame?.analyzerPositionMs !== 550; attempt += 1) {
+  await delay(50);
+  resynchronizedFrame = analyzer.getFrame(550);
+}
+assert(resynchronizedFrame, "analyzer should retain a live frame across clock synchronization");
+assert.equal(resynchronizedFrame.fileId, "analyzer-fixture");
+assert.equal(resynchronizedFrame.analyzerPositionMs, 550);
+
 analyzer.pause();
 analyzer.stop();
-assert.equal(analyzer.getFrame(), null);
+assert.equal(analyzer.getFrame(0), null);
 
 console.log("visualizer analyzer lifecycle ok");
 
