@@ -1,10 +1,23 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { dirname, join } from "node:path";
+import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
+import { dirname, extname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const appName = "negi";
 const appIconPath = join(__dirname, "../renderer/negi.png");
+const backgroundImageScheme = "music-os-image";
+const backgroundImageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"]);
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: backgroundImageScheme,
+    privileges: {
+      secure: true,
+      standard: true,
+      supportFetchAPI: true
+    }
+  }
+]);
 
 app.setName(appName);
 app.setAppUserModelId("com.jamesac42.negi");
@@ -55,7 +68,7 @@ ipcMain.handle("dialog:select-background-image", async () => {
   const path = result.filePaths[0];
   return {
     path: toWslPath(path),
-    url: pathToFileURL(path).href
+    url: toBackgroundImageUrl(path)
   };
 });
 
@@ -82,7 +95,10 @@ async function createWindow(): Promise<void> {
   }
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(async () => {
+  registerBackgroundImageProtocol();
+  await createWindow();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
@@ -105,4 +121,38 @@ function toWslPath(path: string): string {
   const drive = windowsDrive[1].toLowerCase();
   const rest = windowsDrive[2].replaceAll("\\", "/");
   return `/mnt/${drive}/${rest}`;
+}
+
+function toWindowsPath(path: string): string | null {
+  const normalized = path.replaceAll("\\", "/");
+  const wslDrivePath = normalized.match(/^\/mnt\/([a-zA-Z])\/(.*)$/);
+  if (!wslDrivePath || !wslDrivePath[2] || wslDrivePath[2].includes("\0")) {
+    return null;
+  }
+  return `${wslDrivePath[1].toUpperCase()}:\\${wslDrivePath[2].replaceAll("/", "\\")}`;
+}
+
+function toBackgroundImageUrl(path: string): string {
+  return `${backgroundImageScheme}://local/?path=${encodeURIComponent(toWslPath(path))}`;
+}
+
+function registerBackgroundImageProtocol(): void {
+  protocol.handle(backgroundImageScheme, (request) => {
+    try {
+      const requestUrl = new URL(request.url);
+      const requestedPath = requestUrl.searchParams.get("path");
+      if (requestUrl.hostname !== "local" || !requestedPath) {
+        return new Response(null, { status: 404 });
+      }
+
+      const localPath = toWindowsPath(requestedPath);
+      if (!localPath || !backgroundImageExtensions.has(extname(localPath).toLowerCase())) {
+        return new Response(null, { status: 415 });
+      }
+
+      return net.fetch(pathToFileURL(localPath).href);
+    } catch {
+      return new Response(null, { status: 404 });
+    }
+  });
 }

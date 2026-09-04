@@ -6,16 +6,19 @@
   "type": "module",
   "main": "dist/main/index.js",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "build": "tsc --noEmit && vite build && vite build --config vite.main.config.ts && vite build --config vite.main.config.ts --mode preload",
+    "build:electron": "vite build --config vite.main.config.ts && vite build --config vite.main.config.ts --mode preload",
     "discovery-candidates:smoke": "tsx src/scripts/discovery-candidates-smoke.ts",
     "electron-health:smoke": "tsx src/scripts/electron-health-smoke.tsx",
     "playback-progress:smoke": "tsx src/scripts/playback-progress-smoke.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@fontsource-variable/fraunces": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@fontsource-variable/space-grotesk": "^5.2.10",
+    "@fontsource-variable/syne": "^5.3.0",
     "@music-os/core": "0.1.0",
     "electron": "^31.7.0",
     "lucide-react": "^1.31.0",

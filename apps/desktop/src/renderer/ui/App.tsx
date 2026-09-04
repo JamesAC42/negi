@@ -4,11 +4,16 @@ import {
   ArrowDownWideNarrow as LucideSort,
   Bot as LucideBot,
   BriefcaseBusiness as LucideJobs,
+  ChevronDown as LucideChevronDown,
+  ChevronRight as LucideChevronRight,
   CheckCircle2 as LucideStatus,
   Copy as LucideCopy,
   Disc3 as LucideDisc,
   Download as LucideDownload,
   FileAudio as LucideFormat,
+  Folder as LucideFolder,
+  FolderOpen as LucideFolderOpen,
+  GripVertical as LucideGrip,
   Heart as LucideHeart,
   House as LucideHome,
   LibraryBig as LucideLibrary,
@@ -16,9 +21,12 @@ import {
   Menu as LucideMenu,
   Play as LucidePlay,
   Search as LucideSearch,
+  Save as LucideSave,
   Settings as LucideSettings,
+  Shuffle as LucideShuffle,
   SlidersHorizontal as LucideOperations,
   Star as LucideStar,
+  Trash2 as LucideRemove,
   UserRound as LucideArtist,
   Volume2 as LucideVolume
 } from "lucide-react";
@@ -53,6 +61,8 @@ import {
   type DiscoverySort
 } from "../discovery-candidates.js";
 import {
+  albumArtworkCandidatesResponseSchema,
+  albumArtworkOverrideResponseSchema,
   albumGroupsResponseSchema,
   albumMergeSuggestionsResponseSchema,
   agentMessageResponseSchema,
@@ -100,6 +110,8 @@ import {
   type AgentParsedListItem,
   type AgentThreadResponse,
   type AgentThreadsResponse,
+  type AlbumArtworkCandidate,
+  type AlbumArtworkCandidatesResponse,
   type AlbumGroupsResponse,
   type AlbumMergeSuggestionsResponse,
   type AlternateEditionGroupsResponse,
@@ -146,8 +158,14 @@ import {
 
 type HealthState =
   | { status: "loading" }
+  | { status: "reconnecting"; attempt: number; maxAttempts: number }
   | { status: "ready"; health: HealthResponse }
   | { status: "error"; message: string };
+
+type RefreshReadOptions = {
+  signal?: AbortSignal;
+  throwOnError?: boolean;
+};
 
 type LibraryState =
   | { status: "loading" }
@@ -274,10 +292,20 @@ type AlbumGroupMode = "all" | "artist" | "genre" | "decade";
 type AlbumFacetFilter = { genre: string; decade: string };
 type ArtistViewTarget = { key: number; artist: string };
 type AlbumViewTarget = { key: number; albumId: string };
+type LibraryWorkbenchTarget = { key: number; artist: string; albumId?: string | null; fileId?: string | null };
+type LibraryWorkbenchPreferences = {
+  favoriteOnly: boolean;
+  artistSortMode: ArtistSortMode;
+  albumSortMode: AlbumSortMode;
+  selectedArtistName: string | null;
+  selectedAlbumId: string | null;
+};
 type ArtistSongSortMode = "listens" | "ranking" | "albumYear";
 type AppearanceMode = "dark" | "light";
-type AccentColorId = "lime" | "cyan" | "amber" | "rose" | "violet";
-type DisplayFontId = "space" | "grotesk" | "mono" | "system" | "wide";
+type ThemePresetId = "custom" | "nocturne" | "newsprint" | "crt" | "blueprint";
+type CuratedThemePresetId = Exclude<ThemePresetId, "custom">;
+type AccentColorId = "lime" | "code" | "cyan" | "amber" | "rose" | "violet";
+type DisplayFontId = "space" | "grotesk" | "mono" | "system" | "wide" | "editorial" | "avant";
 type SelectedBackgroundImage = { path: string; url: string };
 type SavedBackgroundImage = { id: string; name: string; path: string; url: string; addedAt: string };
 type AppearanceBackgrounds = Record<AppearanceMode, SelectedBackgroundImage | null>;
@@ -289,6 +317,7 @@ type AppearanceSettings = {
   backgroundImages: SavedBackgroundImage[];
   displayFont: DisplayFontId;
   mode: AppearanceMode;
+  themePreset: ThemePresetId;
 };
 
 const emptyDuplicates: DuplicateGroupsResponse = { groups: [], totalGroups: 0, totalFiles: 0 };
@@ -301,6 +330,9 @@ const emptyAlbums: AlbumGroupsResponse = { albums: [], total: 0 };
 const libraryPageSize = 700;
 const albumPageSize = 180;
 const backendOrigin = "http://127.0.0.1:47831";
+const startupReadAttempts = 4;
+const startupReadTimeoutMs = 5_000;
+const startupRetryDelayMs = 250;
 const emptyTasteProfile: TasteProfileResponse = {
   profile: {
     favoriteArtists: [],
@@ -331,6 +363,7 @@ const emptyTasteProfile: TasteProfileResponse = {
 const topNavigationItems = ["Home", "Library", "Discovery", "Agent", "Playlists", "Settings"] as const;
 const appearanceStorageKey = "music-os:appearance:v1";
 const visualizerModeStorageKey = "music-os:visualizer-mode:v1";
+const libraryWorkbenchPreferencesStorageKey = "music-os:library-workbench:v1";
 const defaultAppearanceSettings: AppearanceSettings = {
   accent: "lime",
   backgroundImagePath: null,
@@ -338,7 +371,8 @@ const defaultAppearanceSettings: AppearanceSettings = {
   backgroundDefaults: { dark: null, light: null },
   backgroundImages: [],
   displayFont: "space",
-  mode: "dark"
+  mode: "dark",
+  themePreset: "custom"
 };
 const appearanceModes: AppearanceMode[] = ["dark", "light"];
 const accentPalettes: Record<AccentColorId, { label: string; dark: AccentPalette; light: AccentPalette }> = {
@@ -346,6 +380,11 @@ const accentPalettes: Record<AccentColorId, { label: string; dark: AccentPalette
     label: "Lime",
     dark: { acc: "#c3f53c", accDim: "rgba(195, 245, 60, 0.12)", accInk: "#10130a", accLine: "rgba(195, 245, 60, 0.38)", okLine: "#4c5f2c" },
     light: { acc: "#6e9f00", accDim: "rgba(110, 159, 0, 0.14)", accInk: "#f8fbf0", accLine: "rgba(110, 159, 0, 0.36)", okLine: "#b8cc86" }
+  },
+  code: {
+    label: "Code",
+    dark: { acc: "#32e875", accDim: "rgba(50, 232, 117, 0.13)", accInk: "#03130a", accLine: "rgba(50, 232, 117, 0.42)", okLine: "#1d653c" },
+    light: { acc: "#087a3f", accDim: "rgba(8, 122, 63, 0.13)", accInk: "#f2fff7", accLine: "rgba(8, 122, 63, 0.34)", okLine: "#8fcaa7" }
   },
   cyan: {
     label: "Cyan",
@@ -389,6 +428,16 @@ const displayFonts: Record<DisplayFontId, { label: string; head: string; body: s
     head: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
     body: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
   },
+  editorial: {
+    label: "Editorial - Fraunces Serif",
+    head: "\"Fraunces Variable\", Fraunces, Georgia, serif",
+    body: "\"Fraunces Variable\", Fraunces, Georgia, serif"
+  },
+  avant: {
+    label: "Avant-garde - Syne + Space Grotesk",
+    head: "\"Syne Variable\", Syne, \"Space Grotesk Variable\", sans-serif",
+    body: "\"Space Grotesk Variable\", \"Space Grotesk\", sans-serif"
+  },
   wide: {
     label: "Wide headings",
     head: "\"Arial Black\", \"Arial\", ui-sans-serif, system-ui, sans-serif",
@@ -397,6 +446,124 @@ const displayFonts: Record<DisplayFontId, { label: string; head: string; body: s
 };
 
 type AccentPalette = { acc: string; accDim: string; accInk: string; accLine: string; okLine: string };
+type CuratedThemePreset = {
+  label: string;
+  description: string;
+  mode: AppearanceMode;
+  accent: AccentColorId;
+  accentPalette: AccentPalette;
+  displayFont: DisplayFontId;
+  preview: { background: string; surface: string; accent: string; text: string };
+  variables: Record<string, string>;
+};
+
+const curatedThemePresets: Record<CuratedThemePresetId, CuratedThemePreset> = {
+  nocturne: {
+    label: "Nocturne",
+    description: "Velvet ink, ultraviolet signals, and sculptural Syne headings.",
+    mode: "dark",
+    accent: "violet",
+    accentPalette: {
+      acc: "#b89cff",
+      accDim: "rgba(184, 156, 255, 0.15)",
+      accInk: "#130a24",
+      accLine: "rgba(184, 156, 255, 0.46)",
+      okLine: "#5f4b88"
+    },
+    displayFont: "avant",
+    preview: { background: "#0b0914", surface: "#241f3a", accent: "#b89cff", text: "#f5f0ff" },
+    variables: {
+      "--bg0": "#0b0914", "--bg1": "#12101f", "--bg2": "#19162a", "--bg3": "#241f3a",
+      "--app-bg-opacity": "0.84",
+      "--center-bg-tint": "rgba(11, 9, 20, 0.36)", "--center-bg-vignette": "rgba(6, 4, 13, 0.7)",
+      "--line": "#2a2541", "--line2": "#443a62",
+      "--scrollbar-track": "#090711", "--scrollbar-thumb": "#4f456d", "--scrollbar-thumb-hover": "#746495",
+      "--panel-bg0": "rgba(11, 9, 20, 0.72)", "--panel-bg1": "rgba(18, 16, 31, 0.74)",
+      "--panel-bg2": "rgba(25, 22, 42, 0.7)", "--panel-bg3": "rgba(36, 31, 58, 0.66)",
+      "--tx0": "#f5f0ff", "--tx1": "#c9bfdd", "--tx2": "#817794",
+      "--r-s": "0.25rem", "--r-m": "0.5rem", "--panel-backdrop-blur": "1rem"
+    }
+  },
+  newsprint: {
+    label: "Newsprint",
+    description: "Warm paper, oxblood details, and an expressive editorial serif.",
+    mode: "light",
+    accent: "rose",
+    accentPalette: {
+      acc: "#982f45",
+      accDim: "rgba(152, 47, 69, 0.13)",
+      accInk: "#fff8ef",
+      accLine: "rgba(152, 47, 69, 0.38)",
+      okLine: "#c58f79"
+    },
+    displayFont: "editorial",
+    preview: { background: "#eee7da", surface: "#ddd0bc", accent: "#982f45", text: "#2b2520" },
+    variables: {
+      "--bg0": "#eee7da", "--bg1": "#f8f2e7", "--bg2": "#e8decf", "--bg3": "#ddd0bc",
+      "--app-bg-opacity": "0.86",
+      "--center-bg-tint": "rgba(238, 231, 218, 0.34)", "--center-bg-vignette": "rgba(225, 214, 195, 0.58)",
+      "--line": "#d4c7b3", "--line2": "#b9a78e",
+      "--scrollbar-track": "#e4dacb", "--scrollbar-thumb": "#ad9c85", "--scrollbar-thumb-hover": "#796c5d",
+      "--panel-bg0": "rgba(238, 231, 218, 0.72)", "--panel-bg1": "rgba(248, 242, 231, 0.76)",
+      "--panel-bg2": "rgba(232, 222, 207, 0.7)", "--panel-bg3": "rgba(221, 208, 188, 0.66)",
+      "--tx0": "#2b2520", "--tx1": "#584c41", "--tx2": "#7f6f60",
+      "--r-s": "0", "--r-m": "0.125rem", "--panel-backdrop-blur": "0.5rem"
+    }
+  },
+  crt: {
+    label: "Amber CRT",
+    description: "Near-black phosphor glass, hard edges, and pure terminal mono.",
+    mode: "dark",
+    accent: "amber",
+    accentPalette: {
+      acc: "#ffb72f",
+      accDim: "rgba(255, 183, 47, 0.14)",
+      accInk: "#170f02",
+      accLine: "rgba(255, 183, 47, 0.44)",
+      okLine: "#745720"
+    },
+    displayFont: "mono",
+    preview: { background: "#090b07", surface: "#202214", accent: "#ffb72f", text: "#f1d88d" },
+    variables: {
+      "--bg0": "#090b07", "--bg1": "#10120c", "--bg2": "#17190f", "--bg3": "#202214",
+      "--app-bg-opacity": "0.9",
+      "--center-bg-tint": "rgba(9, 11, 7, 0.42)", "--center-bg-vignette": "rgba(4, 5, 3, 0.74)",
+      "--line": "#292d1a", "--line2": "#464a29",
+      "--scrollbar-track": "#080906", "--scrollbar-thumb": "#504923", "--scrollbar-thumb-hover": "#796a2b",
+      "--panel-bg0": "rgba(9, 11, 7, 0.8)", "--panel-bg1": "rgba(16, 18, 12, 0.8)",
+      "--panel-bg2": "rgba(23, 25, 15, 0.76)", "--panel-bg3": "rgba(32, 34, 20, 0.72)",
+      "--tx0": "#f1d88d", "--tx1": "#c3a967", "--tx2": "#756941",
+      "--r-s": "0", "--r-m": "0", "--panel-backdrop-blur": "0.25rem"
+    }
+  },
+  blueprint: {
+    label: "Blueprint",
+    description: "Architectural navy, drafting lines, and bright cyan notation.",
+    mode: "dark",
+    accent: "cyan",
+    accentPalette: {
+      acc: "#56dcff",
+      accDim: "rgba(86, 220, 255, 0.14)",
+      accInk: "#04141e",
+      accLine: "rgba(86, 220, 255, 0.44)",
+      okLine: "#31748d"
+    },
+    displayFont: "space",
+    preview: { background: "#061a2a", surface: "#123a58", accent: "#56dcff", text: "#edf8ff" },
+    variables: {
+      "--bg0": "#061a2a", "--bg1": "#092238", "--bg2": "#0d2d47", "--bg3": "#123a58",
+      "--app-bg-opacity": "0.86",
+      "--center-bg-tint": "rgba(6, 26, 42, 0.36)", "--center-bg-vignette": "rgba(2, 13, 22, 0.68)",
+      "--line": "#174867", "--line2": "#29698e",
+      "--scrollbar-track": "#051622", "--scrollbar-thumb": "#286584", "--scrollbar-thumb-hover": "#3f8eb1",
+      "--panel-bg0": "rgba(6, 26, 42, 0.74)", "--panel-bg1": "rgba(9, 34, 56, 0.76)",
+      "--panel-bg2": "rgba(13, 45, 71, 0.72)", "--panel-bg3": "rgba(18, 58, 88, 0.68)",
+      "--tx0": "#edf8ff", "--tx1": "#afd2e5", "--tx2": "#719db6",
+      "--r-s": "0.125rem", "--r-m": "0.25rem", "--panel-backdrop-blur": "0.75rem"
+    }
+  }
+};
+const themePresetIds: ThemePresetId[] = ["custom", "nocturne", "newsprint", "crt", "blueprint"];
 
 export function App(): ReactElement {
   const discoverySearchRequestId = useRef(0);
@@ -513,6 +680,8 @@ export function App(): ReactElement {
   const [albumsViewResetKey, setAlbumsViewResetKey] = useState(0);
   const [artistViewTarget, setArtistViewTarget] = useState<ArtistViewTarget | null>(null);
   const [albumViewTarget, setAlbumViewTarget] = useState<AlbumViewTarget | null>(null);
+  const [libraryWorkbenchTarget, setLibraryWorkbenchTarget] = useState<LibraryWorkbenchTarget | null>(null);
+  const [, setArtworkRevision] = useState(0);
   const [editingFile, setEditingFile] = useState<LibraryFile | null>(null);
   const [diagnosticsState, setDiagnosticsState] = useState<DiagnosticsState>({ status: "idle" });
   const [playback, setPlayback] = useState<PlaybackStateResponse>({
@@ -536,12 +705,12 @@ export function App(): ReactElement {
   const nowPlayingStreamMode: VisualizerMode = visualizerCapabilities?.spectrogram === "available" && !reducedMotion
     ? "spectrogram"
     : effectiveVisualizerMode;
-  const barVisualizer = useVisualizerStream(liveVisualizersEnabled && playback.status !== "stopped", "spectrum", playback.currentFileId);
   const modalVisualizer = useVisualizerStream(
     liveVisualizersEnabled && playback.status !== "stopped",
     nowPlayingStreamMode,
     playback.currentFileId
   );
+  const barVisualizer = modalVisualizer;
   const currentWaveform = useWaveform(playback.currentFileId, documentVisible && playback.status !== "stopped");
 
   useEffect(() => {
@@ -565,9 +734,12 @@ export function App(): ReactElement {
     }
   }, [reducedMotion, visualizerCapabilities, visualizerMode]);
 
-  async function refreshLibrary(query = search): Promise<void> {
+  async function refreshLibrary(query = search, options: RefreshReadOptions = {}): Promise<void> {
     try {
-      const [rootsResult, filesResult] = await Promise.all([listRoots(), listFiles(query, 0, libraryPageSize)]);
+      const [rootsResult, filesResult] = await Promise.all([
+        listRoots(options.signal),
+        listFiles(query, 0, libraryPageSize, options.signal)
+      ]);
       setLibrary({
         status: "ready",
         roots: rootsResult.roots,
@@ -576,6 +748,9 @@ export function App(): ReactElement {
       });
       setLoadedLibraryQuery(query);
     } catch (error) {
+      if (options.throwOnError) {
+        throw error;
+      }
       setLibrary((current) => ({
         status: "error",
         message: error instanceof Error ? error.message : String(error),
@@ -734,16 +909,18 @@ export function App(): ReactElement {
     }
   }
 
-  async function refreshAlbums(): Promise<void> {
+  async function refreshAlbums(): Promise<AlbumGroupsResponse | null> {
     try {
       const result = await listAlbums(0, Number.MAX_SAFE_INTEGER);
       setAlbumsState({ status: "ready", albums: result });
+      return result;
     } catch (error) {
       setAlbumsState((current) => ({
         status: "error",
         message: getErrorMessage(error),
         albums: "albums" in current ? current.albums : emptyAlbums
       }));
+      return null;
     }
   }
 
@@ -787,11 +964,14 @@ export function App(): ReactElement {
     }
   }
 
-  async function refreshPlaylists(): Promise<void> {
+  async function refreshPlaylists(options: RefreshReadOptions = {}): Promise<void> {
     try {
-      const result = await listPlaylists();
+      const result = await listPlaylists(options.signal);
       setPlaylistsState({ status: "ready", playlists: result.playlists });
     } catch (error) {
+      if (options.throwOnError) {
+        throw error;
+      }
       setPlaylistsState((current) => ({
         status: "error",
         message: getErrorMessage(error),
@@ -848,6 +1028,51 @@ export function App(): ReactElement {
         profile: current
       });
     }
+  }
+
+  async function handleSetAlbumsFavorite(albums: AlbumGroupItem[], favorite: boolean): Promise<void> {
+    if (albums.length === 0) {
+      return;
+    }
+    const fallback = "profile" in tasteProfileState ? tasteProfileState.profile : emptyTasteProfile;
+    try {
+      const current = "profile" in tasteProfileState ? tasteProfileState.profile : await getTasteProfile();
+      const retained = current.profile.favoriteAlbums.filter(
+        (entry) => !albums.some((album) => favoriteAlbumEntryMatches(entry, album))
+      );
+      const favoriteAlbums = favorite
+        ? [...retained, ...albums.map(formatAlbumFavoriteEntry)]
+        : retained;
+      const profile: TasteProfile = {
+        ...current.profile,
+        favoriteAlbums
+      };
+      const optimistic: TasteProfileResponse = {
+        ...current,
+        profile
+      };
+      setTasteProfileState({ status: "saving", profile: optimistic });
+      setTasteProfileDraft(profile);
+      const result = await updateTasteProfile(profile);
+      setTasteProfileState({ status: "ready", profile: result });
+      setTasteProfileDraft(result.profile);
+    } catch (error) {
+      setTasteProfileState({
+        status: "error",
+        message: getErrorMessage(error),
+        profile: fallback
+      });
+      setTasteProfileDraft(fallback.profile);
+    }
+  }
+
+  async function handleSetAlbumFavorite(album: AlbumGroupItem, favorite: boolean): Promise<void> {
+    await handleSetAlbumsFavorite([album], favorite);
+  }
+
+  function handleAlbumArtworkChanged(album: AlbumGroupItem): void {
+    invalidateAlbumArtworkUrls(album);
+    setArtworkRevision((current) => current + 1);
   }
 
   async function refreshDiscoveryHealth(): Promise<void> {
@@ -1070,27 +1295,42 @@ export function App(): ReactElement {
   }
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const retry = <T,>(read: (signal: AbortSignal) => Promise<T>, onRetry?: (attempt: number) => void) =>
+      retryStartupRead(read, controller.signal, onRetry);
 
-    async function loadHealth(): Promise<void> {
-      try {
-        const result = window.musicOs ? await window.musicOs.health() : await fetchBackendHealth();
-        if (!cancelled) {
+    void retry((signal) => window.musicOs
+      ? withAbortSignal(window.musicOs.health(), signal)
+      : fetchBackendHealth(signal), (attempt) => {
+        setHealth({ status: "reconnecting", attempt, maxAttempts: startupReadAttempts });
+      })
+      .then((result) => {
+        if (!controller.signal.aborted) {
           setHealth({ status: "ready", health: result });
         }
-      } catch (error) {
-        if (!cancelled) {
-          setHealth({ status: "error", message: error instanceof Error ? error.message : String(error) });
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setHealth({ status: "error", message: getErrorMessage(error) });
         }
+      });
+    void retry((signal) => refreshPlayback(signal)).catch((error) => {
+      if (!controller.signal.aborted) {
+        setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
       }
-    }
-
-    void loadHealth();
-    void refreshPlayback();
-    void refreshLibrary("");
-    void refreshPlaylists();
+    });
+    void retry((signal) => refreshLibrary("", { signal, throwOnError: true })).catch((error) => {
+      if (!controller.signal.aborted) {
+        setLibrary({ status: "error", message: getErrorMessage(error), roots: [], files: [], total: 0 });
+      }
+    });
+    void retry((signal) => refreshPlaylists({ signal, throwOnError: true })).catch((error) => {
+      if (!controller.signal.aborted) {
+        setPlaylistsState({ status: "error", message: getErrorMessage(error), playlists: [] });
+      }
+    });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, []);
 
@@ -1106,6 +1346,15 @@ export function App(): ReactElement {
         void refreshAlbums();
       }
       void refreshHomeRecentAlbums();
+      return;
+    }
+    if (activeView === "Library") {
+      if (albumsState.status === "loading") {
+        void refreshAlbums();
+      }
+      if (tasteProfileState.status === "loading") {
+        void refreshTasteProfile();
+      }
       return;
     }
     if ((activeView === "Albums" || activeView === "Artists") && albumsState.status === "loading") {
@@ -1150,7 +1399,7 @@ export function App(): ReactElement {
     }
 
     const interval = window.setInterval(() => {
-      void refreshPlayback();
+      void refreshPlayback().catch(() => undefined);
     }, 1000);
 
     return () => window.clearInterval(interval);
@@ -1641,6 +1890,128 @@ export function App(): ReactElement {
     }));
   }
 
+  async function handleReassignAlbumsToArtist(
+    sourceAlbums: AlbumGroupItem[],
+    targetArtist: string,
+    focusedAlbumId: string | null
+  ): Promise<void> {
+    const albumsToMove = [...new Map(sourceAlbums.map((album) => [album.id, album])).values()];
+    const artist = targetArtist.trim();
+    const fileIds = [...new Set(albumsToMove.flatMap((album) => album.files.map((file) => file.id)))];
+    if (albumsToMove.length === 0 || fileIds.length === 0 || !artist || albumsToMove.every((album) => album.artist === artist)) {
+      return;
+    }
+
+    const focusedAlbum = albumsToMove.find((album) => album.id === focusedAlbumId) ?? albumsToMove[0];
+    const focusedFileIds = new Set(focusedAlbum.files.map((file) => file.id));
+    const profileBefore = "profile" in tasteProfileState ? tasteProfileState.profile : emptyTasteProfile;
+    const favoriteAlbumsToMove = albumsToMove.filter((album) => isAlbumFavorite(album, profileBefore.profile.favoriteAlbums));
+    const movedAlbumIds = new Set(albumsToMove.map((album) => album.id));
+    const movedFileIds = new Set(fileIds);
+    const reassignFile = (file: LibraryFile): LibraryFile => movedFileIds.has(file.id)
+      ? { ...file, displayTags: { ...file.displayTags, albumartist: artist } }
+      : file;
+    const reassignAlbum = (album: AlbumGroupItem): AlbumGroupItem => movedAlbumIds.has(album.id)
+      ? { ...album, artist, files: album.files.map(reassignFile) }
+      : album;
+
+    setAlbumsState((current) => "albums" in current
+      ? {
+          ...current,
+          albums: {
+            ...current.albums,
+            albums: current.albums.albums.map(reassignAlbum)
+          }
+        }
+      : current
+    );
+    setLibrary((current) => "files" in current
+      ? { ...current, files: current.files.map(reassignFile) }
+      : current
+    );
+    setPlaylistsState((current) => "playlists" in current
+      ? {
+          ...current,
+          playlists: current.playlists.map((playlist) => ({
+            ...playlist,
+            items: playlist.items.map((item) => ({ ...item, file: reassignFile(item.file) }))
+          }))
+        }
+      : current
+    );
+    setHomeRecentAlbums((current) => current.map(reassignAlbum));
+    setLibraryWorkbenchTarget({
+      key: pageTargetRequestId.current++,
+      artist,
+      albumId: focusedAlbum.id,
+      fileId: focusedAlbum.files[0]?.id ?? null
+    });
+
+    let refreshedAlbums: AlbumGroupsResponse | null = null;
+    try {
+      const proposed = await proposeBulkFileMetadata(fileIds, { albumartist: artist });
+      replaceOperationBatch(proposed.batch);
+      const approved = await approveOperationBatch(proposed.batch.id);
+      replaceOperationBatch(approved.batch);
+      const applied = await applyOperationBatch(approved.batch.id);
+      replaceOperationBatch(applied.batch);
+      if (applied.batch.status !== "applied") {
+        throw new Error(`Artist reassignment ${applied.batch.status.replaceAll("_", " ")}. Review the operation for details.`);
+      }
+      refreshedAlbums = await refreshAlbums();
+      resetOptionalDuplicateDiagnostics();
+    } catch (error) {
+      const [, reconciledAlbums] = await Promise.all([
+        refreshLibrary(),
+        refreshAlbums(),
+        refreshPlaylists(),
+        refreshHomeRecentAlbums()
+      ]);
+      const reconciledFocusedAlbum = reconciledAlbums?.albums.find((album) =>
+        album.files.some((file) => focusedFileIds.has(file.id))
+      );
+      setLibraryWorkbenchTarget({
+        key: pageTargetRequestId.current++,
+        artist: reconciledFocusedAlbum?.artist ?? focusedAlbum.artist,
+        albumId: reconciledFocusedAlbum?.id ?? focusedAlbum.id,
+        fileId: reconciledFocusedAlbum?.files.find((file) => focusedFileIds.has(file.id))?.id ?? null
+      });
+      throw error;
+    }
+
+    if (favoriteAlbumsToMove.length > 0) {
+      const retained = profileBefore.profile.favoriteAlbums.filter(
+        (entry) => !albumsToMove.some((album) => favoriteAlbumEntryMatches(entry, album))
+      );
+      const migratedEntries = favoriteAlbumsToMove.map((album) => formatAlbumFavoriteEntry({ ...album, artist }));
+      const profile: TasteProfile = {
+        ...profileBefore.profile,
+        favoriteAlbums: [...new Set([...retained, ...migratedEntries])]
+      };
+      setTasteProfileState({ status: "saving", profile: { ...profileBefore, profile } });
+      setTasteProfileDraft(profile);
+      void updateTasteProfile(profile)
+        .then((result) => {
+          setTasteProfileState({ status: "ready", profile: result });
+          setTasteProfileDraft(result.profile);
+        })
+        .catch((error) => {
+          setTasteProfileState({ status: "error", message: getErrorMessage(error), profile: profileBefore });
+          setTasteProfileDraft(profileBefore.profile);
+        });
+    }
+
+    const movedFocusedAlbum = refreshedAlbums?.albums.find(
+      (album) => album.artist === artist && album.files.some((file) => focusedFileIds.has(file.id))
+    );
+    setLibraryWorkbenchTarget({
+      key: pageTargetRequestId.current++,
+      artist,
+      albumId: movedFocusedAlbum?.id ?? null,
+      fileId: movedFocusedAlbum?.files.find((file) => focusedFileIds.has(file.id))?.id ?? null
+    });
+  }
+
   async function handleProposePlaybackRating(fileId: string, rating: number | null): Promise<void> {
     replaceLoadedFile(await updateFileRating(fileId, rating));
   }
@@ -1911,8 +2282,8 @@ export function App(): ReactElement {
     setDiagnosticsState({ status: "ready", diagnostics: await getImportItemDiagnostics(importItemId) });
   }
 
-  async function refreshPlayback(): Promise<void> {
-    const next = await getPlaybackState();
+  async function refreshPlayback(signal?: AbortSignal): Promise<void> {
+    const next = await getPlaybackState(signal);
     const current = playbackRef.current;
     setPlayback((current) => mergePlaybackState(current, next));
     if (
@@ -1991,6 +2362,32 @@ export function App(): ReactElement {
     } finally {
       setPlaybackBusy(false);
     }
+  }
+
+  async function handleReplacePlaybackUpNext(fileIds: string[]): Promise<void> {
+    if (playbackBusy) {
+      return;
+    }
+
+    setPlaybackBusy(true);
+    try {
+      setPlayback(await replacePlaybackUpNext(fileIds));
+    } catch (error) {
+      setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
+      throw error;
+    } finally {
+      setPlaybackBusy(false);
+    }
+  }
+
+  async function handleSavePlaybackQueue(name: string, fileIds: string[]): Promise<void> {
+    const proposed = await proposePlaylist(name, "Saved from the Now Playing queue", fileIds);
+    replaceOperationBatch(proposed.batch);
+    const approved = await approveOperationBatch(proposed.batch.id);
+    replaceOperationBatch(approved.batch);
+    const applied = await applyOperationBatch(proposed.batch.id);
+    replaceOperationBatch(applied.batch);
+    await refreshPlaylists();
   }
 
   async function handlePlayFileIdsShuffled(fileIds: string[]): Promise<void> {
@@ -2201,13 +2598,13 @@ export function App(): ReactElement {
   }
 
   function openArtistPage(artist: string): void {
-    setArtistViewTarget({ key: pageTargetRequestId.current++, artist });
-    setActiveView("Artists");
+    setLibraryWorkbenchTarget({ key: pageTargetRequestId.current++, artist });
+    setActiveView("Library");
   }
 
   function openAlbumDetailPage(album: AlbumGroupItem): void {
-    setAlbumViewTarget({ key: pageTargetRequestId.current++, albumId: album.id });
-    setActiveView("Albums");
+    setLibraryWorkbenchTarget({ key: pageTargetRequestId.current++, artist: album.artist, albumId: album.id });
+    setActiveView("Library");
   }
 
   async function openAlbumPage(group: Pick<LibraryAlbumGroup, "artist" | "album" | "year">): Promise<void> {
@@ -2262,8 +2659,8 @@ export function App(): ReactElement {
       return;
     }
 
-    setAlbumViewTarget({ key: pageTargetRequestId.current++, albumId: matchingAlbum.id });
-    setActiveView("Albums");
+    setLibraryWorkbenchTarget({ key: pageTargetRequestId.current++, artist: matchingAlbum.artist, albumId: matchingAlbum.id });
+    setActiveView("Library");
   }
 
   async function handleSelectBackgroundImage(mode: AppearanceMode): Promise<void> {
@@ -2271,24 +2668,27 @@ export function App(): ReactElement {
     if (!image) {
       return;
     }
+    const normalizedImage: SelectedBackgroundImage = {
+      path: image.path,
+      url: pathToBackgroundUrl(image.path)
+    };
 
     setAppearance((current) => {
-      const existing = current.backgroundImages.filter((item) => item.path !== image.path);
+      const existing = current.backgroundImages.filter((item) => item.path !== normalizedImage.path);
       const nextImage: SavedBackgroundImage = {
         id: crypto.randomUUID(),
-        name: basenameFromPath(image.path),
-        path: image.path,
-        url: image.url,
+        name: basenameFromPath(normalizedImage.path),
+        ...normalizedImage,
         addedAt: new Date().toISOString()
       };
       return {
         ...current,
         backgroundDefaults: {
           ...current.backgroundDefaults,
-          [mode]: image
+          [mode]: normalizedImage
         },
-        backgroundImagePath: image.path,
-        backgroundImageUrl: image.url,
+        backgroundImagePath: normalizedImage.path,
+        backgroundImageUrl: normalizedImage.url,
         backgroundImages: [nextImage, ...existing].slice(0, 12)
       };
     });
@@ -2516,6 +2916,10 @@ export function App(): ReactElement {
 
   async function handleProposeDiscoveryDownload(): Promise<void> {
     const selected = discoveryState.results.filter((result) => selectedDiscoveryFiles.has(result.id) && !result.isLocked && isAudioDiscoveryResult(result));
+    await handleProposeDiscoveryResults(selected);
+  }
+
+  async function handleProposeDiscoveryResults(selected: DiscoveryResult[]): Promise<void> {
     if (selected.length === 0) {
       setDiscoveryDownloadState({ status: "idle", message: "Select at least one unlocked audio file before staging downloads." });
       return;
@@ -2759,7 +3163,8 @@ export function App(): ReactElement {
     [playback.currentFileId, playbackFiles]
   );
   const appearanceStyle = useMemo(() => getAppearanceStyle(appearance), [appearance]);
-  const appShellClassName = `appShell theme-${appearance.mode}`;
+  const hasBackgroundImage = Boolean(appearance.backgroundDefaults[appearance.mode]?.url);
+  const appShellClassName = `appShell theme-${appearance.mode}${hasBackgroundImage ? " hasBackgroundImage" : ""}`;
   const nowPlayingTitle = currentPlaybackFile?.displayTags.title ?? playback.currentDisplayName ?? "Nothing queued";
   const nowPlayingArtist =
     currentPlaybackFile?.displayTags.artist ?? currentPlaybackFile?.displayTags.albumartist ?? "Unknown artist";
@@ -2767,17 +3172,13 @@ export function App(): ReactElement {
   const nowPlayingAlbumTarget = currentPlaybackFile ? getFileAlbumTarget(currentPlaybackFile) : null;
 
   function navigateToView(item: string): void {
-    if (item === "Artists") {
-      if (activeView === "Artists") {
-        setArtistsViewResetKey((current) => current + 1);
-      }
-      setArtistViewTarget(null);
+    if (item === "Artists" || item === "Albums") {
+      setLibraryWorkbenchTarget(null);
+      setActiveView("Library");
+      return;
     }
-    if (item === "Albums") {
-      if (activeView === "Albums") {
-        setAlbumsViewResetKey((current) => current + 1);
-      }
-      setAlbumViewTarget(null);
+    if (item === "Library") {
+      setLibraryWorkbenchTarget(null);
     }
     if (item === "Playlists") {
       setSelectedPlaylistId(null);
@@ -2927,14 +3328,24 @@ export function App(): ReactElement {
           />
         ) : activeView === "Library" ? (
           <LibraryWorkbenchView
+            initialTarget={libraryWorkbenchTarget}
             albumsState={albumsState}
             currentWaveform={currentWaveform.waveform}
+            favoriteAlbumEntries={"profile" in tasteProfileState ? tasteProfileState.profile.profile.favoriteAlbums : []}
+            favoriteBusy={tasteProfileState.status === "loading" || tasteProfileState.status === "saving"}
+            favoriteError={tasteProfileState.status === "error" ? tasteProfileState.message : null}
             playback={playback}
             playbackBusy={playbackBusy}
             onEnqueuePlayback={handleEnqueuePlayback}
             onManage={() => navigateToView("LibraryManager")}
             onPlayAlbum={handlePlayAlbum}
             onPlayFile={handlePlayFile}
+            onAlbumArtworkChanged={handleAlbumArtworkChanged}
+            onReassignAlbumsToArtist={handleReassignAlbumsToArtist}
+            onSetAlbumFavorite={handleSetAlbumFavorite}
+            onSetArtistAlbumsFavorite={handleSetAlbumsFavorite}
+            onSetFileFavoriteStatus={handleProposeFavoriteStatus}
+            onSetFileRating={handleProposeRating}
           />
         ) : activeView === "LibraryManager" ? (
           <LibraryView
@@ -3131,6 +3542,7 @@ export function App(): ReactElement {
             setSortMode={setDiscoverySort}
             onGroupSelect={toggleDiscoveryGroupSelection}
             onDownloadSelection={handleProposeDiscoveryDownload}
+            onDownloadResults={handleProposeDiscoveryResults}
             onInspectGroup={setInspectedDiscoveryGroupId}
             onOpenAgentThread={handleOpenAgentThread}
             onOpenPlaylist={openPlaylist}
@@ -3357,7 +3769,9 @@ export function App(): ReactElement {
           onPlayFile={handlePlayFile}
           onPrevious={handlePrevious}
           onRating={handleProposePlaybackRating}
+          onReplaceUpNext={handleReplacePlaybackUpNext}
           onRepeatMode={handleSetRepeatMode}
+          onSaveQueue={handleSavePlaybackQueue}
           onSeek={seekPlaybackFromRatio}
           onOpenAlbumPage={openAlbumPage}
           onOpenArtistPage={openArtistPage}
@@ -3370,16 +3784,22 @@ export function App(): ReactElement {
   );
 }
 
-async function fetchBackendHealth(): Promise<HealthResponse> {
-  return getJson("/health", healthResponseSchema);
+async function fetchBackendHealth(signal?: AbortSignal): Promise<HealthResponse> {
+  return getJson("/health", healthResponseSchema, signal);
 }
 
+const artworkUrlVersions = new Map<string, number>();
+
 function artworkFileUrl(fileId: string): string {
-  return `${backendOrigin}/artwork/file/${encodeURIComponent(fileId)}`;
+  const base = `${backendOrigin}/artwork/file/${encodeURIComponent(fileId)}`;
+  const version = artworkUrlVersions.get(`file:${fileId}`);
+  return version == null ? base : `${base}?v=${version}`;
 }
 
 function artworkAlbumUrl(albumId: string): string {
-  return `${backendOrigin}/artwork/album/${encodeURIComponent(albumId)}`;
+  const base = `${backendOrigin}/artwork/album/${encodeURIComponent(albumId)}`;
+  const version = artworkUrlVersions.get(`album:${albumId}`);
+  return version == null ? base : `${base}?v=${version}`;
 }
 
 function artistImageUrl(artist: string): string {
@@ -3391,6 +3811,29 @@ const failedArtworkSrcs = new Map<string, number>();
 const artworkObjectUrls = new Map<string, string>();
 const pendingArtworkObjectUrls = new Map<string, Promise<string>>();
 const FAILED_ARTWORK_RETRY_MS = 30_000;
+// Chromium permits six HTTP/1 connections per origin. Keep one lane free for
+// playback and settings mutations while allowing artwork grids to fill quickly.
+const MAX_CONCURRENT_ARTWORK_REQUESTS = 5;
+const artworkRequestQueue: Array<() => void> = [];
+let activeArtworkRequestCount = 0;
+
+function invalidateAlbumArtworkUrls(album: AlbumGroupItem): void {
+  const urls = [artworkAlbumUrl(album.id), ...album.files.map((file) => artworkFileUrl(file.id))];
+  for (const url of urls) {
+    const objectUrl = artworkObjectUrls.get(url);
+    if (objectUrl) {
+      URL.revokeObjectURL(objectUrl);
+    }
+    artworkObjectUrls.delete(url);
+    loadedArtworkSrcs.delete(url);
+    failedArtworkSrcs.delete(url);
+  }
+  const version = Date.now();
+  artworkUrlVersions.set(`album:${album.id}`, version);
+  for (const file of album.files) {
+    artworkUrlVersions.set(`file:${file.id}`, version);
+  }
+}
 
 function Artwork({ src, className, eager }: { src: string | null; className: string; eager?: boolean }): ReactElement {
   const frameRef = useRef<HTMLSpanElement | HTMLImageElement | null>(null);
@@ -3399,6 +3842,7 @@ function Artwork({ src, className, eager }: { src: string | null; className: str
   };
   const [displaySrc, setDisplaySrc] = useState<string | null>(() => (src ? (artworkObjectUrls.get(src) ?? null) : null));
   const [shouldLoad, setShouldLoad] = useState(() => Boolean(eager || (src && artworkObjectUrls.has(src))));
+  const [retryVersion, setRetryVersion] = useState(0);
   const [status, setStatus] = useState<"pending" | "ready" | "failed">(() =>
     src && artworkObjectUrls.has(src) ? "ready" : !src || artworkFailedRecently(src) ? "failed" : "pending"
   );
@@ -3447,6 +3891,24 @@ function Artwork({ src, className, eager }: { src: string | null; className: str
   }, [eager, shouldLoad, src]);
 
   useEffect(() => {
+    if (!src || status !== "failed") {
+      return;
+    }
+    const failedAt = failedArtworkSrcs.get(src);
+    if (failedAt == null) {
+      return;
+    }
+    const remaining = Math.max(0, FAILED_ARTWORK_RETRY_MS - (Date.now() - failedAt));
+    const timer = window.setTimeout(() => {
+      failedArtworkSrcs.delete(src);
+      setStatus("pending");
+      setShouldLoad(true);
+      setRetryVersion((version) => version + 1);
+    }, remaining + 25);
+    return () => window.clearTimeout(timer);
+  }, [src, status]);
+
+  useEffect(() => {
     if (!src || artworkFailedRecently(src)) {
       setDisplaySrc(null);
       setStatus("failed");
@@ -3467,7 +3929,7 @@ function Artwork({ src, className, eager }: { src: string | null; className: str
     let cancelled = false;
     setDisplaySrc(null);
     setStatus("pending");
-    void getArtworkObjectUrl(src)
+    void getArtworkObjectUrl(src, Boolean(eager))
       .then((objectUrl) => {
         if (cancelled) {
           return;
@@ -3487,7 +3949,7 @@ function Artwork({ src, className, eager }: { src: string | null; className: str
     return () => {
       cancelled = true;
     };
-  }, [shouldLoad, src]);
+  }, [retryVersion, shouldLoad, src]);
 
   if (!src || status === "failed" || !displaySrc) {
     return (
@@ -3518,7 +3980,7 @@ function Artwork({ src, className, eager }: { src: string | null; className: str
   );
 }
 
-function getArtworkObjectUrl(src: string): Promise<string> {
+function getArtworkObjectUrl(src: string, highPriority = false): Promise<string> {
   const cachedObjectUrl = artworkObjectUrls.get(src);
   if (cachedObjectUrl) {
     return Promise.resolve(cachedObjectUrl);
@@ -3528,8 +3990,8 @@ function getArtworkObjectUrl(src: string): Promise<string> {
     return pendingObjectUrl;
   }
 
-  const request = fetch(src)
-    .then(async (response) => {
+  const request = scheduleArtworkRequest(async () => {
+    const response = await fetch(src, { cache: "no-store" });
       if (!response.ok) {
         throw new Error(`Artwork request failed with ${response.status}`);
       }
@@ -3539,13 +4001,37 @@ function getArtworkObjectUrl(src: string): Promise<string> {
       loadedArtworkSrcs.add(src);
       failedArtworkSrcs.delete(src);
       return objectUrl;
-    })
+    }, highPriority)
     .finally(() => {
       pendingArtworkObjectUrls.delete(src);
     });
 
   pendingArtworkObjectUrls.set(src, request);
   return request;
+}
+
+function scheduleArtworkRequest<T>(request: () => Promise<T>, highPriority: boolean): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const run = () => {
+      activeArtworkRequestCount += 1;
+      void request()
+        .then(resolve, reject)
+        .finally(() => {
+          activeArtworkRequestCount = Math.max(0, activeArtworkRequestCount - 1);
+          artworkRequestQueue.shift()?.();
+        });
+    };
+
+    if (activeArtworkRequestCount < MAX_CONCURRENT_ARTWORK_REQUESTS) {
+      run();
+      return;
+    }
+    if (highPriority) {
+      artworkRequestQueue.unshift(run);
+    } else {
+      artworkRequestQueue.push(run);
+    }
+  });
 }
 
 function artworkFailedRecently(src: string): boolean {
@@ -3583,7 +4069,7 @@ function useArtworkVisualizerPalette(src: string | null, mode: AppearanceMode): 
 
     let cancelled = false;
     setPalette(null);
-    void getArtworkObjectUrl(src)
+    void getArtworkObjectUrl(src, true)
       .then((objectUrl) => extractArtworkVisualizerPalette(objectUrl, mode))
       .then((nextPalette) => {
         artworkVisualizerPaletteCache.set(cacheKey, nextPalette);
@@ -3840,6 +4326,10 @@ function QueueIcon(): ReactElement {
   );
 }
 
+function themedPortalRoot(source?: Element | null): Element {
+  return source?.closest(".appShell") ?? document.querySelector(".appShell") ?? document.body;
+}
+
 function QueueMenuButton({
   disabled,
   fileIds,
@@ -3936,7 +4426,7 @@ function QueueMenuButton({
                 Add to End
               </button>
             </div>,
-            document.body
+            themedPortalRoot(triggerRef.current)
           )
         : null}
     </span>
@@ -4270,7 +4760,8 @@ function StyledSelect<T extends string>({
       }
       setMenuStyle({
         left: rect.left,
-        minWidth: rect.width,
+        width: rect.width,
+        maxWidth: Math.max(0, window.innerWidth - rect.left - 16),
         top: rect.bottom + 4,
         maxHeight: Math.max(120, window.innerHeight - rect.bottom - 16)
       });
@@ -4323,6 +4814,7 @@ function StyledSelect<T extends string>({
               className={option.value === value ? "styledSelectOption active" : "styledSelectOption"}
               key={option.value}
               role="option"
+              title={option.label}
               type="button"
               onClick={() => {
                 onChange(option.value);
@@ -4333,7 +4825,7 @@ function StyledSelect<T extends string>({
             </button>
           ))}
         </div>,
-        document.body
+        themedPortalRoot(rootRef.current)
           )
         : null}
     </div>
@@ -4443,6 +4935,7 @@ function CommandPalette({
   );
   const hasResults =
     pageMatches.length + artistMatches.length + albumMatches.length + playlistMatches.length + trackMatches.length > 0;
+  const paletteRoot = themedPortalRoot();
 
   function choose(action: () => void): void {
     onClose();
@@ -4479,7 +4972,7 @@ function CommandPalette({
               {pageMatches.map((item) => (
                 <button key={item} type="button" onClick={() => choose(() => onNavigate(item))}>
                   <NavIcon view={item} />
-                  <span><strong>{item === "Playlists" ? "Lists" : item}</strong><small>Workspace</small></span>
+                  <span className="commandPaletteCopy"><strong>{item === "Playlists" ? "Lists" : item}</strong><small>Workspace</small></span>
                   <em>Open</em>
                 </button>
               ))}
@@ -4491,7 +4984,7 @@ function CommandPalette({
               {artistMatches.map((artist) => (
                 <button key={artist} type="button" onClick={() => choose(() => onOpenArtist(artist))}>
                   <UiIcon name="artist" />
-                  <span><strong>{artist}</strong><small>Artist</small></span>
+                  <span className="commandPaletteCopy"><strong>{artist}</strong><small>Artist</small></span>
                   <em>Browse</em>
                 </button>
               ))}
@@ -4503,7 +4996,7 @@ function CommandPalette({
               {albumMatches.map((album) => (
                 <button key={album.id} type="button" onClick={() => choose(() => onOpenAlbum(album))}>
                   <Artwork className="commandPaletteArtwork" src={artworkAlbumUrl(album.id)} />
-                  <span><strong>{album.album}</strong><small>{album.artist} - {album.fileCount} tracks</small></span>
+                  <span className="commandPaletteCopy"><strong>{album.album}</strong><small>{album.artist} - {album.fileCount} tracks</small></span>
                   <em>Open</em>
                 </button>
               ))}
@@ -4519,7 +5012,7 @@ function CommandPalette({
                   onClick={() => choose(() => onPlayFile(file.id, album.files.map((item) => item.id)))}
                 >
                   <UiIcon name="format" />
-                  <span><strong>{label}</strong><small>{file.displayTags.artist ?? album.artist} - {album.album}</small></span>
+                  <span className="commandPaletteCopy"><strong>{label}</strong><small>{file.displayTags.artist ?? album.artist} - {album.album}</small></span>
                   <em>Play</em>
                 </button>
               ))}
@@ -4531,7 +5024,7 @@ function CommandPalette({
               {playlistMatches.map((playlist) => (
                 <button key={playlist.id} type="button" onClick={() => choose(() => onOpenPlaylist(playlist.id))}>
                   <UiIcon name="playlist" />
-                  <span><strong>{playlist.name}</strong><small>{playlist.items.length} tracks</small></span>
+                  <span className="commandPaletteCopy"><strong>{playlist.name}</strong><small>{playlist.items.length} tracks</small></span>
                   <em>Open</em>
                 </button>
               ))}
@@ -4546,38 +5039,326 @@ function CommandPalette({
         </footer>
       </section>
     </div>,
-    document.body
+    paletteRoot
   );
 }
 
+const DEFAULT_ALBUM_ARTWORK_SOURCES: AlbumArtworkCandidate["source"][] = [
+  "apple_music",
+  "deezer",
+  "cover_art_archive"
+];
+const MAX_ALBUM_ARTWORK_CANDIDATES = 48;
+
+function AlbumArtworkDialog({
+  album,
+  onChanged,
+  onClose
+}: {
+  album: AlbumGroupItem;
+  onChanged(): void;
+  onClose(): void;
+}): ReactElement {
+  const [query, setQuery] = useState(`${album.artist} ${album.album}`);
+  const [candidates, setCandidates] = useState<AlbumArtworkCandidate[]>([]);
+  const [searching, setSearching] = useState(true);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const searchRequestIdRef = useRef(0);
+
+  async function loadCandidates(nextQuery: string): Promise<void> {
+    const requestId = ++searchRequestIdRef.current;
+    let failedSources = 0;
+    setCandidates([]);
+    setSearching(true);
+    setError(null);
+
+    await Promise.all(
+      DEFAULT_ALBUM_ARTWORK_SOURCES.map(async (source) => {
+        try {
+          const result = await searchAlbumArtworkCandidates(album.id, nextQuery, source);
+          if (searchRequestIdRef.current === requestId) {
+            setCandidates((current) => mergeAlbumArtworkCandidates(current, result.candidates));
+          }
+        } catch {
+          failedSources += 1;
+        }
+      })
+    );
+
+    if (searchRequestIdRef.current === requestId) {
+      if (failedSources === DEFAULT_ALBUM_ARTWORK_SOURCES.length) {
+        setError("Artwork search services are unavailable right now.");
+      }
+      setSearching(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadCandidates(`${album.artist} ${album.album}`);
+    return () => {
+      searchRequestIdRef.current += 1;
+    };
+  }, [album.album, album.artist, album.id]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !savingId) {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, savingId]);
+
+  async function handleSearch(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const nextQuery = query.trim();
+    if (!nextQuery || searching) {
+      return;
+    }
+    await loadCandidates(nextQuery);
+  }
+
+  async function handleChooseLocal(): Promise<void> {
+    if (!window.musicOs?.selectBackgroundImage) {
+      setError("Local image selection is available in the Electron app.");
+      return;
+    }
+    const selection = await window.musicOs.selectBackgroundImage();
+    if (!selection) {
+      return;
+    }
+    setSavingId("local");
+    setError(null);
+    try {
+      await setAlbumArtworkFromPath(album.id, selection.path);
+      onChanged();
+      onClose();
+    } catch (saveError) {
+      setError(getErrorMessage(saveError));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function handleChooseRemote(candidate: AlbumArtworkCandidate): Promise<void> {
+    setSavingId(candidate.id);
+    setError(null);
+    try {
+      await setAlbumArtworkFromUrl(album.id, candidate.imageUrl);
+      onChanged();
+      onClose();
+    } catch (saveError) {
+      setError(getErrorMessage(saveError));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function handleUseAutomatic(): Promise<void> {
+    setSavingId("automatic");
+    setError(null);
+    try {
+      await removeAlbumArtworkOverride(album.id);
+      onChanged();
+      onClose();
+    } catch (saveError) {
+      setError(getErrorMessage(saveError));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  return createPortal(
+    <div
+      className="albumArtworkBackdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target && !savingId) {
+          onClose();
+        }
+      }}
+    >
+      <section aria-label={`Artwork for ${album.album}`} aria-modal="true" className="albumArtworkDialog" role="dialog">
+        <header>
+          <Artwork className="albumArtworkCurrent" eager src={artworkAlbumUrl(album.id)} />
+          <div>
+            <span className="eyebrow">Album artwork</span>
+            <h2>{album.album}</h2>
+            <p>{album.artist}</p>
+          </div>
+          <button aria-label="Close artwork manager" disabled={Boolean(savingId)} type="button" onClick={onClose}>×</button>
+        </header>
+
+        <div className="albumArtworkActions">
+          <button disabled={Boolean(savingId)} type="button" onClick={() => void handleChooseLocal()}>
+            {savingId === "local" ? "Copying…" : "Choose local image"}
+          </button>
+          <button disabled={Boolean(savingId)} type="button" onClick={() => void handleUseAutomatic()}>
+            {savingId === "automatic" ? "Resetting…" : "Use automatic artwork"}
+          </button>
+        </div>
+
+        <form className="albumArtworkSearch" onSubmit={(event) => void handleSearch(event)}>
+          <UiIcon name="search" />
+          <input
+            aria-label="Search album artwork"
+            placeholder="Artist and album"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <button disabled={searching || Boolean(savingId) || !query.trim()} type="submit">
+            {searching ? "Searching…" : "Search"}
+          </button>
+        </form>
+
+        {error ? <div className="albumArtworkError" role="alert">{error}</div> : null}
+        <div className="albumArtworkCandidates">
+          {!searching && candidates.length === 0 ? (
+            <div className="albumArtworkEmpty">No covers found. Try a shorter artist or album name.</div>
+          ) : null}
+          {candidates.map((candidate) => (
+            <button
+              aria-label={`Use artwork for ${candidate.album} by ${candidate.artist}`}
+              disabled={Boolean(savingId)}
+              key={`${candidate.id}:${candidate.imageUrl}`}
+              title={`Use ${candidate.album} by ${candidate.artist}`}
+              type="button"
+              onClick={() => void handleChooseRemote(candidate)}
+            >
+              <img alt="" loading="lazy" src={candidate.imageUrl} />
+              <span>
+                <strong>{candidate.album}</strong>
+                <small>{candidate.artist} · {albumArtworkSourceLabel(candidate.source)}</small>
+              </span>
+              {savingId === candidate.id ? <em>Saving…</em> : null}
+            </button>
+          ))}
+        </div>
+        <footer>
+          {searching ? "Searching" : "Results"} from Apple Music, Deezer, and Cover Art Archive. Selected images are copied into Music OS.
+        </footer>
+      </section>
+    </div>,
+    themedPortalRoot()
+  );
+}
+
+function mergeAlbumArtworkCandidates(
+  current: AlbumArtworkCandidate[],
+  incoming: AlbumArtworkCandidate[]
+): AlbumArtworkCandidate[] {
+  const unique: AlbumArtworkCandidate[] = [];
+  const seen = new Set<string>();
+  for (const candidate of [...current, ...incoming]) {
+    const key = `${candidate.source}:${candidate.id}:${candidate.imageUrl}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(candidate);
+    }
+  }
+
+  const bySource = DEFAULT_ALBUM_ARTWORK_SOURCES.map((source) =>
+    unique.filter((candidate) => candidate.source === source)
+  );
+  const interleaved: AlbumArtworkCandidate[] = [];
+  const largestResult = Math.max(0, ...bySource.map((candidates) => candidates.length));
+  for (let index = 0; index < largestResult; index += 1) {
+    for (const candidates of bySource) {
+      const candidate = candidates[index];
+      if (candidate) {
+        interleaved.push(candidate);
+      }
+    }
+  }
+  return interleaved.slice(0, MAX_ALBUM_ARTWORK_CANDIDATES);
+}
+
+function albumArtworkSourceLabel(source: AlbumArtworkCandidate["source"]): string {
+  if (source === "apple_music") {
+    return "Apple Music";
+  }
+  if (source === "cover_art_archive") {
+    return "Cover Art Archive";
+  }
+  return "Deezer";
+}
+
 function LibraryWorkbenchView({
+  initialTarget,
   albumsState,
   currentWaveform,
+  favoriteAlbumEntries,
+  favoriteBusy,
+  favoriteError,
   playback,
   playbackBusy,
+  onAlbumArtworkChanged,
   onEnqueuePlayback,
   onManage,
   onPlayAlbum,
-  onPlayFile
+  onPlayFile,
+  onReassignAlbumsToArtist,
+  onSetAlbumFavorite,
+  onSetArtistAlbumsFavorite,
+  onSetFileFavoriteStatus,
+  onSetFileRating
 }: {
+  initialTarget: LibraryWorkbenchTarget | null;
   albumsState: AlbumsState;
   currentWaveform: WaveformSummaryResponse | null;
+  favoriteAlbumEntries: string[];
+  favoriteBusy: boolean;
+  favoriteError: string | null;
   playback: PlaybackStateResponse;
   playbackBusy: boolean;
+  onAlbumArtworkChanged(album: AlbumGroupItem): void;
   onEnqueuePlayback(fileIds: string[], position: QueueInsertPosition): Promise<void>;
   onManage(): void;
   onPlayAlbum(albumId: string): Promise<void>;
   onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
+  onReassignAlbumsToArtist(albums: AlbumGroupItem[], targetArtist: string, focusedAlbumId: string | null): Promise<void>;
+  onSetAlbumFavorite(album: AlbumGroupItem, favorite: boolean): Promise<void>;
+  onSetArtistAlbumsFavorite(albums: AlbumGroupItem[], favorite: boolean): Promise<void>;
+  onSetFileFavoriteStatus(fileId: string, status: "liked" | "disliked" | "neutral"): Promise<void>;
+  onSetFileRating(fileId: string, rating: number | null): Promise<void>;
 }): ReactElement {
   const albums = "albums" in albumsState ? albumsState.albums.albums : [];
+  const [initialPreferences] = useState(loadLibraryWorkbenchPreferences);
   const [artistQuery, setArtistQuery] = useState("");
-  const [selectedArtistName, setSelectedArtistName] = useState<string | null>(null);
-  const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
+  const [favoriteOnly, setFavoriteOnly] = useState(initialPreferences.favoriteOnly);
+  const [artistSortMode, setArtistSortMode] = useState<ArtistSortMode>(initialPreferences.artistSortMode);
+  const [albumSortMode, setAlbumSortMode] = useState<AlbumSortMode>(initialPreferences.albumSortMode);
+  const [selectedArtistName, setSelectedArtistName] = useState<string | null>(initialPreferences.selectedArtistName);
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(initialPreferences.selectedAlbumId);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const [reassignTargetArtist, setReassignTargetArtist] = useState("");
+  const [reassignBusy, setReassignBusy] = useState(false);
+  const [reassignError, setReassignError] = useState<string | null>(null);
+  const [trackPreferenceBusyFileId, setTrackPreferenceBusyFileId] = useState<string | null>(null);
+  const [trackPreferenceError, setTrackPreferenceError] = useState<string | null>(null);
+  const [artworkAlbum, setArtworkAlbum] = useState<AlbumGroupItem | null>(null);
   const artistListRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!initialTarget) {
+      return;
+    }
+    setArtistQuery("");
+    setSelectedArtistName(initialTarget.artist);
+    setSelectedAlbumId(initialTarget.albumId ?? null);
+    setSelectedFileId(initialTarget.fileId ?? null);
+  }, [initialTarget]);
+  const filteredAlbums = useMemo(
+    () => favoriteOnly ? albums.filter((album) => isAlbumFavorite(album, favoriteAlbumEntries)) : albums,
+    [albums, favoriteAlbumEntries, favoriteOnly]
+  );
   const artistGroups = useMemo(
-    () => groupAlbumsByArtist(sortAlbumsByArtistAlbum(albums)),
-    [albums]
+    () => sortArtistSections(
+      groupAlbumsByArtist(sortAlbumsByMode(filteredAlbums, albumSortMode)),
+      artistSortMode
+    ),
+    [albumSortMode, artistSortMode, filteredAlbums]
   );
   const visibleArtists = useMemo(() => {
     const query = artistQuery.trim().toLocaleLowerCase();
@@ -4593,6 +5374,19 @@ function LibraryWorkbenchView({
     selectedArtist?.albums.find((album) => album.id === selectedAlbumId) ??
     selectedArtist?.albums[0] ??
     null;
+  const reassignArtistOptions = useMemo(
+    () => [...new Set(albums.map((album) => album.artist))]
+      .filter((artist) => artist !== selectedArtist?.artist)
+      .sort(compareText)
+      .map((artist) => ({ value: artist, label: artist })),
+    [albums, selectedArtist?.artist]
+  );
+  const selectedArtistAlbums = useMemo(
+    () => selectedArtist ? albums.filter((album) => album.artist === selectedArtist.artist) : [],
+    [albums, selectedArtist?.artist]
+  );
+  const allSelectedArtistAlbumsFavorite = selectedArtistAlbums.length > 0 &&
+    selectedArtistAlbums.every((album) => isAlbumFavorite(album, favoriteAlbumEntries));
   const selectedFile =
     selectedAlbum?.files.find((file) => file.id === selectedFileId) ??
     selectedAlbum?.files[0] ??
@@ -4601,10 +5395,28 @@ function LibraryWorkbenchView({
     () => selectedAlbum?.files.map((file) => file.id) ?? [],
     [selectedAlbum]
   );
+  useEffect(() => {
+    setReassignTargetArtist((current) =>
+      reassignArtistOptions.some((option) => option.value === current)
+        ? current
+        : reassignArtistOptions[0]?.value ?? ""
+    );
+    setReassignError(null);
+  }, [reassignArtistOptions]);
+  useEffect(() => {
+    saveLibraryWorkbenchPreferences({
+      favoriteOnly,
+      artistSortMode,
+      albumSortMode,
+      selectedArtistName: selectedArtist?.artist ?? selectedArtistName,
+      selectedAlbumId: selectedAlbum?.id ?? selectedAlbumId
+    });
+  }, [albumSortMode, artistSortMode, favoriteOnly, selectedAlbum?.id, selectedAlbumId, selectedArtist?.artist, selectedArtistName]);
 
   function selectArtist(artist: string): void {
+    const firstAlbum = visibleArtists.find((section) => section.artist === artist)?.albums[0] ?? null;
     setSelectedArtistName(artist);
-    setSelectedAlbumId(null);
+    setSelectedAlbumId(firstAlbum?.id ?? null);
     setSelectedFileId(null);
   }
 
@@ -4618,6 +5430,47 @@ function LibraryWorkbenchView({
       `button[data-start-letter="${letter}"]`
     );
     target?.scrollIntoView({ block: "start" });
+  }
+
+  async function reassignAlbums(scope: "album" | "artist"): Promise<void> {
+    if (!selectedArtist || !selectedAlbum || !reassignTargetArtist || reassignBusy) {
+      return;
+    }
+    const albumsToMove = scope === "artist" ? selectedArtistAlbums : [selectedAlbum];
+    if (scope === "artist") {
+      const confirmed = window.confirm(
+        `Move all ${albumsToMove.length} album${albumsToMove.length === 1 ? "" : "s"} by ${selectedArtist.artist} to ${reassignTargetArtist}?`
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    setReassignBusy(true);
+    setReassignError(null);
+    setSelectedArtistName(reassignTargetArtist);
+    setSelectedAlbumId(selectedAlbum.id);
+    try {
+      await onReassignAlbumsToArtist(albumsToMove, reassignTargetArtist, selectedAlbum.id);
+    } catch (error) {
+      setReassignError(getErrorMessage(error));
+    } finally {
+      setReassignBusy(false);
+    }
+  }
+
+  async function updateTrackPreference(fileId: string, update: () => Promise<void>): Promise<void> {
+    if (trackPreferenceBusyFileId) {
+      return;
+    }
+    setTrackPreferenceBusyFileId(fileId);
+    setTrackPreferenceError(null);
+    try {
+      await update();
+    } catch (error) {
+      setTrackPreferenceError(getErrorMessage(error));
+    } finally {
+      setTrackPreferenceBusyFileId(null);
+    }
   }
 
   if (albumsState.status === "loading" && albums.length === 0) {
@@ -4637,6 +5490,52 @@ function LibraryWorkbenchView({
 
   return (
     <section className="libraryWorkbench" aria-label="Library browser">
+      <div className="libraryWorkbenchToolbar" aria-label="Library view controls">
+        <div className="libraryWorkbenchSummary">
+          <strong>{artistGroups.length.toLocaleString()} artists</strong>
+          <span>{filteredAlbums.length.toLocaleString()} albums</span>
+          {favoriteError ? <span className="libraryFavoriteError" role="alert">Favorites unavailable: {favoriteError}</span> : null}
+        </div>
+        <div className="libraryWorkbenchControls">
+          <button
+            aria-pressed={favoriteOnly}
+            className={favoriteOnly ? "libraryFavoritesOnly active" : "libraryFavoritesOnly"}
+            type="button"
+            onClick={() => setFavoriteOnly((current) => !current)}
+          >
+            <LucideHeart size={13} />
+            Favorites only
+          </button>
+          <label className="libraryWorkbenchSort">
+            <span>Artists</span>
+            <StyledSelect<ArtistSortMode>
+              ariaLabel="Sort artists"
+              options={[
+                { value: "artist", label: "A–Z" },
+                { value: "listens", label: "Most listens" },
+                { value: "likes", label: "Most likes" },
+                { value: "recent", label: "Recently added" }
+              ]}
+              value={artistSortMode}
+              onChange={setArtistSortMode}
+            />
+          </label>
+          <label className="libraryWorkbenchSort">
+            <span>Albums</span>
+            <StyledSelect<AlbumSortMode>
+              ariaLabel="Sort albums"
+              options={[
+                { value: "artistAlbum", label: "A–Z" },
+                { value: "listens", label: "Most listens" },
+                { value: "likes", label: "Most likes" },
+                { value: "recent", label: "Recently added" }
+              ]}
+              value={albumSortMode}
+              onChange={setAlbumSortMode}
+            />
+          </label>
+        </div>
+      </div>
       <section className="libraryBrowserPane artistBrowserPane">
         <header className="libraryPaneHeader">
           <strong>Artists</strong>
@@ -4669,6 +5568,11 @@ function LibraryWorkbenchView({
             })}
           </nav>
           <div className="libraryArtistList" ref={artistListRef}>
+            {visibleArtists.length === 0 ? (
+              <div className="libraryPaneEmpty">
+                {favoriteOnly ? "No favorite albums yet." : "No artists match this filter."}
+              </div>
+            ) : null}
             {visibleArtists.map((section) => {
               const fileCount = section.albums.reduce((sum, album) => sum + album.files.length, 0);
               return (
@@ -4695,31 +5599,57 @@ function LibraryWorkbenchView({
       </section>
 
       <section className="libraryBrowserPane albumBrowserPane">
-        <header className="libraryPaneHeader">
-          <strong>Albums</strong>
-          <span>{selectedArtist?.albums.length ?? 0}</span>
+        <header className="libraryPaneHeader libraryAlbumPaneHeader">
+          <div className="libraryAlbumPaneTitle">
+            <strong title={selectedArtist?.artist}>{selectedArtist?.artist ?? "Albums"}</strong>
+            <span>{selectedArtistAlbums.length} album{selectedArtistAlbums.length === 1 ? "" : "s"}</span>
+          </div>
+          {selectedArtist ? (
+            <button
+              aria-label={allSelectedArtistAlbumsFavorite
+                ? `Remove all albums by ${selectedArtist.artist} from favorites`
+                : `Favorite all albums by ${selectedArtist.artist}`}
+              aria-pressed={allSelectedArtistAlbumsFavorite}
+              className={allSelectedArtistAlbumsFavorite ? "libraryArtistFavoriteAll active" : "libraryArtistFavoriteAll"}
+              disabled={favoriteBusy || reassignBusy}
+              title={allSelectedArtistAlbumsFavorite
+                ? `Remove all ${selectedArtistAlbums.length} albums by ${selectedArtist.artist} from favorites`
+                : `Favorite all ${selectedArtistAlbums.length} albums by ${selectedArtist.artist}`}
+              type="button"
+              onClick={() => void onSetArtistAlbumsFavorite(selectedArtistAlbums, !allSelectedArtistAlbumsFavorite)}
+            >
+              <LucideHeart size={11} />
+              {favoriteBusy ? "Saving…" : "All"}
+            </button>
+          ) : null}
         </header>
         <div className="libraryAlbumList">
-          {selectedArtist?.albums.map((album) => (
-            <button
-              className={album.id === selectedAlbum?.id ? "active" : ""}
-              key={album.id}
-              type="button"
-              onClick={() => selectAlbum(album.id)}
-            >
-              <Artwork className="libraryAlbumThumb" src={artworkAlbumUrl(album.id)} />
-              <span>
-                <strong>{album.album}</strong>
-                <small>{album.artist}</small>
-                <em>
-                  {album.year ?? "-"} - {album.fileCount} tracks
-                </em>
-              </span>
-            </button>
-          ))}
+          {!selectedArtist ? (
+            <div className="libraryPaneEmpty">{favoriteOnly ? "Favorite an album to show it here." : "Choose an artist."}</div>
+          ) : null}
+          {selectedArtist?.albums.map((album) => {
+            const favorite = isAlbumFavorite(album, favoriteAlbumEntries);
+            return (
+              <button
+                className={`${album.id === selectedAlbum?.id ? "active" : ""}${favorite ? " favorite" : ""}`.trim()}
+                key={album.id}
+                type="button"
+                onClick={() => selectAlbum(album.id)}
+              >
+                <Artwork className="libraryAlbumThumb" src={artworkAlbumUrl(album.id)} />
+                <span>
+                  <strong>{album.album}</strong>
+                  <small>{favorite ? <LucideHeart aria-label="Favorite album" size={11} /> : null}{album.artist}</small>
+                  <em>
+                    {album.year ?? "-"} - {album.fileCount} tracks - {albumPlayCount(album.files)} plays
+                  </em>
+                </span>
+              </button>
+            );
+          })}
         </div>
         <footer>
-          <span>Grouped by artist</span>
+          <span>{favoriteOnly ? "Favorite albums" : "Grouped by artist"}</span>
           <span>{selectedArtist?.artist ?? "-"}</span>
         </footer>
       </section>
@@ -4728,16 +5658,45 @@ function LibraryWorkbenchView({
         {selectedAlbum ? (
           <>
             <header className="libraryAlbumTitlebar">
-              <div>
-                <span className="eyebrow">Album - {selectedAlbum.year ?? "Unknown year"}</span>
-                <h1>{selectedAlbum.album}</h1>
-                <p>
-                  {selectedAlbum.artist} - {selectedAlbum.fileCount} tracks -{" "}
-                  {selectedAlbum.durationMs == null ? "Unknown duration" : formatTime(selectedAlbum.durationMs)} -{" "}
-                  {selectedAlbum.formats.join(" / ")}
-                </p>
+              <div className="libraryAlbumIdentity">
+                <button
+                  aria-label={`Edit artwork for ${selectedAlbum.album}`}
+                  className="libraryAlbumArtworkButton"
+                  title="Edit album artwork"
+                  type="button"
+                  onClick={() => setArtworkAlbum(selectedAlbum)}
+                >
+                  <Artwork
+                    className="libraryAlbumHeroArt"
+                    eager
+                    src={artworkAlbumUrl(selectedAlbum.id)}
+                  />
+                </button>
+                <div className="libraryAlbumTitleCopy">
+                  <span className="eyebrow">Album - {selectedAlbum.year ?? "Unknown year"}</span>
+                  <h1>{selectedAlbum.album}</h1>
+                  <p>
+                    {selectedAlbum.artist} - {selectedAlbum.fileCount} tracks -{" "}
+                    {selectedAlbum.durationMs == null ? "Unknown duration" : formatTime(selectedAlbum.durationMs)} -{" "}
+                    {selectedAlbum.formats.join(" / ")}
+                  </p>
+                </div>
               </div>
               <div className="libraryAlbumActions">
+                <button
+                  aria-label={isAlbumFavorite(selectedAlbum, favoriteAlbumEntries) ? `Remove ${selectedAlbum.album} from favorites` : `Favorite ${selectedAlbum.album}`}
+                  aria-pressed={isAlbumFavorite(selectedAlbum, favoriteAlbumEntries)}
+                  className={isAlbumFavorite(selectedAlbum, favoriteAlbumEntries) ? "favorite active" : "favorite"}
+                  disabled={favoriteBusy || reassignBusy}
+                  type="button"
+                  onClick={() => void onSetAlbumFavorite(
+                    selectedAlbum,
+                    !isAlbumFavorite(selectedAlbum, favoriteAlbumEntries)
+                  )}
+                >
+                  <LucideHeart />
+                  {favoriteBusy ? "Saving…" : isAlbumFavorite(selectedAlbum, favoriteAlbumEntries) ? "Favorited" : "Favorite"}
+                </button>
                 <button
                   className="primary"
                   disabled={playbackBusy}
@@ -4754,9 +5713,45 @@ function LibraryWorkbenchView({
                 >
                   Queue
                 </button>
+                <button type="button" onClick={() => setArtworkAlbum(selectedAlbum)}>Artwork</button>
                 <button type="button" onClick={onManage}>Manage</button>
               </div>
             </header>
+
+            <div className="libraryArtistReassignBar">
+              <span className="libraryArtistReassignLabel">Reassign artist</span>
+              {reassignArtistOptions.length > 0 ? (
+                <>
+                  <StyledSelect<string>
+                    ariaLabel={`Choose a new artist for ${selectedAlbum.album}`}
+                    className="libraryArtistReassignSelect"
+                    disabled={reassignBusy || favoriteBusy}
+                    options={reassignArtistOptions}
+                    value={reassignTargetArtist}
+                    onChange={setReassignTargetArtist}
+                  />
+                  <button
+                    disabled={reassignBusy || favoriteBusy || !reassignTargetArtist}
+                    title={`Move only ${selectedAlbum.album} to ${reassignTargetArtist}`}
+                    type="button"
+                    onClick={() => void reassignAlbums("album")}
+                  >
+                    {reassignBusy ? "Saving…" : "This album"}
+                  </button>
+                  <button
+                    disabled={reassignBusy || favoriteBusy || !reassignTargetArtist}
+                    title={`Move all albums by ${selectedArtist?.artist ?? selectedAlbum.artist} to ${reassignTargetArtist}`}
+                    type="button"
+                    onClick={() => void reassignAlbums("artist")}
+                  >
+                    All {selectedArtistAlbums.length} album{selectedArtistAlbums.length === 1 ? "" : "s"}
+                  </button>
+                </>
+              ) : (
+                <span className="libraryArtistReassignEmpty">No other existing artists</span>
+              )}
+              {reassignError ? <span className="libraryArtistReassignError" role="alert">{reassignError}</span> : null}
+            </div>
 
             <div className="libraryTrackHeader" aria-hidden="true">
               <span />
@@ -4764,9 +5759,13 @@ function LibraryWorkbenchView({
               <span>Title</span>
               <span>Time</span>
               <span>Plays</span>
+              <span>Like</span>
               <span>Rating</span>
               <span>Format</span>
             </div>
+            {trackPreferenceError ? (
+              <div className="libraryTrackPreferenceError" role="alert">Could not save track preference: {trackPreferenceError}</div>
+            ) : null}
             <div className="libraryTrackList">
               {selectedAlbum.files.map((file, index) => {
                 const isCurrent = playback.currentFileId === file.id;
@@ -4797,13 +5796,68 @@ function LibraryWorkbenchView({
                     </button>
                     <span>{file.durationMs == null ? "-" : formatTime(file.durationMs)}</span>
                     <span>{file.playCount || "-"}</span>
-                    <span className="libraryTrackRating" aria-label={file.rating == null ? "Not rated" : `${file.rating} stars`}>
+                    <div
+                      className="libraryTrackPreference"
+                      aria-label={`Preference for ${file.displayTags.title ?? file.filename}`}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                    >
+                      <button
+                        aria-label={file.liked ? "Remove like" : "Like track"}
+                        aria-pressed={Boolean(file.liked)}
+                        className={file.liked ? "active" : ""}
+                        disabled={trackPreferenceBusyFileId !== null}
+                        title={file.liked ? "Remove like" : "Like"}
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void updateTrackPreference(file.id, () =>
+                            onSetFileFavoriteStatus(file.id, file.liked ? "neutral" : "liked")
+                          );
+                        }}
+                      >
+                        <ActionIcon shape="like" />
+                      </button>
+                      <button
+                        aria-label={file.disliked ? "Remove dislike" : "Dislike track"}
+                        aria-pressed={Boolean(file.disliked)}
+                        className={file.disliked ? "active disliked" : ""}
+                        disabled={trackPreferenceBusyFileId !== null}
+                        title={file.disliked ? "Remove dislike" : "Dislike"}
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void updateTrackPreference(file.id, () =>
+                            onSetFileFavoriteStatus(file.id, file.disliked ? "neutral" : "disliked")
+                          );
+                        }}
+                      >
+                        <ActionIcon shape="dislike" />
+                      </button>
+                    </div>
+                    <div
+                      className="libraryTrackRating"
+                      aria-label={file.rating == null ? "Not rated" : `${file.rating} stars`}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                    >
                       {[1, 2, 3, 4, 5].map((rating) => (
-                        <i className={(file.rating ?? 0) >= rating ? "active" : ""} key={rating}>
+                        <button
+                          aria-label={file.rating === rating ? `Clear ${rating}-star rating` : `Rate ${rating} stars`}
+                          className={(file.rating ?? 0) >= rating ? "active" : ""}
+                          disabled={trackPreferenceBusyFileId !== null}
+                          key={rating}
+                          title={file.rating === rating ? "Clear rating" : `${rating}/5`}
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void updateTrackPreference(file.id, () =>
+                              onSetFileRating(file.id, file.rating === rating ? null : rating)
+                            );
+                          }}
+                        >
                           <StarIcon />
-                        </i>
+                        </button>
                       ))}
-                    </span>
+                    </div>
                     <span>{formatFileFormat(file)}</span>
                   </div>
                 );
@@ -4818,9 +5872,16 @@ function LibraryWorkbenchView({
             </footer>
           </>
         ) : (
-          <div className="emptyState">Choose an artist and album.</div>
+          <div className="emptyState">{favoriteOnly ? "Favorite an album to browse its tracks." : "Choose an artist and album."}</div>
         )}
       </section>
+      {artworkAlbum ? (
+        <AlbumArtworkDialog
+          album={artworkAlbum}
+          onClose={() => setArtworkAlbum(null)}
+          onChanged={() => onAlbumArtworkChanged(artworkAlbum)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -7235,6 +8296,11 @@ function SettingsView({
   const latest = "profile" in state ? state.profile : emptyTasteProfile;
   const accentOptions = Object.entries(accentPalettes) as Array<[AccentColorId, (typeof accentPalettes)[AccentColorId]]>;
   const fontOptions = Object.entries(displayFonts) as Array<[DisplayFontId, (typeof displayFonts)[DisplayFontId]]>;
+  const customPreviewTheme = appearance.mode === "light" ? getLightThemeVariables() : getDarkThemeVariables();
+  const customPreviewAccent = accentPalettes[appearance.accent][appearance.mode];
+  const activeThemePreset = isThemePresetId(appearance.themePreset) ? appearance.themePreset : "custom";
+  const activeThemeLabel =
+    activeThemePreset === "custom" ? "Custom" : curatedThemePresets[activeThemePreset].label;
 
   return (
     <section className="settingsWorkbench" aria-label="Settings">
@@ -7253,9 +8319,9 @@ function SettingsView({
           <a href="#settings-workflows"><UiIcon name="operations" /><span>Workflows</span></a>
         </nav>
         <div className="settingsNavigatorSummary">
-          <span>Typography</span>
-          <strong>{displayFonts[appearance.displayFont].label}</strong>
-          <small>{appearance.mode} / {accentPalettes[appearance.accent].label}</small>
+          <span>Theme</span>
+          <strong>{activeThemeLabel}</strong>
+          <small>{displayFonts[appearance.displayFont].label}</small>
         </div>
       </aside>
       <div className="settingsView">
@@ -7267,7 +8333,62 @@ function SettingsView({
       <section className="settingsPanel appearancePanel" id="settings-appearance" aria-label="Appearance preferences">
         <div>
           <strong>Appearance</strong>
-          <span>Customize the app theme, highlight color, display type, and main background.</span>
+          <span>Start with a complete visual preset, then remix its mode, accent, typography, and background.</span>
+        </div>
+        <div className="appearanceSubhead">
+          <strong>Theme presets</strong>
+          <span>Each preset changes the surfaces, contrast, geometry, accent treatment, and font pairing together.</span>
+        </div>
+        <div className="themePresetGrid" aria-label="Theme presets">
+          {themePresetIds.map((id) => {
+            const preset = id === "custom" ? null : curatedThemePresets[id];
+            const preview = preset?.preview ?? {
+              background: customPreviewTheme["--bg0"],
+              surface: customPreviewTheme["--bg3"],
+              accent: customPreviewAccent.acc,
+              text: customPreviewTheme["--tx0"]
+            };
+            const fontId = preset?.displayFont ?? appearance.displayFont;
+            const label = preset?.label ?? "Custom";
+            const description = preset?.description ?? "Your own mode, accent, font, and background combination.";
+            return (
+              <button
+                aria-pressed={activeThemePreset === id}
+                className={activeThemePreset === id ? "themePresetCard active" : "themePresetCard"}
+                key={id}
+                style={{
+                  "--preset-bg": preview.background,
+                  "--preset-surface": preview.surface,
+                  "--preset-accent": preview.accent,
+                  "--preset-text": preview.text,
+                  "--preset-font": displayFonts[fontId].head
+                } as CSSProperties}
+                type="button"
+                onClick={() =>
+                  setAppearance((current) => {
+                    if (id === "custom") {
+                      return { ...current, themePreset: "custom" };
+                    }
+                    const next = curatedThemePresets[id];
+                    return {
+                      ...current,
+                      accent: next.accent,
+                      displayFont: next.displayFont,
+                      mode: next.mode,
+                      themePreset: id
+                    };
+                  })
+                }
+              >
+                <span aria-hidden="true" className="themePresetPreview"><i /><i /><i /></span>
+                <span className="themePresetCopy"><strong>{label}</strong><small>{description}</small></span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="appearanceSubhead">
+          <strong>Fine tune</strong>
+          <span>Changing any control below turns the current look into a custom theme.</span>
         </div>
         <div className="appearanceGrid">
           <label className="settingsField compact">
@@ -7283,7 +8404,8 @@ function SettingsView({
                 setAppearance((current) => ({
                   ...current,
                   mode: value,
-                  accent: isAccentColorId(current.accent) ? current.accent : defaultAppearanceSettings.accent
+                  accent: isAccentColorId(current.accent) ? current.accent : defaultAppearanceSettings.accent,
+                  themePreset: "custom"
                 }))
               }
             />
@@ -7297,7 +8419,8 @@ function SettingsView({
               onChange={(value) =>
                 setAppearance((current) => ({
                   ...current,
-                  displayFont: value
+                  displayFont: value,
+                  themePreset: "custom"
                 }))
               }
             />
@@ -7309,12 +8432,12 @@ function SettingsView({
             return (
               <button
                 aria-label={`Use ${palette.label} highlight`}
-                className={appearance.accent === id ? "colorSwatch active" : "colorSwatch"}
+                className={appearance.themePreset === "custom" && appearance.accent === id ? "colorSwatch active" : "colorSwatch"}
                 key={id}
                 style={{ "--swatch": color } as CSSProperties}
                 title={palette.label}
                 type="button"
-                onClick={() => setAppearance((current) => ({ ...current, accent: id }))}
+                onClick={() => setAppearance((current) => ({ ...current, accent: id, themePreset: "custom" }))}
               >
                 <span>{palette.label}</span>
               </button>
@@ -7503,7 +8626,475 @@ function SettingsView({
   );
 }
 
-function DiscoveryView({
+function DiscoveryView(props: Parameters<typeof LegacyDiscoveryView>[0]): ReactElement {
+  const {
+    availabilityFilter,
+    busyImportBatchId,
+    discoveryQuery,
+    discoveryState,
+    downloadJobs,
+    downloadState,
+    expandedGroupIds,
+    formatFilter,
+    importsState,
+    libraryFiles,
+    libraryFilter,
+    onApplyImportBatch,
+    onCancelDownload,
+    onDownloadResults,
+    onInspectImport,
+    onRejectImportBatch,
+    onRetryDownload,
+    onSaveCandidate,
+    onSearch,
+    onToggleFileSelect,
+    onToggleGroup,
+    playlistWorkflows,
+    savedCandidates,
+    selectedFileIds,
+    setAvailabilityFilter,
+    setDiscoveryQuery,
+    setFormatFilter,
+    setLibraryFilter,
+    setSortMode,
+    sortMode
+  } = props;
+  const [screen, setScreen] = useState<"results" | "downloads" | "ready">("results");
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const groupingQuery = discoveryState.query || discoveryQuery.trim();
+  const libraryIndex = useMemo(() => createDiscoveryLibraryIndex(libraryFiles), [libraryFiles]);
+  const baseGroups = useMemo(
+    () => groupDiscoveryResults(discoveryState.results, groupingQuery),
+    [discoveryState.results, groupingQuery]
+  );
+  const libraryMatches = useMemo(() => {
+    const matches = new Map<string, DiscoveryLibraryMatch>();
+    for (const group of baseGroups) {
+      matches.set(group.id, summarizeDiscoveryLibraryMatch(group, libraryIndex));
+    }
+    return matches;
+  }, [baseGroups, libraryIndex]);
+  const groups = useMemo(
+    () =>
+      sortDiscoveryGroups(
+        filterDiscoveryGroups(baseGroups, formatFilter, availabilityFilter).filter((group) =>
+          matchesDiscoveryLibraryFilter(getDiscoveryLibraryMatch(group, libraryMatches), libraryFilter)
+        ),
+        sortMode
+      ),
+    [availabilityFilter, baseGroups, formatFilter, libraryFilter, libraryMatches, sortMode]
+  );
+  const selectedGroup = groups.find((group) => group.id === selectedGroupId) ?? groups[0] ?? null;
+  const activeDownloadCount = downloadJobs.filter((job) => job.status === "queued" || job.status === "running").length;
+  const imports = "imports" in importsState ? importsState.imports : [];
+  const agentOwnedImportIds = getAgentOwnedImportIds(playlistWorkflows, downloadJobs);
+  const readyGroups = groupReadyImportBatches(imports, agentOwnedImportIds);
+  const healthReady = discoveryState.health?.reachable === true;
+
+  return (
+    <section className="discovery-v2 discovery-v10 discovery-v11 discoveryPage" aria-label="Discovery">
+      <header className="discovery-functional-head">
+        <div>
+          <h1>Discovery</h1>
+          <div className="network-facts">
+            <span className={healthReady ? "connected" : ""}><i />{healthReady ? "slskd connected" : "slskd offline"}</span>
+            <span>{groups.length.toLocaleString()} folders</span>
+            <span>{discoveryState.results.length.toLocaleString()} files</span>
+            <span>{activeDownloadCount.toLocaleString()} active downloads</span>
+          </div>
+        </div>
+        <form onSubmit={(event) => void onSearch(event)}>
+          <input
+            aria-label="Search Soulseek"
+            placeholder="Artist, album, catalog number, or song"
+            value={discoveryQuery}
+            onChange={(event) => setDiscoveryQuery(event.target.value)}
+          />
+          <button className="primary" disabled={!discoveryQuery.trim() || discoveryState.status === "searching"} type="submit">
+            <UiIcon name="search" />
+            {discoveryState.status === "searching" ? "Searching" : "Search"}
+          </button>
+        </form>
+      </header>
+
+      <div className="discovery-v2-toolbar">
+        <div className="discovery-filters">
+          <button
+            className={formatFilter === "all" && availabilityFilter === "available" && libraryFilter === "actionable" ? "active" : ""}
+            type="button"
+            onClick={() => {
+              setFormatFilter("all");
+              setAvailabilityFilter("available");
+              setLibraryFilter("actionable");
+            }}
+          >
+            Folders
+          </button>
+          <button className={formatFilter === "lossless" ? "active" : ""} type="button" onClick={() => setFormatFilter(formatFilter === "lossless" ? "all" : "lossless")}>
+            Lossless
+          </button>
+          <button className={availabilityFilter === "available" ? "active" : ""} type="button" onClick={() => setAvailabilityFilter(availabilityFilter === "available" ? "all" : "available")}>
+            Unlocked
+          </button>
+          <button className={libraryFilter === "missing" ? "active" : ""} type="button" onClick={() => setLibraryFilter(libraryFilter === "missing" ? "actionable" : "missing")}>
+            Missing from library
+          </button>
+          <button className={sortMode === "best" ? "active" : ""} type="button" onClick={() => setSortMode("best")}>
+            Best sources
+          </button>
+        </div>
+        <div className="discovery-views">
+          <button className={screen === "results" ? "active" : ""} type="button" onClick={() => setScreen("results")}>
+            Results <b>{groups.length.toLocaleString()}</b>
+          </button>
+          <button className={screen === "downloads" ? "active" : ""} type="button" onClick={() => setScreen("downloads")}>
+            Active downloads <b>{activeDownloadCount.toLocaleString()}</b>
+          </button>
+          <button className={screen === "ready" ? "active" : ""} type="button" onClick={() => setScreen("ready")}>
+            Ready to import <b>{readyGroups.length.toLocaleString()}</b>
+          </button>
+        </div>
+      </div>
+
+      <div className="discoveryMockNotices" aria-live="polite">
+        {downloadState.message ? (
+          <div className={downloadState.message.toLowerCase().includes("error") ? "inlineError discoveryMockNotice" : "inlineNotice discoveryMockNotice"}>
+            {downloadState.message}
+          </div>
+        ) : null}
+        {discoveryState.status === "error" ? <div className="inlineError discoveryMockNotice">{discoveryState.message}</div> : null}
+      </div>
+
+      <div className="discovery-v2-body">
+        {screen === "results" ? (
+          <DiscoveryMockupResults
+            expandedGroupIds={expandedGroupIds}
+            groups={groups}
+            libraryMatches={libraryMatches}
+            query={groupingQuery}
+            savedCandidates={savedCandidates}
+            selectedFileIds={selectedFileIds}
+            selectedGroup={selectedGroup}
+            status={discoveryState.status}
+            onDownloadResults={onDownloadResults}
+            onSaveCandidate={onSaveCandidate}
+            onSelectGroup={setSelectedGroupId}
+            onToggleFileSelect={onToggleFileSelect}
+            onToggleGroup={onToggleGroup}
+          />
+        ) : screen === "downloads" ? (
+          <DiscoveryMockupDownloads
+            jobs={downloadJobs}
+            onCancel={onCancelDownload}
+            onRetry={onRetryDownload}
+          />
+        ) : (
+          <DiscoveryMockupReady
+            busyImportBatchId={busyImportBatchId}
+            groups={readyGroups}
+            onApplyBatch={onApplyImportBatch}
+            onInspect={onInspectImport}
+            onRemoveBatch={onRejectImportBatch}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function DiscoveryMockupResults({
+  expandedGroupIds,
+  groups,
+  libraryMatches,
+  query,
+  savedCandidates,
+  selectedFileIds,
+  selectedGroup,
+  status,
+  onDownloadResults,
+  onSaveCandidate,
+  onSelectGroup,
+  onToggleFileSelect,
+  onToggleGroup
+}: {
+  expandedGroupIds: Set<string>;
+  groups: DiscoveryGroup[];
+  libraryMatches: Map<string, DiscoveryLibraryMatch>;
+  query: string;
+  savedCandidates: SavedDiscoveryCandidate[];
+  selectedFileIds: Set<string>;
+  selectedGroup: DiscoveryGroup | null;
+  status: DiscoveryState["status"];
+  onDownloadResults(results: DiscoveryResult[]): Promise<void>;
+  onSaveCandidate(group: DiscoveryGroup): Promise<void>;
+  onSelectGroup(groupId: string): void;
+  onToggleFileSelect(fileId: string): void;
+  onToggleGroup(groupId: string): void;
+}): ReactElement {
+  const selectedHit = selectedGroup ? getDiscoveryFolderSearchHit(selectedGroup, query) : null;
+  const downloadable = (group: DiscoveryGroup) =>
+    group.files.filter((file) => !file.isLocked && isAudioDiscoveryResult(file));
+
+  return (
+    <div className="candidate-layout folder-layout">
+      <section className="candidate-list folder-results">
+        <div className="operations-head">
+          <span>{query ? `Folders containing “${query}”` : "Remote folders"}</span>
+          <small>{groups.length.toLocaleString()} folders · {groups.reduce((sum, group) => sum + group.files.length, 0).toLocaleString()} files</small>
+        </div>
+        <div className="candidate-scroll">
+          {groups.length === 0 ? (
+            status === "searching" ? <DiscoveryLoadingState query={query} /> : <div className="emptyState">Search Soulseek to browse matching folders and their files.</div>
+          ) : groups.map((group) => {
+            const expanded = expandedGroupIds.has(group.id);
+            const hit = getDiscoveryFolderSearchHit(group, query);
+            return (
+              <article className={selectedGroup?.id === group.id ? "folder-result selected" : "folder-result"} key={group.id}>
+                <div className="folder-result-head">
+                  <button
+                    className="folder-toggle"
+                    type="button"
+                    onClick={() => {
+                      onSelectGroup(group.id);
+                      onToggleGroup(group.id);
+                    }}
+                  >
+                    <span className="folder-chevron">{expanded ? <LucideChevronDown size={15} /> : <LucideChevronRight size={15} />}</span>
+                    {expanded ? <LucideFolderOpen size={17} /> : <LucideFolder size={17} />}
+                    <span className="folder-identity">
+                      <strong>{group.releaseArtist ? `${group.releaseArtist} — ${group.releaseTitle}` : group.releaseTitle}</strong>
+                      <small>{group.files.length} files · {group.primaryFormat ?? group.qualityLabel} · {formatBytes(group.totalSizeBytes)}</small>
+                      <em>{group.username ?? "unknown peer"} · {getDiscoveryFolderLabel(group)}</em>
+                      {hit ? <span className="song-hit" title={hit.filename}>Found: {hit.filename}</span> : null}
+                    </span>
+                    <span className="candidate-score">{Math.round(group.score)}<small>match</small></span>
+                  </button>
+                  <div className="folder-actions">
+                    <button disabled={group.availableCount === 0} type="button" onClick={() => void onDownloadResults(downloadable(group))}>
+                      <DownloadIcon /> Folder
+                    </button>
+                    <button aria-label="Save source" disabled={savedCandidates.some((candidate) => candidate.candidateKey === group.id)} type="button" onClick={() => void onSaveCandidate(group)}>
+                      <UiIcon name="playlist" />
+                    </button>
+                  </div>
+                </div>
+                {expanded ? (
+                  <div className="folder-browser">
+                    <div className="folder-file-head"><span>#</span><span>File</span><span>Format</span><span>Size</span><span>Action</span></div>
+                    {group.files.map((file, index) => {
+                      const selectable = !file.isLocked && isAudioDiscoveryResult(file);
+                      const matched = hit?.id === file.id;
+                      return (
+                        <div className={matched ? "folder-file-row matched" : selectedFileIds.has(file.id) ? "folder-file-row selected-file" : "folder-file-row"} key={file.id}>
+                          <span>{String(index + 1).padStart(2, "0")}</span>
+                          <strong title={file.path}>{file.filename}{matched ? <em>Search match</em> : null}</strong>
+                          <span>{file.extension?.toUpperCase() ?? "FILE"}</span>
+                          <span>{formatBytes(file.sizeBytes)}</span>
+                          <button disabled={!selectable} type="button" onClick={() => void onDownloadResults([file])}><DownloadIcon /> File</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+        <div className="operations-foot"><span>Grouped by shared folder</span><span>Sorted by source quality</span></div>
+      </section>
+      <aside className="candidate-inspect folder-inspect">
+        {selectedGroup ? (
+          <>
+            <span className="eyebrow">Selected folder</span>
+            <h2>{selectedGroup.releaseTitle}</h2>
+            <p>{selectedGroup.releaseArtist ?? "Unknown artist"} · {selectedGroup.username ?? "unknown peer"}</p>
+            <div className="source-facts">
+              <span><small>Folder</small>{selectedGroup.files.length} files</span>
+              <span><small>Matched file</small>{selectedHit ? "1" : "—"}</span>
+              <span><small>Total size</small>{formatBytes(selectedGroup.totalSizeBytes)}</span>
+              <span><small>Quality</small>{selectedGroup.qualityLabel}</span>
+            </div>
+            {selectedHit ? <div className="selected-file-card"><span className="eyebrow">Song match</span><strong>{selectedHit.filename}</strong><small>The matched song belongs to this source folder. Browse nearby files or take the complete folder.</small></div> : null}
+            <div className="source-verdict">
+              <strong>{getDiscoveryLibraryMatch(selectedGroup, libraryMatches).label}</strong>
+              <span>{getDiscoveryLibraryMatch(selectedGroup, libraryMatches).detail}</span>
+            </div>
+            <div className="candidate-actions vertical-actions">
+              <button className="primary" disabled={selectedGroup.availableCount === 0} type="button" onClick={() => void onDownloadResults(downloadable(selectedGroup))}><DownloadIcon /> Download complete folder</button>
+              {selectedHit ? <button disabled={selectedHit.isLocked || !isAudioDiscoveryResult(selectedHit)} type="button" onClick={() => void onDownloadResults([selectedHit])}><DownloadIcon /> Download matched file only</button> : null}
+            </div>
+            <div className="folder-path"><LucideFolderOpen size={14} /><span>{selectedGroup.folder ?? getDiscoveryFolderLabel(selectedGroup)}</span></div>
+            <p className="staging-note">Manual finds download into staging for review. Agent-owned downloads import automatically.</p>
+          </>
+        ) : <div className="emptyState">Select a folder to inspect it.</div>}
+      </aside>
+    </div>
+  );
+}
+
+function DiscoveryMockupDownloads({
+  jobs,
+  onCancel,
+  onRetry
+}: {
+  jobs: DiscoveryDownloadJob[];
+  onCancel(jobId: string): Promise<void>;
+  onRetry(jobId: string): Promise<void>;
+}): ReactElement {
+  const [selectedId, setSelectedId] = useState<string | null>(jobs[0]?.id ?? null);
+  const job = jobs.find((item) => item.id === selectedId) ?? jobs[0] ?? null;
+  const active = jobs.filter((item) => item.status === "queued" || item.status === "running");
+  const remaining = jobs.reduce((sum, item) => sum + Math.max(0, item.selectedCount - item.completedCount), 0);
+  if (!job) {
+    return <section className="empty-staging"><DownloadIcon /><h2>No downloads</h2><p>Queued Soulseek folders will appear here.</p></section>;
+  }
+  const percent = Math.round(job.progress * 100);
+  const files = job.imported?.items ?? [];
+  return (
+    <section className="active-downloads-workspace">
+      <header className="downloads-overview">
+        <div><span className="eyebrow">Transfer activity</span><h2>{active.length} active downloads</h2><p>Downloads remain isolated in staging until complete.</p></div>
+        <div className="download-summary-metrics">
+          <span><small>Completed</small><strong>{jobs.reduce((sum, item) => sum + item.completedCount, 0)} files</strong></span>
+          <span><small>Remaining</small><strong>{remaining} files</strong></span>
+          <span><small>Queued jobs</small><strong>{jobs.length}</strong></span>
+          <span><small>Network</small><strong className="online">slskd online</strong></span>
+        </div>
+        <div className="download-global-actions"><button type="button"><TransportIcon shape="pause" /> Pause all</button><button type="button"><UiIcon name="settings" /></button></div>
+      </header>
+      <div className="active-download-grid">
+        <aside className="download-job-list">
+          <div className="section-label"><span>Download queue</span><small>Newest first</small></div>
+          {jobs.map((item) => (
+            <article className={item.id === job.id ? "download-job selected" : "download-job"} key={item.id}>
+              <button className="download-job-main" type="button" onClick={() => setSelectedId(item.id)}>
+                <span className="download-job-cover"><UiIcon name="album" /></span>
+                <span className="download-job-copy">
+                  <strong title={item.message ?? `Download ${item.id.slice(0, 8)}`}>{item.message ?? `Download ${item.id.slice(0, 8)}`}</strong>
+                  <small>{item.selectedCount} files · Soulseek staging</small>
+                  <span><em>{item.status}</em>{item.completedCount} / {item.selectedCount} files</span>
+                  <i><b style={{ width: `${Math.round(item.progress * 100)}%` }} /></i>
+                  <small>{item.imported ? "Staged for import" : "Transfer in progress"}</small>
+                </span>
+                <span className="download-job-rate"><strong>{Math.round(item.progress * 100)}%</strong><small>{item.completedCount} complete</small></span>
+              </button>
+            </article>
+          ))}
+        </aside>
+        <section className="download-job-detail">
+          <header className="download-detail-head">
+            <span className="download-detail-cover"><UiIcon name="album" /></span>
+            <div><span className="eyebrow">Selected download</span><h3 title={job.message ?? "Soulseek download"}>{job.message ?? "Soulseek download"}</h3><p>{job.selectedCount} files · job {job.id.slice(0, 8)}</p></div>
+            <div className="selected-download-actions">
+              {(job.status === "queued" || job.status === "running") ? <button type="button" onClick={() => void onCancel(job.id)}>Cancel</button> : null}
+              {(job.status === "failed" || job.status === "cancelled") ? <button className="primary" type="button" onClick={() => void onRetry(job.id)}>Retry</button> : null}
+            </div>
+          </header>
+          <section className="download-progress-panel">
+            <div className="download-progress-heading"><span><strong>{job.status}</strong><small>{job.error ?? job.message ?? "Waiting for transfer details"}</small></span><b>{percent}%</b></div>
+            <div className="download-progress-large"><i style={{ width: `${percent}%` }} /></div>
+            <div className="download-progress-stats">
+              <span><small>Completed</small><strong>{job.completedCount} / {job.selectedCount}</strong></span>
+              <span><small>Progress</small><strong>{percent}%</strong></span>
+              <span><small>Status</small><strong>{job.status}</strong></span>
+              <span><small>Started</small><strong>{job.startedAt ? formatDateTime(job.startedAt) : "Queued"}</strong></span>
+            </div>
+          </section>
+          <section className="download-files">
+            <div className="section-label"><span>Files</span><small>{files.length ? "Completed staging items" : "File detail appears after staging"}</small></div>
+            <div className="download-file-head"><span>#</span><span>Filename</span><span>Size</span><span>Status</span><span>Progress</span></div>
+            {(files.length ? files : [{ id: job.id, detectedTitle: job.message, stagingPath: "", status: job.status }]).map((file, index) => (
+              <div className="download-file-row" key={file.id}>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <strong>{file.detectedTitle ?? basenameFromPath(file.stagingPath) ?? "Transfer details pending"}</strong>
+                <span>—</span><span className="download-file-state">{file.status}</span><span className="file-progress-cell"><i><b style={{ width: `${percent}%` }} /></i><em>{percent}%</em></span>
+              </div>
+            ))}
+          </section>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function DiscoveryMockupReady({
+  busyImportBatchId,
+  groups,
+  onApplyBatch,
+  onInspect,
+  onRemoveBatch
+}: {
+  busyImportBatchId: string | null;
+  groups: ReadyImportGroup[];
+  onApplyBatch(batch: ImportBatch): Promise<void>;
+  onInspect(importItemId: string): Promise<void>;
+  onRemoveBatch(batch: ImportBatch): Promise<void>;
+}): ReactElement {
+  const [selectedKey, setSelectedKey] = useState<string | null>(groups[0]?.key ?? null);
+  const group = groups.find((item) => item.key === selectedKey) ?? groups[0] ?? null;
+  if (!group) {
+    return <section className="empty-staging"><UiIcon name="import" /><h2>Staging is empty</h2><p>Completed manual downloads will appear here.</p></section>;
+  }
+  const items = getReviewableImportItems(group.batch);
+  const busy = busyImportBatchId === group.batch.id;
+  const lead = items[0] ?? group.batch.items[0];
+  return (
+    <section className="import-review multi-review">
+      <header className="import-review-head multi-head">
+        <div className="import-title"><span className="eyebrow">Staging review</span><h2>{groups.length} releases ready</h2><p>{groups.reduce((sum, item) => sum + getReviewableImportItems(item.batch).length, 0)} tracks · choose what enters the library</p></div>
+        <div className="import-head-actions">
+          <button disabled={busy} type="button" onClick={() => void onRemoveBatch(group.batch)}>Remove selected</button>
+          <button className="primary" disabled={busy || items.length === 0} type="button" onClick={() => void onApplyBatch(group.batch)}>{busy ? "Importing" : `Import ${items.length} tracks`}</button>
+        </div>
+      </header>
+      <div className="multi-review-grid">
+        <aside className="staging-queue">
+          <div className="section-label"><span>Staged releases</span><small>{groups.length} ready</small></div>
+          {groups.map((item) => {
+            const itemLead = item.batch.items[0];
+            return (
+              <article className={item.key === group.key ? "staging-album-row active" : "staging-album-row"} key={item.key}>
+                <button className="stage-check checked" type="button" onClick={() => setSelectedKey(item.key)}><UiIcon name="status" /></button>
+                <button className="staging-album-main" type="button" onClick={() => setSelectedKey(item.key)}>
+                  <span className="stage-cover"><UiIcon name={item.kind === "album" ? "album" : "format"} /></span>
+                  <span><strong title={deriveImportBatchTitle(item.batch)}>{deriveImportBatchTitle(item.batch)}</strong><small title={itemLead?.detectedArtist ?? "Unknown artist"}>{itemLead?.detectedArtist ?? "Unknown artist"}</small><em>{getReviewableImportItems(item.batch).length} tracks</em></span>
+                </button>
+                <button className="stage-remove" type="button" onClick={() => void onRemoveBatch(item.batch)}>×</button>
+              </article>
+            );
+          })}
+        </aside>
+        <section className="staging-detail">
+          <header className="selected-stage-head">
+            <span className="selected-stage-cover"><UiIcon name={group.kind === "album" ? "album" : "format"} /></span>
+            <div><span className="eyebrow">Selected release</span><h3 title={deriveImportBatchTitle(group.batch)}>{deriveImportBatchTitle(group.batch)}</h3><p title={lead?.detectedArtist ?? "Unknown artist"}>{lead?.detectedArtist ?? "Unknown artist"} · {items.length} tracks</p></div>
+            <div className="stage-statuses"><span><UiIcon name="status" /> Metadata</span><span><UiIcon name="status" /> Duplicates</span></div>
+          </header>
+          <div className="staging-detail-grid">
+            <section className="import-plan">
+              <div className="section-label"><span>Import plan</span><small>{group.batch.status}</small></div>
+              <div className="plan-row"><UiIcon name="library" /><span><small>Destination</small><strong title={lead?.proposedDestination ?? "Library root"}>{lead?.proposedDestination ?? "Library root"}</strong></span></div>
+              <div className="plan-row"><UiIcon name="format" /><span><small>Metadata</small><strong>{items.length} tracks detected</strong></span><button type="button" onClick={() => lead ? void onInspect(lead.id) : undefined}>Inspect</button></div>
+              <div className="plan-row"><UiIcon name="duplicate" /><span><small>Warnings</small><strong>{items.reduce((sum, item) => sum + item.warnings.length + item.duplicateCandidates.length, 0)} findings</strong></span></div>
+              <div className="plan-row passive"><UiIcon name="operations" /><span><small>After import</small><strong>Refresh artist and album index</strong></span></div>
+            </section>
+            <section className="track-review-list">
+              <div className="section-label"><span>Track mapping</span><small>Source → library metadata</small></div>
+              <div className="review-track-head"><span>#</span><span>Title</span><span>Artist</span><span>Year</span><span>Status</span></div>
+              {items.map((item, index) => (
+                <button className="review-track" type="button" key={item.id} onClick={() => void onInspect(item.id)}>
+                  <span>{String(index + 1).padStart(2, "0")}</span><strong title={item.detectedTitle ?? basenameFromPath(item.stagingPath)}>{item.detectedTitle ?? basenameFromPath(item.stagingPath)}</strong><span title={item.detectedArtist ?? "Unknown"}>{item.detectedArtist ?? "Unknown"}</span><span>{item.detectedYear ?? "—"}</span><span className="verified">{item.status}</span>
+                </button>
+              ))}
+            </section>
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function LegacyDiscoveryView({
   busyImportBatchId,
   discoveryQuery,
   downloadState,
@@ -7535,6 +9126,7 @@ function DiscoveryView({
   setSortMode,
   onGroupSelect,
   onDownloadSelection,
+  onDownloadResults,
   onInspectGroup,
   onOpenAgentThread,
   onOpenPlaylist,
@@ -7590,6 +9182,7 @@ function DiscoveryView({
   setSortMode(value: DiscoverySort): void;
   onGroupSelect(group: DiscoveryGroup): void;
   onDownloadSelection(): Promise<void>;
+  onDownloadResults(results: DiscoveryResult[]): Promise<void>;
   onInspectGroup(groupId: string): void;
   onOpenAgentThread(threadId: string): Promise<void>;
   onOpenPlaylist(playlistId: string): void;
@@ -7649,6 +9242,10 @@ function DiscoveryView({
     () => filterDiscoveryClustersByRelease(clusters, releaseFilter, (group) => getDiscoveryLibraryMatch(group, libraryMatches)),
     [clusters, libraryMatches, releaseFilter]
   );
+  const releaseFilteredGroups = useMemo(
+    () => releaseFilteredClusters.flatMap((cluster) => cluster.groups),
+    [releaseFilteredClusters]
+  );
   const visibleClusters = releaseFilteredClusters.slice(0, visibleClusterLimit);
   const hiddenClusterCount = Math.max(0, releaseFilteredClusters.length - visibleClusters.length);
   const inspectedGroup = groups.find((group) => group.id === inspectedGroupId) ?? null;
@@ -7675,9 +9272,8 @@ function DiscoveryView({
   const missingParsedCount = parsedListState.items.filter((item) => item.ownedMatchCount === 0).length;
   const activeDownloadCount = downloadJobs.filter((job) => job.status === "queued" || job.status === "running").length;
   const importBatches = "imports" in importsState ? importsState.imports : [];
-  const readyImportBatches = importBatches.filter((batch) =>
-    batch.items.some((item) => item.status !== "imported" && item.status !== "rejected")
-  );
+  const agentOwnedImportIds = getAgentOwnedImportIds(playlistWorkflows, downloadJobs);
+  const readyImportGroups = groupReadyImportBatches(importBatches, agentOwnedImportIds);
   const activeWorkflowCount = playlistWorkflows.filter((workflow) => workflow.status !== "completed" && workflow.status !== "failed").length;
   const discoveryStatusDetail = discoveryState.health?.message ?? discoveryState.health?.url ?? "Check slskd before searching.";
 
@@ -7779,7 +9375,7 @@ function DiscoveryView({
         >
           <UiIcon name="search" />
           <span>Results</span>
-          <strong>{clusters.length.toLocaleString()}</strong>
+          <strong>{releaseFilteredGroups.length.toLocaleString()}</strong>
         </button>
         <button
           aria-current={discoveryWorkspaceTab === "downloads" ? "page" : undefined}
@@ -7799,11 +9395,43 @@ function DiscoveryView({
         >
           <UiIcon name="import" />
           <span>Ready to import</span>
-          <strong>{readyImportBatches.length.toLocaleString()}</strong>
+          <strong>{readyImportGroups.length.toLocaleString()}</strong>
         </button>
       </nav>
 
-      {discoveryWorkspaceTab === "results" ? (
+      {discoveryWorkspaceTab === "results" && discoverySearchMode === "search" ? (
+        <DiscoveryFolderResultsWorkspace
+          availabilityFilter={availabilityFilter}
+          canDownload={canDownload}
+          discoveryStatusDetail={discoveryStatusDetail}
+          downloadButtonLabel={downloadButtonLabel}
+          downloadsConfigured={downloadsConfigured}
+          expandedGroupIds={expandedGroupIds}
+          formatFilter={formatFilter}
+          groups={releaseFilteredGroups}
+          inspectedGroup={inspectedGroup}
+          libraryFilter={libraryFilter}
+          libraryMatches={libraryMatches}
+          query={groupingQuery}
+          releaseFilter={releaseFilter}
+          savedCandidates={savedCandidates}
+          selectedFileIds={selectedFileIds}
+          selectedGroupIds={selectedGroupIds}
+          sortMode={sortMode}
+          status={discoveryState.status}
+          onDownloadSelection={onDownloadSelection}
+          onGroupSelect={onGroupSelect}
+          onInspectGroup={onInspectGroup}
+          onSaveCandidate={onSaveCandidate}
+          onToggleFileSelect={onToggleFileSelect}
+          onToggleGroup={onToggleGroup}
+          setAvailabilityFilter={setAvailabilityFilter}
+          setFormatFilter={setFormatFilter}
+          setLibraryFilter={setLibraryFilter}
+          setReleaseFilter={setReleaseFilter}
+          setSortMode={setSortMode}
+        />
+      ) : discoveryWorkspaceTab === "results" ? (
         <div className={`discoveryWorkspace mode-${discoverySearchMode}`}>
         <div className="discoveryMainColumn">
           {discoverySearchMode === "search" ? (
@@ -8216,6 +9844,7 @@ function DiscoveryView({
       ) : (
         <DiscoveryReadyImportsWorkspace
           busyImportBatchId={busyImportBatchId}
+          hiddenImportIds={agentOwnedImportIds}
           importsState={importsState}
           onApplyBatch={onApplyImportBatch}
           onInspect={onInspectImport}
@@ -8224,6 +9853,337 @@ function DiscoveryView({
       )}
     </section>
   );
+}
+
+function DiscoveryFolderResultsWorkspace({
+  availabilityFilter,
+  canDownload,
+  discoveryStatusDetail,
+  downloadButtonLabel,
+  downloadsConfigured,
+  expandedGroupIds,
+  formatFilter,
+  groups,
+  inspectedGroup,
+  libraryFilter,
+  libraryMatches,
+  query,
+  releaseFilter,
+  savedCandidates,
+  selectedFileIds,
+  selectedGroupIds,
+  sortMode,
+  status,
+  onDownloadSelection,
+  onGroupSelect,
+  onInspectGroup,
+  onSaveCandidate,
+  onToggleFileSelect,
+  onToggleGroup,
+  setAvailabilityFilter,
+  setFormatFilter,
+  setLibraryFilter,
+  setReleaseFilter,
+  setSortMode
+}: {
+  availabilityFilter: DiscoveryAvailabilityFilter;
+  canDownload: boolean;
+  discoveryStatusDetail: string;
+  downloadButtonLabel: string;
+  downloadsConfigured: boolean;
+  expandedGroupIds: Set<string>;
+  formatFilter: DiscoveryFormatFilter;
+  groups: DiscoveryGroup[];
+  inspectedGroup: DiscoveryGroup | null;
+  libraryFilter: DiscoveryLibraryFilter;
+  libraryMatches: Map<string, DiscoveryLibraryMatch>;
+  query: string;
+  releaseFilter: DiscoveryReleaseFilter;
+  savedCandidates: SavedDiscoveryCandidate[];
+  selectedFileIds: Set<string>;
+  selectedGroupIds: Set<string>;
+  sortMode: DiscoverySort;
+  status: DiscoveryState["status"];
+  onDownloadSelection(): Promise<void>;
+  onGroupSelect(group: DiscoveryGroup): void;
+  onInspectGroup(groupId: string): void;
+  onSaveCandidate(group: DiscoveryGroup): Promise<void>;
+  onToggleFileSelect(fileId: string): void;
+  onToggleGroup(groupId: string): void;
+  setAvailabilityFilter(value: DiscoveryAvailabilityFilter): void;
+  setFormatFilter(value: DiscoveryFormatFilter): void;
+  setLibraryFilter(value: DiscoveryLibraryFilter): void;
+  setReleaseFilter(value: DiscoveryReleaseFilter): void;
+  setSortMode(value: DiscoverySort): void;
+}): ReactElement {
+  const inspectedGroupVisible = inspectedGroup && groups.some((group) => group.id === inspectedGroup.id);
+  const selectedGroup = inspectedGroupVisible ? inspectedGroup : groups[0] ?? null;
+  const selectedFileCount = selectedFileIds.size;
+
+  return (
+    <section className="discoveryFolderWorkspace" aria-label="Discovery folder results">
+      <header className="discoveryFolderToolbar">
+        <div className="discoveryConnectionSummary">
+          <span className="connected"><i /> slskd connected</span>
+          <span>{groups.length.toLocaleString()} folders</span>
+          <span>{groups.reduce((total, group) => total + group.files.length, 0).toLocaleString()} files</span>
+          <span title={discoveryStatusDetail}>{downloadsConfigured ? "staging ready" : "staging unavailable"}</span>
+        </div>
+        <div className="discoveryFolderFilters">
+          <StyledSelect<DiscoverySort>
+            ariaLabel="Sort Discovery folders"
+            options={[
+              { value: "best", label: "Best candidates" },
+              { value: "match", label: "Closest match" },
+              { value: "tracks", label: "Most files" },
+              { value: "size", label: "Largest folders" },
+              { value: "user", label: "Peer / folder" }
+            ]}
+            value={sortMode}
+            onChange={setSortMode}
+          />
+          <StyledSelect<DiscoveryFormatFilter>
+            ariaLabel="Filter Discovery format"
+            options={[
+              { value: "all", label: "All formats" },
+              { value: "lossless", label: "Lossless" },
+              { value: "compressed", label: "Compressed" }
+            ]}
+            value={formatFilter}
+            onChange={setFormatFilter}
+          />
+          <StyledSelect<DiscoveryAvailabilityFilter>
+            ariaLabel="Filter Discovery availability"
+            options={[
+              { value: "available", label: "Unlocked" },
+              { value: "all", label: "All availability" }
+            ]}
+            value={availabilityFilter}
+            onChange={setAvailabilityFilter}
+          />
+          <StyledSelect<DiscoveryLibraryFilter>
+            ariaLabel="Filter Discovery library status"
+            options={[
+              { value: "actionable", label: "Missing / upgrades" },
+              { value: "missing", label: "Missing" },
+              { value: "owned", label: "Owned / upgrades" },
+              { value: "all", label: "All library states" }
+            ]}
+            value={libraryFilter}
+            onChange={setLibraryFilter}
+          />
+          <StyledSelect<DiscoveryReleaseFilter>
+            ariaLabel="Filter Discovery release type"
+            options={[
+              { value: "recommended", label: "Recommended" },
+              { value: "all", label: "All folders" },
+              { value: "albums", label: "Albums / EPs" },
+              { value: "singles", label: "Singles / loose" },
+              { value: "collections", label: "Collections" },
+              { value: "upgrades", label: "Upgrades" }
+            ]}
+            value={releaseFilter}
+            onChange={setReleaseFilter}
+          />
+        </div>
+        <button
+          className="primary discoverySelectionDownload"
+          disabled={!canDownload}
+          title={downloadsConfigured ? undefined : "Download staging is not configured"}
+          type="button"
+          onClick={() => void onDownloadSelection()}
+        >
+          <DownloadIcon />
+          {selectedFileCount > 0 ? downloadButtonLabel : "Select files"}
+        </button>
+      </header>
+
+      <div className="discoveryFolderLayout">
+        <section className="discoveryFolderList" aria-label="Remote folders">
+          <header>
+            <strong>{query ? `Folders matching “${query}”` : "Remote folders"}</strong>
+            <span>{groups.length.toLocaleString()} ranked sources</span>
+          </header>
+          <div className="discoveryFolderScroll">
+            {groups.length === 0 ? (
+              status === "searching" ? (
+                <DiscoveryLoadingState query={query} />
+              ) : (
+                <div className="emptyState">Search Soulseek to browse matching folders and their files.</div>
+              )
+            ) : (
+              groups.map((group) => {
+                const expanded = expandedGroupIds.has(group.id);
+                const selected = selectedGroup?.id === group.id;
+                const selectedForDownload = selectedGroupIds.has(group.id);
+                const libraryMatch = getDiscoveryLibraryMatch(group, libraryMatches);
+                const searchHit = getDiscoveryFolderSearchHit(group, query);
+                return (
+                  <article className={selected ? "discoveryFolderResult selected" : "discoveryFolderResult"} key={group.id}>
+                    <div className="discoveryFolderResultHead">
+                      <button
+                        aria-label={expanded ? "Collapse folder files" : "Expand folder files"}
+                        className="discoveryFolderExpand"
+                        type="button"
+                        onClick={() => onToggleGroup(group.id)}
+                      >
+                        {expanded ? <LucideChevronDown size={15} /> : <LucideChevronRight size={15} />}
+                      </button>
+                      <span className="discoveryFolderGlyph" aria-hidden="true">
+                        {expanded ? <LucideFolderOpen size={17} /> : <LucideFolder size={17} />}
+                      </span>
+                      <button
+                        className="discoveryFolderIdentity"
+                        type="button"
+                        onClick={() => onInspectGroup(group.id)}
+                      >
+                        <strong title={group.releaseArtist ? group.releaseArtist + " — " + group.releaseTitle : group.releaseTitle}>
+                          {group.releaseArtist ? `${group.releaseArtist} — ${group.releaseTitle}` : group.releaseTitle}
+                        </strong>
+                        <small
+                          title={[
+                            `${group.files.length.toLocaleString()} files`,
+                            group.primaryFormat ?? group.qualityLabel,
+                            formatBytes(group.totalSizeBytes)
+                          ].join(" · ")}
+                        >
+                          {group.files.length.toLocaleString()} files · {group.primaryFormat ?? group.qualityLabel} · {formatBytes(group.totalSizeBytes)}
+                        </small>
+                        <em title={group.folder ?? undefined}>
+                          {group.username ?? "unknown peer"} · {getDiscoveryFolderLabel(group)}
+                        </em>
+                        {searchHit ? <span className="discoverySongHit" title={"Found: " + searchHit.filename}>Found: {searchHit.filename}</span> : null}
+                      </button>
+                      <span className="discoveryFolderScore">{Math.round(group.score)}<small>match</small></span>
+                      <div className="discoveryFolderActions">
+                        <button
+                          className={selectedForDownload ? "active" : ""}
+                          disabled={group.availableCount === 0}
+                          type="button"
+                          onClick={() => onGroupSelect(group)}
+                        >
+                          {selectedForDownload ? "Selected" : `Select ${group.availableCount}`}
+                        </button>
+                      </div>
+                    </div>
+                    {expanded ? (
+                      <div className="discoveryFolderFiles">
+                        <div className="discoveryFolderFileHead">
+                          <span />
+                          <span>#</span>
+                          <span>File</span>
+                          <span>Format</span>
+                          <span>Size</span>
+                          <span>Status</span>
+                        </div>
+                        {group.files.map((file, index) => {
+                          const selectable = isAudioDiscoveryResult(file) && !file.isLocked;
+                          const matched = searchHit?.id === file.id;
+                          return (
+                            <label className={matched ? "discoveryFolderFile matched" : "discoveryFolderFile"} key={file.id}>
+                              <input
+                                checked={selectedFileIds.has(file.id)}
+                                disabled={!selectable}
+                                type="checkbox"
+                                onChange={() => onToggleFileSelect(file.id)}
+                              />
+                              <span>{String(index + 1).padStart(2, "0")}</span>
+                              <strong title={file.path}>
+                                {file.filename}
+                                {matched ? <em>Search match</em> : null}
+                              </strong>
+                              <span>{file.extension?.toUpperCase() ?? "FILE"}</span>
+                              <span>{formatBytes(file.sizeBytes)}</span>
+                              <span>{file.isLocked ? "Locked" : selectable ? "Available" : "Asset"}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })
+            )}
+          </div>
+          <footer>
+            <span>Grouped by shared remote folder</span>
+            <span>Sorted by source quality</span>
+          </footer>
+        </section>
+
+        <aside className="discoveryFolderInspector" aria-label="Selected remote folder">
+          {selectedGroup ? (
+            <>
+              <span className="eyebrow">Selected folder</span>
+              <h2>{selectedGroup.releaseTitle}</h2>
+              <p>{selectedGroup.releaseArtist ?? "Unknown artist"} · {selectedGroup.username ?? "unknown peer"}</p>
+              <div className="discoveryFolderFacts">
+                <span><small>Files</small><strong>{selectedGroup.files.length.toLocaleString()}</strong></span>
+                <span><small>Available</small><strong>{selectedGroup.availableCount.toLocaleString()}</strong></span>
+                <span><small>Total size</small><strong>{formatBytes(selectedGroup.totalSizeBytes)}</strong></span>
+                <span><small>Quality</small><strong>{selectedGroup.qualityLabel}</strong></span>
+              </div>
+              {getDiscoveryFolderSearchHit(selectedGroup, query) ? (
+                <div className="discoverySelectedSong">
+                  <span className="eyebrow">Song match</span>
+                  <strong>{getDiscoveryFolderSearchHit(selectedGroup, query)?.filename}</strong>
+                  <small>The search hit belongs to this folder. Expand it to choose nearby files or select the complete folder.</small>
+                </div>
+              ) : null}
+              <div className="discoverySelectedLibrary">
+                <span>{getDiscoveryLibraryMatch(selectedGroup, libraryMatches).label}</span>
+                <strong>{getDiscoveryLibraryMatch(selectedGroup, libraryMatches).detail}</strong>
+              </div>
+              <div className="discoveryFolderInspectorActions">
+                <button
+                  className={selectedGroupIds.has(selectedGroup.id) ? "primary" : ""}
+                  disabled={selectedGroup.availableCount === 0}
+                  type="button"
+                  onClick={() => onGroupSelect(selectedGroup)}
+                >
+                  <DownloadIcon />
+                  {selectedGroupIds.has(selectedGroup.id) ? "Folder selected" : "Select complete folder"}
+                </button>
+                <button
+                  className="secondary"
+                  disabled={savedCandidates.some((candidate) => candidate.candidateKey === selectedGroup.id)}
+                  type="button"
+                  onClick={() => void onSaveCandidate(selectedGroup)}
+                >
+                  {savedCandidates.some((candidate) => candidate.candidateKey === selectedGroup.id) ? "Saved source" : "Save source"}
+                </button>
+              </div>
+              <div className="discoveryFolderPath">
+                <LucideFolderOpen size={14} />
+                <span>{selectedGroup.folder ?? getDiscoveryFolderLabel(selectedGroup)}</span>
+              </div>
+              <p className="discoveryStagingNote">Selections download into staging. Agent-owned downloads import automatically; manual finds remain reviewable.</p>
+            </>
+          ) : (
+            <div className="emptyState">Select a folder to inspect its files, quality, and library match.</div>
+          )}
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+function getDiscoveryFolderSearchHit(group: DiscoveryGroup, query: string): DiscoveryResult | null {
+  const tokens = query
+    .toLocaleLowerCase()
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 1);
+  if (tokens.length === 0) {
+    return null;
+  }
+  return group.files.find((file) => {
+    const filename = file.filename.toLocaleLowerCase();
+    return tokens.every((token) => filename.includes(token));
+  }) ?? group.files.find((file) => {
+    const filename = file.filename.toLocaleLowerCase();
+    return tokens.some((token) => filename.includes(token));
+  }) ?? null;
 }
 
 function DiscoveryDownloadsWorkspace({
@@ -8331,25 +10291,22 @@ function DiscoveryDownloadsWorkspace({
 
 function DiscoveryReadyImportsWorkspace({
   busyImportBatchId,
+  hiddenImportIds,
   importsState,
   onApplyBatch,
   onInspect,
   onRemoveBatch
 }: {
   busyImportBatchId: string | null;
+  hiddenImportIds: Set<string>;
   importsState: ImportsState;
   onApplyBatch(importBatch: ImportBatch): Promise<void>;
   onInspect(importItemId: string): Promise<void>;
   onRemoveBatch(importBatch: ImportBatch): Promise<void>;
 }): ReactElement {
   const imports = "imports" in importsState ? importsState.imports : [];
-  const readyBatches = imports.filter((batch) =>
-    batch.items.some((item) => item.status !== "imported" && item.status !== "rejected")
-  );
-  const readyItemCount = readyBatches.reduce(
-    (total, batch) => total + getReviewableImportItems(batch).length,
-    0
-  );
+  const readyGroups = groupReadyImportBatches(imports, hiddenImportIds);
+  const readyItemCount = readyGroups.reduce((total, group) => total + getReviewableImportItems(group.batch).length, 0);
 
   return (
     <section className="discoveryReadyWorkspace" aria-label="Ready to import">
@@ -8358,7 +10315,7 @@ function DiscoveryReadyImportsWorkspace({
           <span className="eyebrow">Staging</span>
           <h2>Ready to import</h2>
           <p>
-            {readyBatches.length.toLocaleString()} album batch{readyBatches.length === 1 ? "" : "es"} -{" "}
+            {readyGroups.length.toLocaleString()} release group{readyGroups.length === 1 ? "" : "s"} -{" "}
             {readyItemCount.toLocaleString()} reviewable files
           </p>
         </div>
@@ -8366,10 +10323,10 @@ function DiscoveryReadyImportsWorkspace({
 
       {importsState.status === "error" ? <div className="inlineError">{importsState.message}</div> : null}
       <div className="discoveryReadyBatches">
-        {readyBatches.length === 0 ? (
+        {readyGroups.length === 0 ? (
           <div className="emptyState">Completed downloads will appear here for review before entering the library.</div>
         ) : (
-          readyBatches.map((batch) => {
+          readyGroups.map(({ batch, key, kind }) => {
             const reviewableItems = getReviewableImportItems(batch);
             const visibleItems = batch.items.filter((item) => item.status !== "rejected");
             const warningCount = visibleItems.reduce(
@@ -8379,13 +10336,13 @@ function DiscoveryReadyImportsWorkspace({
             const busy = busyImportBatchId === batch.id;
             const leadItem = visibleItems[0] ?? null;
             return (
-              <article className="discoveryReadyBatch" key={batch.id}>
+              <article className="discoveryReadyBatch" key={`${batch.id}:${key}`}>
                 <header>
                   <span className="discoveryReadyArtwork" aria-hidden="true">
                     <UiIcon name="album" />
                   </span>
                   <div>
-                    <span className="eyebrow">Album import</span>
+                    <span className="eyebrow">{kind === "album" ? "Album import" : "Track import"}</span>
                     <h3>{deriveImportBatchTitle(batch)}</h3>
                     <p>
                       {leadItem?.detectedArtist ?? "Unknown artist"} - {visibleItems.length.toLocaleString()} files - {batch.source}
@@ -8398,7 +10355,7 @@ function DiscoveryReadyImportsWorkspace({
                       type="button"
                       onClick={() => void onApplyBatch(batch)}
                     >
-                      {busy ? "Importing" : `Import album (${reviewableItems.length})`}
+                      {busy ? "Importing" : `Import ${kind === "album" ? "album" : "track"} (${reviewableItems.length})`}
                     </button>
                     <button
                       className="secondary"
@@ -10011,7 +11968,9 @@ function NowPlayingModal({
   onPlayFile,
   onPrevious,
   onRating,
+  onReplaceUpNext,
   onRepeatMode,
+  onSaveQueue,
   onSeek,
   onOpenAlbumPage,
   onOpenArtistPage,
@@ -10030,7 +11989,9 @@ function NowPlayingModal({
   onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
   onPrevious(): Promise<void>;
   onRating(fileId: string, rating: number | null): Promise<void>;
+  onReplaceUpNext(fileIds: string[]): Promise<void>;
   onRepeatMode(repeatMode: PlaybackRepeatMode): Promise<void>;
+  onSaveQueue(name: string, fileIds: string[]): Promise<void>;
   onSeek(ratio: number): Promise<void>;
   onOpenAlbumPage(group: Pick<LibraryAlbumGroup, "artist" | "album" | "year">): void | Promise<void>;
   onOpenArtistPage(artist: string): void;
@@ -10038,8 +11999,20 @@ function NowPlayingModal({
   visualizerFrameRef: MutableRefObject<VisualizerFrameResponse | null>;
   waveformState: WaveformState;
 }): ReactElement {
+  const [closing, setClosing] = useState(false);
+  const closeTimerRef = useRef<number | null>(null);
+  const onCloseRef = useRef(onClose);
   const filesById = useMemo(() => new Map(files.map((file) => [file.id, file])), [files]);
   const currentFile = playback.currentFileId ? filesById.get(playback.currentFileId) ?? null : null;
+  const activeQueueIndex = playback.queueIndex ?? (
+    playback.currentFileId ? playback.queue.indexOf(playback.currentFileId) : -1
+  );
+  const previousFile = activeQueueIndex > 0
+    ? filesById.get(playback.queue[activeQueueIndex - 1] ?? "") ?? null
+    : null;
+  const nextFile = activeQueueIndex >= 0 && activeQueueIndex < playback.queue.length - 1
+    ? filesById.get(playback.queue[activeQueueIndex + 1] ?? "") ?? null
+    : null;
   const displayTitle = currentFile?.displayTags.title ?? playback.currentDisplayName ?? "Nothing queued";
   const displayArtist = currentFile?.displayTags.artist ?? currentFile?.displayTags.albumartist ?? "Unknown Artist";
   const displayAlbum = currentFile?.displayTags.album ?? "Unknown Album";
@@ -10059,18 +12032,61 @@ function NowPlayingModal({
   }, [visualizerPalette]);
   const queueFileIdsRef = useRef(playback.queue);
   const onPlayFileRef = useRef(onPlayFile);
+  const onReplaceUpNextRef = useRef(onReplaceUpNext);
+  const onSaveQueueRef = useRef(onSaveQueue);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
   useEffect(() => {
     queueFileIdsRef.current = playback.queue;
     onPlayFileRef.current = onPlayFile;
-  }, [onPlayFile, playback.queue]);
+    onReplaceUpNextRef.current = onReplaceUpNext;
+    onSaveQueueRef.current = onSaveQueue;
+  }, [onPlayFile, onReplaceUpNext, onSaveQueue, playback.queue]);
   const onQueueRowPlay = useMemo(
     () => (fileId: string) => {
       void onPlayFileRef.current(fileId, queueFileIdsRef.current);
     },
     []
   );
+  const onQueueReplace = useMemo(
+    () => (fileIds: string[]) => onReplaceUpNextRef.current(fileIds),
+    []
+  );
+  const onQueueSave = useMemo(
+    () => (name: string, fileIds: string[]) => onSaveQueueRef.current(name, fileIds),
+    []
+  );
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        requestClose();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
+
+  function requestClose(): void {
+    if (closeTimerRef.current !== null) {
+      return;
+    }
+    setClosing(true);
+    closeTimerRef.current = window.setTimeout(() => onCloseRef.current(), 130);
+  }
+
   return (
-    <div className="modalBackdrop" role="presentation" onMouseDown={onClose}>
+    <div
+      className={`modalBackdrop nowPlayingBackdrop${closing ? " closing" : ""}`}
+      role="presentation"
+      onMouseDown={requestClose}
+    >
       <section
         aria-label="Now playing"
         aria-modal="true"
@@ -10088,8 +12104,10 @@ function NowPlayingModal({
             waveformState={waveformState}
           />
           <header className="overlayTopbar">
-            <button className="modalClose secondary" type="button" onClick={onClose}>
-              Close
+            <button aria-label="Close now playing" className="modalClose" title="Close" type="button" onClick={requestClose}>
+              <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" viewBox="0 0 16 16">
+                <path d="m4 4 8 8M12 4l-8 8" />
+              </svg>
             </button>
           </header>
           <div className="nowPlayingFocus">
@@ -10111,7 +12129,13 @@ function NowPlayingModal({
                   className="nowPlayingMetaLink artist"
                   disabled={!currentFile?.displayTags.artist}
                   type="button"
-                  onClick={() => currentFile?.displayTags.artist ? onOpenArtistPage(currentFile.displayTags.artist) : undefined}
+                  onClick={() => {
+                    if (!currentFile?.displayTags.artist) {
+                      return;
+                    }
+                    onOpenArtistPage(currentFile.displayTags.artist);
+                    requestClose();
+                  }}
                 >
                   {displayArtist}
                 </button>
@@ -10119,7 +12143,13 @@ function NowPlayingModal({
                   className="nowPlayingMetaLink album"
                   disabled={!albumTarget}
                   type="button"
-                  onClick={() => albumTarget ? void onOpenAlbumPage(albumTarget) : undefined}
+                  onClick={() => {
+                    if (!albumTarget) {
+                      return;
+                    }
+                    requestClose();
+                    void onOpenAlbumPage(albumTarget);
+                  }}
                 >
                   {displayAlbum}
                 </button>
@@ -10133,125 +12163,231 @@ function NowPlayingModal({
                 ) : null}
               </div>
               <div className="focusSpectrum" aria-hidden="true">
+                <div className="focusSpectrumLabel">
+                  <span>Live spectrum</span>
+                  <small>20 Hz - 20 kHz</small>
+                </div>
                 <SpectrumCanvas className="focusSpectrumCanvas" frameRef={visualizerFrameRef} mode="spectrum" playing={playback.status === "playing"} />
               </div>
             </div>
-            <div className="overlayPlaybackControls">
-              <div className="nowPlayingModalTime">
-                <span>{formatTime(playback.positionMs)}</span>
+            <div className="nowPlayingControlDeck">
+              <div className="overlayPlaybackControls">
+                <div className="nowPlayingModalTime">
+                  <span>{formatTime(playback.positionMs)}</span>
+                  <button
+                    aria-label="Seek playback"
+                    className="modalProgressSeek"
+                    disabled={playbackBusy || playback.status === "stopped" || !playback.durationMs || playback.durationMs <= 0}
+                    type="button"
+                    onClick={(event) => void onSeek(getPointerRatio(event.currentTarget, event.clientX))}
+                  >
+                    <span className="progressRail">
+                      <WaveformCanvas
+                        className="modalWaveformRailCanvas"
+                        playback={playback}
+                        positionFrameRef={visualizerFrameRef}
+                        variant="rail"
+                        waveform={waveformState.waveform}
+                      />
+                    </span>
+                  </button>
+                  <span>{formatTime(playback.durationMs)}</span>
+                </div>
+                <div className="overlayControls">
+                  <RepeatControls
+                    disabled={playbackBusy || playback.status === "stopped"}
+                    repeatMode={playback.repeatMode}
+                    variant="modal"
+                    onRepeatMode={onRepeatMode}
+                  />
+                  <div className="transport modalTransport">
+                    <button aria-label="Previous track" disabled={playbackBusy || playback.status === "stopped"} title="Previous" type="button" onClick={() => void onPrevious()}>
+                      <TransportIcon shape="previous" />
+                    </button>
+                    <button
+                      aria-label={playback.status === "playing" ? "Pause" : "Play"}
+                      className="tPlay"
+                      disabled={(playback.status === "stopped" && !playback.currentFileId) || (playbackBusy && playback.status !== "playing")}
+                      title={playback.status === "playing" ? "Pause" : "Play"}
+                      type="button"
+                      onClick={() => void onPauseResume()}
+                    >
+                      <TransportIcon shape={playback.status === "playing" ? "pause" : "play"} />
+                    </button>
+                    <button aria-label="Next track" disabled={playbackBusy || playback.status === "stopped"} title="Next" type="button" onClick={() => void onNext()}>
+                      <TransportIcon shape="next" />
+                    </button>
+                  </div>
+                  <label className="volumeControl modal">
+                    <span className="volumeIcon" aria-hidden="true">
+                      <UiIcon name="volume" />
+                    </span>
+                    <input
+                      aria-label="Playback volume"
+                      max={100}
+                      min={0}
+                      type="range"
+                      value={playback.volumePercent}
+                      onChange={(event) => void onVolumeChange(event.target.value)}
+                    />
+                    <strong>{playback.volumePercent}</strong>
+                  </label>
+                </div>
+              </div>
+              <div aria-label="Playback context" className="nowPlayingContextRail">
                 <button
-                  aria-label="Seek playback"
-                  className="modalProgressSeek"
-                  disabled={playbackBusy || playback.status === "stopped" || !playback.durationMs || playback.durationMs <= 0}
+                  className="nowPlayingContextTrack previous"
+                  disabled={playbackBusy || !previousFile}
                   type="button"
-                  onClick={(event) => void onSeek(getPointerRatio(event.currentTarget, event.clientX))}
+                  onClick={() => void onPrevious()}
                 >
-                  <span className="progressRail">
-                    <WaveformCanvas className="modalWaveformRailCanvas" playback={playback} variant="rail" waveform={waveformState.waveform} />
-                    <div className="progressFill" key={playback.currentFileId ?? "stopped"} style={{ width: `${getProgressPercent(playback)}%` }} />
+                  {previousFile ? <Artwork className="nowPlayingContextArt" src={artworkFileUrl(previousFile.id)} /> : <span className="nowPlayingContextPlaceholder"><UiIcon name="album" /></span>}
+                  <span>
+                    <small>Previous</small>
+                    <strong>{previousFile?.displayTags.title ?? "Start of queue"}</strong>
+                    <em>{previousFile?.displayTags.artist ?? "No earlier track"}</em>
                   </span>
                 </button>
-                <span>{formatTime(playback.durationMs)}</span>
-              </div>
-              <div className="overlayControls">
-                <RepeatControls
-                  disabled={playbackBusy || playback.status === "stopped"}
-                  repeatMode={playback.repeatMode}
-                  variant="modal"
-                  onRepeatMode={onRepeatMode}
-                />
-                <div className="transport modalTransport">
-                  <button disabled={playbackBusy || playback.status === "stopped"} type="button" onClick={() => void onPrevious()}>
-                    <TransportIcon shape="previous" />
-                  </button>
-                  <button
-                    className="tPlay"
-                    disabled={(playback.status === "stopped" && !playback.currentFileId) || (playbackBusy && playback.status !== "playing")}
-                    type="button"
-                    onClick={() => void onPauseResume()}
-                  >
-                    <TransportIcon shape={playback.status === "playing" ? "pause" : "play"} />
-                  </button>
-                  <button disabled={playbackBusy || playback.status === "stopped"} type="button" onClick={() => void onNext()}>
-                    <TransportIcon shape="next" />
-                  </button>
+                <div className="nowPlayingContextCurrent">
+                  <small>Queue position</small>
+                  <strong>{activeQueueIndex >= 0 ? `${activeQueueIndex + 1} / ${playback.queue.length}` : "—"}</strong>
+                  <span>{currentFile ? formatFileFormat(currentFile) : "Playback idle"}</span>
                 </div>
-                <label className="volumeControl modal">
-                  <span className="volumeIcon" aria-hidden="true">
-                    <UiIcon name="volume" />
+                <button
+                  className="nowPlayingContextTrack next"
+                  disabled={playbackBusy || !nextFile}
+                  type="button"
+                  onClick={() => void onNext()}
+                >
+                  <span>
+                    <small>Up next</small>
+                    <strong>{nextFile?.displayTags.title ?? "End of queue"}</strong>
+                    <em>{nextFile?.displayTags.artist ?? "No upcoming track"}</em>
                   </span>
-                  <input
-                    aria-label="Playback volume"
-                    max={100}
-                    min={0}
-                    type="range"
-                    value={playback.volumePercent}
-                    onChange={(event) => void onVolumeChange(event.target.value)}
-                  />
-                  <strong>{playback.volumePercent}</strong>
-                </label>
+                  {nextFile ? <Artwork className="nowPlayingContextArt" src={artworkFileUrl(nextFile.id)} /> : <span className="nowPlayingContextPlaceholder"><UiIcon name="album" /></span>}
+                </button>
               </div>
             </div>
           </div>
         </div>
         <NowPlayingQueue
           currentFileId={playback.currentFileId}
+          currentQueueIndex={playback.queueIndex}
           filesById={filesById}
+          playbackBusy={playbackBusy}
           queueFileIds={playback.queue}
           onPlayFile={onQueueRowPlay}
+          onReplaceUpNext={onQueueReplace}
+          onSaveQueue={onQueueSave}
         />
       </section>
     </div>
   );
 }
 
-const NowPlayingQueue = memo(function NowPlayingQueue({
-  currentFileId,
-  filesById,
-  queueFileIds,
-  onPlayFile
-}: {
+type NowPlayingQueueProps = {
   currentFileId: string | null;
+  currentQueueIndex: number | null;
   filesById: Map<string, LibraryFile>;
+  playbackBusy: boolean;
   queueFileIds: string[];
   onPlayFile(fileId: string): void;
-}): ReactElement {
-  const rowHeightPx = 58;
-  const overscanRows = 6;
+  onReplaceUpNext(fileIds: string[]): Promise<void>;
+  onSaveQueue(name: string, fileIds: string[]): Promise<void>;
+};
+
+type NowPlayingQueueDisplayItem =
+  | {
+      type: "album";
+      key: string;
+      file: LibraryFile;
+      trackCount: number;
+      durationMs: number | null;
+    }
+  | {
+      type: "track";
+      key: string;
+      file: LibraryFile;
+      queueIndex: number;
+      showArtwork: boolean;
+    };
+
+const queueAlbumHeaderHeightPx = 66;
+const queueTrackHeightPx = 44;
+const queueTrackWithArtHeightPx = 52;
+
+const NowPlayingQueue = memo(function NowPlayingQueue({
+  currentFileId,
+  currentQueueIndex,
+  filesById,
+  playbackBusy,
+  queueFileIds,
+  onPlayFile,
+  onReplaceUpNext,
+  onSaveQueue
+}: NowPlayingQueueProps): ReactElement {
+  const overscanItems = 8;
   const queueRowsRef = useRef<HTMLDivElement | null>(null);
   const scrollFrameRef = useRef(0);
   const [viewport, setViewport] = useState({ height: 0, scrollTop: 0 });
-  const queueFiles = useMemo(
-    () => queueFileIds.map((fileId) => filesById.get(fileId)).filter((file): file is LibraryFile => file != null),
-    [filesById, queueFileIds]
+  const [queueActionBusy, setQueueActionBusy] = useState(false);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const [queueNotice, setQueueNotice] = useState<string | null>(null);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState(() => defaultQueuePlaylistName());
+  const [draggedQueueIndex, setDraggedQueueIndex] = useState<number | null>(null);
+  const [dropQueueIndex, setDropQueueIndex] = useState<number | null>(null);
+  const firstUpNextIndex = currentQueueIndex == null ? 0 : Math.min(queueFileIds.length, currentQueueIndex + 1);
+  const currentQueueFile = currentFileId ? filesById.get(currentFileId) ?? null : null;
+  const upNextFileIds = useMemo(
+    () => queueFileIds.slice(firstUpNextIndex),
+    [firstUpNextIndex, queueFileIds]
   );
+  const upNextFiles = useMemo(
+    () => upNextFileIds.map((fileId) => filesById.get(fileId)).filter((file): file is LibraryFile => file != null),
+    [filesById, upNextFileIds]
+  );
+  const queueDurationMs = useMemo(
+    () => upNextFiles.some((file) => file.durationMs == null)
+      ? null
+      : upNextFiles.reduce((total, file) => total + (file.durationMs ?? 0), 0),
+    [upNextFiles]
+  );
+  const queueSummary = `${upNextFileIds.length.toLocaleString()} track${upNextFileIds.length === 1 ? "" : "s"}${
+    queueDurationMs == null ? "" : ` · ${formatQueueSummaryDuration(queueDurationMs)}`
+  }`;
+  const displayItems = useMemo(
+    () => buildNowPlayingQueueDisplayItems(upNextFiles),
+    [upNextFiles]
+  );
+  const displayLayout = useMemo(() => {
+    const offsets: number[] = [];
+    let height = 0;
+    for (const item of displayItems) {
+      offsets.push(height);
+      height += nowPlayingQueueItemHeight(item);
+    }
+    return { offsets, height };
+  }, [displayItems]);
   const visibleRange = useMemo(() => {
-    const start = Math.max(0, Math.floor(viewport.scrollTop / rowHeightPx) - overscanRows);
-    const count = Math.ceil(Math.max(viewport.height, rowHeightPx) / rowHeightPx) + overscanRows * 2;
-    return {
-      start,
-      end: Math.min(queueFiles.length, start + count)
-    };
-  }, [queueFiles.length, viewport.height, viewport.scrollTop]);
-  const visibleQueueFiles = useMemo(
-    () => queueFiles.slice(visibleRange.start, visibleRange.end),
-    [queueFiles, visibleRange.end, visibleRange.start]
+    if (displayItems.length === 0) {
+      return { start: 0, end: 0 };
+    }
+    const start = Math.max(
+      0,
+      getVirtualIndexAfterOffset(displayLayout.offsets, viewport.scrollTop) - overscanItems - 1
+    );
+    const end = Math.min(
+      displayItems.length,
+      getVirtualIndexAfterOffset(displayLayout.offsets, viewport.scrollTop + Math.max(viewport.height, queueTrackHeightPx)) + overscanItems + 1
+    );
+    return { start, end };
+  }, [displayItems.length, displayLayout.offsets, viewport.height, viewport.scrollTop]);
+  const visibleItems = useMemo(
+    () => displayItems.slice(visibleRange.start, visibleRange.end),
+    [displayItems, visibleRange.end, visibleRange.start]
   );
-  const queueRows = useMemo(
-    () => visibleQueueFiles.map((file, offset) => {
-      const index = visibleRange.start + offset;
-      return (
-      <NowPlayingQueueRow
-        active={file.id === currentFileId}
-        file={file}
-        index={index}
-        key={`${file.id}-${index}`}
-        onPlayFile={onPlayFile}
-      />
-      );
-    }),
-    [currentFileId, onPlayFile, visibleQueueFiles, visibleRange.start]
-  );
+  const busy = playbackBusy || queueActionBusy;
   const updateViewport = useMemo(
     () => () => {
       const node = queueRowsRef.current;
@@ -10274,31 +12410,191 @@ const NowPlayingQueue = memo(function NowPlayingQueue({
     const observer = new ResizeObserver(updateViewport);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [updateViewport]);
+  }, [displayItems.length, updateViewport]);
   useEffect(() => () => window.cancelAnimationFrame(scrollFrameRef.current), []);
   const handleQueueScroll = () => {
     window.cancelAnimationFrame(scrollFrameRef.current);
     scrollFrameRef.current = window.requestAnimationFrame(updateViewport);
   };
 
+  async function replaceUpNext(nextFileIds: string[], notice?: string): Promise<void> {
+    if (busy) {
+      return;
+    }
+    setQueueActionBusy(true);
+    setQueueError(null);
+    setQueueNotice(null);
+    try {
+      await onReplaceUpNext(nextFileIds);
+      if (notice) {
+        setQueueNotice(notice);
+      }
+    } catch (error) {
+      setQueueError(getErrorMessage(error));
+    } finally {
+      setQueueActionBusy(false);
+      setDraggedQueueIndex(null);
+      setDropQueueIndex(null);
+    }
+  }
+
+  function moveQueueItem(fromIndex: number, toIndex: number): void {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= upNextFileIds.length || toIndex >= upNextFileIds.length) {
+      setDraggedQueueIndex(null);
+      setDropQueueIndex(null);
+      return;
+    }
+    const next = [...upNextFileIds];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    void replaceUpNext(next);
+  }
+
+  async function saveQueue(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const name = saveName.trim();
+    if (!name || upNextFileIds.length === 0 || busy) {
+      return;
+    }
+    setQueueActionBusy(true);
+    setQueueError(null);
+    setQueueNotice(null);
+    try {
+      await onSaveQueue(name, upNextFileIds);
+      setSaveOpen(false);
+      setQueueNotice(`Saved as ${name}`);
+      setSaveName(defaultQueuePlaylistName());
+    } catch (error) {
+      setQueueError(getErrorMessage(error));
+    } finally {
+      setQueueActionBusy(false);
+    }
+  }
+
   return (
     <aside className="nowPlayingQueue" aria-label="Up next">
-      <header>
-        <div>
-          <strong>Up Next</strong>
-          <span>{queueFileIds.length.toLocaleString()} item{queueFileIds.length === 1 ? "" : "s"}</span>
+      <header className="queueHeader">
+        <div className="queueHeading">
+          <span className="queueEyebrow">
+            <i aria-hidden="true" />
+            {currentQueueFile ? `Playing · ${currentQueueFile.displayTags.title ?? currentQueueFile.filename}` : "Playback queue"}
+          </span>
+          <div>
+            <strong>Up Next</strong>
+            <span title={queueSummary}>{queueSummary}</span>
+          </div>
+        </div>
+        <div className="queueHeaderActions">
+          <button
+            aria-label="Shuffle upcoming tracks"
+            disabled={busy || upNextFileIds.length < 2}
+            title="Shuffle upcoming tracks"
+            type="button"
+            onClick={() => void replaceUpNext(shuffleFileIds(upNextFileIds), "Upcoming tracks shuffled")}
+          >
+            <LucideShuffle />
+            <span>Shuffle</span>
+          </button>
+          <button
+            aria-expanded={saveOpen}
+            aria-label="Save upcoming tracks as a playlist"
+            disabled={busy || upNextFileIds.length === 0}
+            title="Save as playlist"
+            type="button"
+            onClick={() => {
+              setSaveOpen((current) => !current);
+              setQueueError(null);
+              setQueueNotice(null);
+            }}
+          >
+            <LucideSave />
+            <span>Save</span>
+          </button>
+          <button
+            aria-label="Clear upcoming tracks"
+            disabled={busy || upNextFileIds.length === 0}
+            title="Clear upcoming tracks"
+            type="button"
+            onClick={() => {
+              if (window.confirm(`Clear ${upNextFileIds.length} upcoming track${upNextFileIds.length === 1 ? "" : "s"}? The current song will keep playing.`)) {
+                void replaceUpNext([], "Upcoming queue cleared");
+              }
+            }}
+          >
+            <LucideRemove />
+            <span>Clear</span>
+          </button>
         </div>
       </header>
+      {saveOpen ? (
+        <form className="queueSaveForm" onSubmit={(event) => void saveQueue(event)}>
+          <label htmlFor="queue-playlist-name">Playlist name</label>
+          <input
+            autoFocus
+            id="queue-playlist-name"
+            maxLength={120}
+            value={saveName}
+            onChange={(event) => setSaveName(event.target.value)}
+          />
+          <button disabled={busy || !saveName.trim()} type="submit">Save playlist</button>
+          <button className="quiet" disabled={busy} type="button" onClick={() => setSaveOpen(false)}>Cancel</button>
+        </form>
+      ) : null}
+      {queueError ? <div className="queueNotice error" role="alert">{queueError}</div> : null}
+      {queueNotice ? <div className="queueNotice" role="status">{queueNotice}</div> : null}
       <div className="queueRows" ref={queueRowsRef} onScroll={handleQueueScroll}>
-        {queueFiles.length === 0 ? (
-          <div className="emptyState">No queued songs.</div>
+        {upNextFiles.length === 0 ? (
+          <div className="queueEmptyState">
+            <LucidePlaylist />
+            <strong>You’re all caught up</strong>
+            <span>Add music from Library or Discovery to keep listening.</span>
+          </div>
         ) : (
-          <div className="queueRowsSpacer" style={{ height: `${queueFiles.length * rowHeightPx}px` }}>
+          <div className="queueRowsSpacer" style={{ height: `${displayLayout.height}px` }}>
             <div
               className="queueRowsWindow"
-              style={{ transform: `translateY(${visibleRange.start * rowHeightPx}px)` }}
+              style={{ transform: `translateY(${displayLayout.offsets[visibleRange.start] ?? 0}px)` }}
             >
-              {queueRows}
+              {visibleItems.map((item) => item.type === "album" ? (
+                <NowPlayingQueueAlbumHeader
+                  durationMs={item.durationMs}
+                  file={item.file}
+                  key={item.key}
+                  trackCount={item.trackCount}
+                />
+              ) : (
+                <NowPlayingQueueRow
+                  busy={busy}
+                  dragging={draggedQueueIndex === item.queueIndex}
+                  dropTarget={dropQueueIndex === item.queueIndex && draggedQueueIndex !== item.queueIndex}
+                  file={item.file}
+                  index={item.queueIndex}
+                  isNext={item.queueIndex === 0}
+                  key={item.key}
+                  queueLength={upNextFileIds.length}
+                  showArtwork={item.showArtwork}
+                  onDragEnd={() => {
+                    setDraggedQueueIndex(null);
+                    setDropQueueIndex(null);
+                  }}
+                  onDragOver={() => setDropQueueIndex(item.queueIndex)}
+                  onDragStart={() => {
+                    setDraggedQueueIndex(item.queueIndex);
+                    setDropQueueIndex(item.queueIndex);
+                  }}
+                  onDrop={() => {
+                    if (draggedQueueIndex != null) {
+                      moveQueueItem(draggedQueueIndex, item.queueIndex);
+                    }
+                  }}
+                  onMove={moveQueueItem}
+                  onPlayFile={onPlayFile}
+                  onRemove={() => {
+                    const next = upNextFileIds.filter((_, index) => index !== item.queueIndex);
+                    void replaceUpNext(next);
+                  }}
+                />
+              ))}
             </div>
           </div>
         )}
@@ -10324,28 +12620,35 @@ function BeatSyncedAlbumGlow({
     let animationFrame = 0;
     let averageEnergy = 0;
     let pulse = 0;
-    const draw = () => {
+    let lastFrameId = -1;
+    let previousDrawAt = performance.now();
+    const draw = (now: number) => {
+      const elapsedMs = Math.max(1, Math.min(50, now - previousDrawAt));
+      previousDrawAt = now;
       const frame = frameRef.current;
-      const bands = frame?.bands ?? [];
-      const measuredBands = Math.max(1, Math.ceil(bands.length * 0.45));
-      let bandTotal = 0;
-      for (let index = 0; index < Math.min(bands.length, measuredBands); index += 1) {
-        bandTotal += bands[index] ?? 0;
+      pulse *= Math.exp(-elapsedMs / 115);
+      if (playing && frame && frame.frameId !== lastFrameId && isVisualizerFrameFresh(frame)) {
+        lastFrameId = frame.frameId;
+        const bands = frame.bands ?? [];
+        const measuredBands = Math.max(1, Math.ceil(bands.length * 0.38));
+        let bandTotal = 0;
+        for (let index = 0; index < Math.min(bands.length, measuredBands); index += 1) {
+          bandTotal += bands[index] ?? 0;
+        }
+        const bandEnergy = bands.length > 0 ? bandTotal / measuredBands : 0;
+        const energy = Math.min(1, Math.max(frame.rms, frame.peak * 0.7, bandEnergy));
+        const averageBlend = 1 - Math.exp(-elapsedMs / 190);
+        averageEnergy += (energy - averageEnergy) * averageBlend;
+        const beat = Math.max(0, energy - averageEnergy);
+        pulse = Math.max(beat * 4.2, pulse);
       }
-      const bandEnergy = bands.length > 0 ? bandTotal / measuredBands : 0;
-      const energy = playing
-        ? Math.min(1, Math.max(frame?.rms ?? 0, (frame?.peak ?? 0) * 0.72, bandEnergy))
-        : 0;
-      averageEnergy = averageEnergy * 0.92 + energy * 0.08;
-      const beat = Math.max(0, energy - averageEnergy);
-      pulse = Math.max(beat * 3.6, pulse * 0.86);
       const clampedPulse = Math.min(1, pulse);
       node.style.setProperty("--beat-glow-blur", `${0.5 + clampedPulse * 0.32}rem`);
       node.style.setProperty("--beat-glow-opacity", (0.66 + clampedPulse * 0.26).toFixed(3));
       node.style.setProperty("--beat-glow-scale", (1 + clampedPulse * 0.065).toFixed(3));
       animationFrame = window.requestAnimationFrame(draw);
     };
-    draw();
+    animationFrame = window.requestAnimationFrame(draw);
     return () => {
       window.cancelAnimationFrame(animationFrame);
       node.style.removeProperty("--beat-glow-blur");
@@ -10357,23 +12660,89 @@ function BeatSyncedAlbumGlow({
   return <div className="artSignalGlow" aria-hidden="true" ref={glowRef} />;
 }
 
-function areNowPlayingQueuePropsEqual(
-  previous: {
-    currentFileId: string | null;
-    filesById: Map<string, LibraryFile>;
-    queueFileIds: string[];
-    onPlayFile(fileId: string): void;
-  },
-  next: {
-    currentFileId: string | null;
-    filesById: Map<string, LibraryFile>;
-    queueFileIds: string[];
-    onPlayFile(fileId: string): void;
+function buildNowPlayingQueueDisplayItems(files: LibraryFile[]): NowPlayingQueueDisplayItem[] {
+  const items: NowPlayingQueueDisplayItem[] = [];
+  let queueIndex = 0;
+  while (queueIndex < files.length) {
+    const file = files[queueIndex];
+    const albumIdentity = nowPlayingQueueAlbumIdentity(file);
+    let groupEnd = queueIndex + 1;
+    if (albumIdentity) {
+      while (groupEnd < files.length && nowPlayingQueueAlbumIdentity(files[groupEnd]) === albumIdentity) {
+        groupEnd += 1;
+      }
+    }
+    const groupFiles = files.slice(queueIndex, groupEnd);
+    const showAlbumGroup = albumIdentity != null && groupFiles.length > 1;
+    if (showAlbumGroup) {
+      items.push({
+        type: "album",
+        key: `album-${albumIdentity}-${queueIndex}`,
+        file,
+        trackCount: groupFiles.length,
+        durationMs: groupFiles.some((item) => item.durationMs == null)
+          ? null
+          : groupFiles.reduce((total, item) => total + (item.durationMs ?? 0), 0)
+      });
+    }
+    for (let index = queueIndex; index < groupEnd; index += 1) {
+      items.push({
+        type: "track",
+        key: `track-${files[index].id}-${index}`,
+        file: files[index],
+        queueIndex: index,
+        showArtwork: !showAlbumGroup
+      });
+    }
+    queueIndex = groupEnd;
   }
-): boolean {
+  return items;
+}
+
+function nowPlayingQueueAlbumIdentity(file: LibraryFile): string | null {
+  const album = file.displayTags.album?.trim();
+  if (!album) {
+    return null;
+  }
+  const artist = file.displayTags.albumartist?.trim() || file.displayTags.artist?.trim() || "Unknown Artist";
+  return `${artist.toLocaleLowerCase()}\u0000${album.toLocaleLowerCase()}`;
+}
+
+function nowPlayingQueueItemHeight(item: NowPlayingQueueDisplayItem): number {
+  if (item.type === "album") {
+    return queueAlbumHeaderHeightPx;
+  }
+  return item.showArtwork ? queueTrackWithArtHeightPx : queueTrackHeightPx;
+}
+
+function formatQueueSummaryDuration(durationMs: number): string {
+  const totalMinutes = Math.max(0, Math.round(durationMs / 60_000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) {
+    return `${minutes} min`;
+  }
+  return minutes === 0 ? `${hours} hr` : `${hours} hr ${minutes} min`;
+}
+
+function defaultQueuePlaylistName(): string {
+  const timestamp = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date());
+  return `Queue · ${timestamp}`;
+}
+
+function areNowPlayingQueuePropsEqual(previous: NowPlayingQueueProps, next: NowPlayingQueueProps): boolean {
   return previous.currentFileId === next.currentFileId &&
+    previous.currentQueueIndex === next.currentQueueIndex &&
     previous.filesById === next.filesById &&
+    previous.playbackBusy === next.playbackBusy &&
     previous.onPlayFile === next.onPlayFile &&
+    previous.onReplaceUpNext === next.onReplaceUpNext &&
+    previous.onSaveQueue === next.onSaveQueue &&
     areStringArraysEqual(previous.queueFileIds, next.queueFileIds);
 }
 
@@ -10393,34 +12762,124 @@ function areStringArraysEqual(left: string[], right: string[]): boolean {
 }
 
 const NowPlayingQueueRow = memo(function NowPlayingQueueRow({
-  active,
+  busy,
+  dragging,
+  dropTarget,
   file,
   index,
-  onPlayFile
+  isNext,
+  queueLength,
+  showArtwork,
+  onDragEnd,
+  onDragOver,
+  onDragStart,
+  onDrop,
+  onMove,
+  onPlayFile,
+  onRemove
 }: {
-  active: boolean;
+  busy: boolean;
+  dragging: boolean;
+  dropTarget: boolean;
   file: LibraryFile;
   index: number;
+  isNext: boolean;
+  queueLength: number;
+  showArtwork: boolean;
+  onDragEnd(): void;
+  onDragOver(): void;
+  onDragStart(): void;
+  onDrop(): void;
+  onMove(fromIndex: number, toIndex: number): void;
   onPlayFile(fileId: string): void;
+  onRemove(): void;
 }): ReactElement {
+  const title = file.displayTags.title ?? file.filename;
+  const artist = file.displayTags.artist ?? file.displayTags.albumartist ?? "Unknown Artist";
+  const album = file.displayTags.album ?? "Unknown Album";
   return (
-    <button
-      className={active ? "queueRow active" : "queueRow"}
-      type="button"
-      onClick={() => onPlayFile(file.id)}
+    <div
+      className={`queueTrackRow${isNext ? " next" : ""}${showArtwork ? " withArtwork" : ""}${dragging ? " dragging" : ""}${dropTarget ? " dropTarget" : ""}`}
+      draggable={!busy}
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        onDragOver();
+      }}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", String(index));
+        onDragStart();
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDrop();
+      }}
     >
-      <span>{index + 1}</span>
-      <Artwork className="queueArt" src={artworkFileUrl(file.id)} />
-      <span>
-        <strong>{file.displayTags.title ?? file.filename}</strong>
-        <small>
-          {file.displayTags.artist ?? file.displayTags.albumartist ?? "Unknown Artist"} - {file.displayTags.album ?? "Unknown Album"}
-        </small>
-      </span>
-      <small>{file.durationMs == null ? "-" : formatTime(file.durationMs)}</small>
-    </button>
+      <button
+        aria-label={`Move ${title}. Use arrow keys to change its position.`}
+        className="queueDragHandle"
+        disabled={busy}
+        title="Drag to reorder"
+        type="button"
+        onKeyDown={(event) => {
+          if (event.key === "ArrowUp" && index > 0) {
+            event.preventDefault();
+            onMove(index, index - 1);
+          } else if (event.key === "ArrowDown" && index < queueLength - 1) {
+            event.preventDefault();
+            onMove(index, index + 1);
+          }
+        }}
+      >
+        <LucideGrip />
+      </button>
+      <span className="queuePosition">{isNext ? <em>Next</em> : String(index + 1).padStart(2, "0")}</span>
+      <div className={`queueTrackSummary${showArtwork ? " withArtwork" : ""}`}>
+        {showArtwork ? <Artwork className="queueArt" src={artworkFileUrl(file.id)} /> : null}
+        <button disabled={busy} title={`Play ${title} now`} type="button" onClick={() => onPlayFile(file.id)}>
+          <strong>{title}</strong>
+          {showArtwork ? <small>{artist} · {album}</small> : null}
+        </button>
+      </div>
+      <small className="queueDuration">{file.durationMs == null ? "-" : formatTime(file.durationMs)}</small>
+      <div className="queueTrackActions">
+        <button aria-label={`Play ${title} now`} disabled={busy} title="Play now" type="button" onClick={() => onPlayFile(file.id)}>
+          <LucidePlay />
+        </button>
+        <button aria-label={`Remove ${title} from queue`} disabled={busy} title="Remove from queue" type="button" onClick={onRemove}>
+          <LucideRemove />
+        </button>
+      </div>
+    </div>
   );
 });
+
+function NowPlayingQueueAlbumHeader({
+  durationMs,
+  file,
+  trackCount
+}: {
+  durationMs: number | null;
+  file: LibraryFile;
+  trackCount: number;
+}): ReactElement {
+  const album = file.displayTags.album ?? "Unknown Album";
+  const artist = file.displayTags.albumartist ?? file.displayTags.artist ?? "Unknown Artist";
+  return (
+    <div className="queueAlbumGroupHeader">
+      <Artwork className="queueAlbumGroupArt" src={artworkFileUrl(file.id)} />
+      <span>
+        <em>Album</em>
+        <strong>{album}</strong>
+        <small>
+          {artist} · {trackCount} tracks{durationMs == null ? "" : ` · ${formatQueueSummaryDuration(durationMs)}`}
+        </small>
+      </span>
+    </div>
+  );
+}
 
 function AlbumDetailView({
   album,
@@ -10943,7 +13402,6 @@ function PlaylistsView({
               {activePlaylist.items.map((item, index) => {
                 const tags = item.file.displayTags;
                 const isCurrent = playback.currentFileId === item.file.id;
-                const artist = tags.artist ?? tags.albumartist ?? "Unknown artist";
                 return (
                   <div className={isCurrent ? "playlistWorkspaceTrack playing" : "playlistWorkspaceTrack"} key={item.id}>
                     <button
@@ -10958,7 +13416,6 @@ function PlaylistsView({
                     <span>{String(index + 1).padStart(2, "0")}</span>
                     <span className="playlistWorkspaceTitle">
                       <strong>{tags.title ?? item.file.filename}</strong>
-                      <button type="button" onClick={() => onOpenArtistPage(artist)}>{artist}</button>
                       {isCurrent ? <MiniTrackWaveform playback={playback} waveform={currentWaveform} /> : null}
                     </span>
                     <span>{tags.album ?? "-"}</span>
@@ -11597,16 +14054,16 @@ function stepLabel(type: AgentRun["steps"][number]["type"], toolName: string | n
   return toolName ? `${type}:${toolName}` : type;
 }
 
-async function listRoots() {
-  return getJson("/library/roots", libraryRootsResponseSchema);
+async function listRoots(signal?: AbortSignal) {
+  return getJson("/library/roots", libraryRootsResponseSchema, signal);
 }
 
-async function listFiles(query: string, offset = 0, limit = libraryPageSize) {
+async function listFiles(query: string, offset = 0, limit = libraryPageSize, signal?: AbortSignal) {
   const params = new URLSearchParams();
   params.set("query", query);
   params.set("offset", String(offset));
   params.set("limit", String(limit));
-  return getJson(`/library/files?${params.toString()}`, libraryFilesResponseSchema);
+  return getJson(`/library/files?${params.toString()}`, libraryFilesResponseSchema, signal);
 }
 
 async function getLibraryFileDiagnostics(fileId: string) {
@@ -11649,6 +14106,47 @@ async function listAlbums(offset = 0, limit = albumPageSize, sort?: "recent") {
     params.set("sort", sort);
   }
   return getJson(`/library/albums?${params.toString()}`, albumGroupsResponseSchema);
+}
+
+async function searchAlbumArtworkCandidates(
+  albumId: string,
+  query: string,
+  source?: AlbumArtworkCandidate["source"]
+): Promise<AlbumArtworkCandidatesResponse> {
+  const params = new URLSearchParams({ query });
+  if (source) {
+    params.set("source", source);
+  }
+  return getJson(
+    `/artwork/album/${encodeURIComponent(albumId)}/candidates?${params.toString()}`,
+    albumArtworkCandidatesResponseSchema
+  );
+}
+
+async function setAlbumArtworkFromPath(albumId: string, path: string): Promise<void> {
+  await putJson(
+    `/artwork/album/${encodeURIComponent(albumId)}/override`,
+    { source: "local", path },
+    albumArtworkOverrideResponseSchema
+  );
+}
+
+async function setAlbumArtworkFromUrl(albumId: string, url: string): Promise<void> {
+  await putJson(
+    `/artwork/album/${encodeURIComponent(albumId)}/override`,
+    { source: "remote", url },
+    albumArtworkOverrideResponseSchema
+  );
+}
+
+async function removeAlbumArtworkOverride(albumId: string): Promise<void> {
+  const response = await fetch(`${backendOrigin}/artwork/album/${encodeURIComponent(albumId)}/override`, {
+    method: "DELETE"
+  });
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+  albumArtworkOverrideResponseSchema.parse(await response.json());
 }
 
 async function getTasteProfile() {
@@ -11698,8 +14196,8 @@ async function listOperationBatches() {
   return getJson("/operations/batches", operationBatchesResponseSchema);
 }
 
-async function listPlaylists() {
-  return getJson("/playlists", playlistsResponseSchema);
+async function listPlaylists(signal?: AbortSignal) {
+  return getJson("/playlists", playlistsResponseSchema, signal);
 }
 
 async function getDiscoveryHealth() {
@@ -11954,8 +14452,8 @@ async function revertOperationBatch(batchId: string) {
   return postJson("/operations/revert-batch", { batchId }, operationBatchResponseSchema);
 }
 
-async function getPlaybackState() {
-  return getJson("/playback/state", playbackStateSchema);
+async function getPlaybackState(signal?: AbortSignal) {
+  return getJson("/playback/state", playbackStateSchema, signal);
 }
 
 async function getVisualizerCapabilities() {
@@ -11976,6 +14474,10 @@ async function playQueue(fileIds: string[], startIndex: number) {
 
 async function enqueuePlayback(fileIds: string[], position: QueueInsertPosition) {
   return postJson("/playback/enqueue", { fileIds, position }, playbackStateSchema);
+}
+
+async function replacePlaybackUpNext(fileIds: string[]) {
+  return postJson("/playback/queue/up-next", { fileIds }, playbackStateSchema);
 }
 
 async function setPlaybackRepeatMode(repeatMode: PlaybackRepeatMode) {
@@ -12027,12 +14529,78 @@ async function removeRoot(rootId: string) {
   }
 }
 
-async function getJson<T>(path: string, schema: { parse(value: unknown): T }): Promise<T> {
-  const response = await fetch(`${backendOrigin}${path}`);
+async function getJson<T>(path: string, schema: { parse(value: unknown): T }, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(`${backendOrigin}${path}`, { signal });
   if (!response.ok) {
     throw new Error(await readError(response));
   }
   return schema.parse(await response.json());
+}
+
+async function retryStartupRead<T>(
+  read: (signal: AbortSignal) => Promise<T>,
+  signal: AbortSignal,
+  onRetry?: (attempt: number) => void
+): Promise<T> {
+  let lastError: unknown = new Error("Backend startup read failed");
+  for (let attempt = 1; attempt <= startupReadAttempts; attempt += 1) {
+    if (signal.aborted) {
+      throw createAbortError();
+    }
+
+    const attemptController = new AbortController();
+    const abortAttempt = () => attemptController.abort();
+    signal.addEventListener("abort", abortAttempt, { once: true });
+    const timeout = window.setTimeout(() => attemptController.abort(), startupReadTimeoutMs);
+    try {
+      return await withAbortSignal(read(attemptController.signal), attemptController.signal);
+    } catch (error) {
+      if (signal.aborted) {
+        throw createAbortError();
+      }
+      lastError = error;
+    } finally {
+      window.clearTimeout(timeout);
+      signal.removeEventListener("abort", abortAttempt);
+    }
+
+    if (attempt < startupReadAttempts) {
+      onRetry?.(attempt + 1);
+      await waitForStartupRetry(startupRetryDelayMs * (2 ** (attempt - 1)), signal);
+    }
+  }
+  throw lastError;
+}
+
+function withAbortSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(createAbortError());
+  }
+  return new Promise<T>((resolve, reject) => {
+    const aborted = () => reject(createAbortError());
+    signal.addEventListener("abort", aborted, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", aborted));
+  });
+}
+
+function waitForStartupRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener("abort", aborted);
+      resolve();
+    }, delayMs);
+    const aborted = () => {
+      window.clearTimeout(timer);
+      reject(createAbortError());
+    };
+    signal.addEventListener("abort", aborted, { once: true });
+  });
+}
+
+function createAbortError(): Error {
+  const error = new Error("Request cancelled");
+  error.name = "AbortError";
+  return error;
 }
 
 async function postJson<T>(path: string, body: unknown, schema: { parse(value: unknown): T }): Promise<T> {
@@ -12319,6 +14887,34 @@ function compareText(left: string, right: string): number {
 
 function sortAlbumsByArtistAlbum(albums: AlbumGroupItem[]): AlbumGroupItem[] {
   return [...albums].sort((left, right) => compareText(left.artist, right.artist) || compareText(left.album, right.album));
+}
+
+function formatAlbumFavoriteEntry(album: AlbumGroupItem): string {
+  return `${album.artist} — ${album.album}${album.year ? ` (${album.year})` : ""}`;
+}
+
+function isAlbumFavorite(album: AlbumGroupItem, entries: string[]): boolean {
+  return entries.some((entry) => favoriteAlbumEntryMatches(entry, album));
+}
+
+function favoriteAlbumEntryMatches(entry: string, album: AlbumGroupItem): boolean {
+  const normalizedEntry = normalizeAlbumFavoriteEntry(entry);
+  const artistAlbum = normalizeAlbumFavoriteEntry(`${album.artist} - ${album.album}`);
+  const artistAlbumYear = normalizeAlbumFavoriteEntry(formatAlbumFavoriteEntry(album));
+  const title = normalizeAlbumFavoriteEntry(album.album);
+  return normalizedEntry === normalizeAlbumFavoriteEntry(album.id) ||
+    normalizedEntry === artistAlbum ||
+    normalizedEntry === artistAlbumYear ||
+    normalizedEntry === title;
+}
+
+function normalizeAlbumFavoriteEntry(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/[–—]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase();
 }
 
 function sortAlbumsByMode(albums: AlbumGroupItem[], sortMode: AlbumSortMode): AlbumGroupItem[] {
@@ -13156,6 +15752,9 @@ function useVisualizerStream(
 
   useEffect(() => {
     frameRef.current = null;
+  }, [currentFileId, enabled, mode]);
+
+  useEffect(() => {
     if (!enabled) {
       return;
     }
@@ -13173,6 +15772,7 @@ function useVisualizerStream(
         try {
           const parsed = visualizerFrameSchema.safeParse(JSON.parse((event as MessageEvent<string>).data));
           if (parsed.success) {
+            visualizerFrameReceivedAt.set(parsed.data, performance.now());
             frameRef.current = parsed.data;
           }
         } catch {
@@ -13197,7 +15797,7 @@ function useVisualizerStream(
       }
       source?.close();
     };
-  }, [enabled, mode, currentFileId]);
+  }, [enabled, mode]);
 
   return { frameRef };
 }
@@ -13317,11 +15917,13 @@ function MiniTrackWaveform({
 function WaveformCanvas({
   className,
   playback,
+  positionFrameRef,
   waveform,
   variant
 }: {
   className: string;
   playback: PlaybackStateResponse;
+  positionFrameRef?: MutableRefObject<VisualizerFrameResponse | null>;
   waveform: WaveformSummaryResponse | null;
   variant: "rail" | "hero";
 }): ReactElement {
@@ -13332,12 +15934,52 @@ function WaveformCanvas({
     if (!canvas) {
       return;
     }
-    const draw = () => drawWaveform(canvas, waveform?.peaks ?? null, getProgressPercent(playback) / 100, variant);
-    draw();
-    const observer = new ResizeObserver(draw);
+    const observedAt = performance.now();
+    let animationFrame = 0;
+    let lastDrawAt = 0;
+    let lastProgress = -1;
+
+    const getProgress = (now: number): number => {
+      let durationMs = playback.durationMs;
+      let positionMs = playback.positionMs + (playback.status === "playing" ? Math.max(0, now - observedAt) : 0);
+      const frame = positionFrameRef?.current;
+      if (frame?.fileId === playback.currentFileId && frame.status !== "stopped" && frame.status !== "error") {
+        const frameAgeMs = getVisualizerFrameAgeMs(frame, now);
+        if (frameAgeMs >= 0 && frameAgeMs <= 500) {
+          positionMs = frame.positionMs + (frame.status === "playing" ? frameAgeMs : 0);
+          durationMs = frame.durationMs ?? durationMs;
+        }
+      }
+      if (!durationMs || durationMs <= 0) {
+        return 0;
+      }
+      return Math.max(0, Math.min(1, positionMs / durationMs));
+    };
+    const draw = (now: number, force = false) => {
+      const progress = getProgress(now);
+      const width = canvas.getBoundingClientRect().width;
+      if (!force && now - lastDrawAt < 34 && Math.abs(progress - lastProgress) * width < 0.25) {
+        return;
+      }
+      drawWaveform(canvas, waveform?.peaks ?? null, progress, variant);
+      lastDrawAt = now;
+      lastProgress = progress;
+    };
+    const tick = (now: number) => {
+      draw(now);
+      animationFrame = window.requestAnimationFrame(tick);
+    };
+    draw(performance.now(), true);
+    if (playback.status === "playing") {
+      animationFrame = window.requestAnimationFrame(tick);
+    }
+    const observer = new ResizeObserver(() => draw(performance.now(), true));
     observer.observe(canvas);
-    return () => observer.disconnect();
-  }, [playback.currentFileId, playback.positionMs, playback.durationMs, variant, waveform]);
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [playback.currentFileId, playback.positionMs, playback.durationMs, playback.status, positionFrameRef, variant, waveform]);
 
   return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
 }
@@ -13365,23 +16007,25 @@ function SpectrumCanvas({
       return;
     }
     let animationFrame = 0;
+    let previousDrawAt = performance.now();
     const levels = new Array(mode === "meter" ? 8 : 32).fill(0);
-    const draw = () => {
+    const draw = (now: number) => {
+      const elapsedMs = Math.max(1, Math.min(50, now - previousDrawAt));
+      previousDrawAt = now;
       const frame = frameRef.current;
-      const incoming = frame?.bands?.length ? frame.bands : [];
+      const frameIsLive = playing && isVisualizerFrameFresh(frame);
+      const incoming = frameIsLive && frame?.bands?.length ? frame.bands : [];
       for (let index = 0; index < levels.length; index += 1) {
-        const rawNext = playing ? incoming[Math.floor((index / levels.length) * incoming.length)] ?? 0 : 0;
+        const rawNext = frameIsLive ? incoming[Math.floor((index / levels.length) * incoming.length)] ?? 0 : 0;
         const next = mode === "spectrum" ? Math.min(1, Math.pow(rawNext, 0.78) * 1.18) : rawNext;
-        const attack = mode === "meter" ? 0.94 : 0.9;
-        const decay = mode === "meter" ? 0.64 : 0.72;
-        levels[index] = next > levels[index]
-          ? levels[index] + (next - levels[index]) * attack
-          : Math.max(next, levels[index] * decay);
+        const responseMs = next > levels[index] ? (mode === "meter" ? 7 : 11) : (mode === "meter" ? 58 : 72);
+        const blend = 1 - Math.exp(-elapsedMs / responseMs);
+        levels[index] += (next - levels[index]) * blend;
       }
       drawSpectrum(canvas, levels, mode);
       animationFrame = window.requestAnimationFrame(draw);
     };
-    draw();
+    animationFrame = window.requestAnimationFrame(draw);
     return () => window.cancelAnimationFrame(animationFrame);
   }, [frameRef, mode, playing]);
 
@@ -13409,20 +16053,24 @@ function LevelMeterCanvas({
     let animationFrame = 0;
     let level = 0;
     let peak = 0;
-    const draw = () => {
+    let previousDrawAt = performance.now();
+    const draw = (now: number) => {
+      const elapsedMs = Math.max(1, Math.min(50, now - previousDrawAt));
+      previousDrawAt = now;
       const frame = frameRef.current;
       const bands = frame?.bands ?? [];
       const sideBias = channel === "left" ? 0 : 0.5;
       const bandIndex = bands.length > 0 ? Math.floor(sideBias * (bands.length - 1)) : 0;
-      const incoming = playing
+      const incoming = playing && isVisualizerFrameFresh(frame)
         ? Math.max(frame?.rms ?? 0, bands[bandIndex] ?? 0, frame?.peak ? frame.peak * 0.72 : 0)
         : 0;
-      level = incoming > level ? level + (incoming - level) * 0.94 : Math.max(incoming, level * 0.68);
-      peak = Math.max(level, peak * 0.9);
+      const responseMs = incoming > level ? 7 : 78;
+      level += (incoming - level) * (1 - Math.exp(-elapsedMs / responseMs));
+      peak = Math.max(level, peak * Math.exp(-elapsedMs / 310));
       drawLevelMeter(canvas, level, peak);
       animationFrame = window.requestAnimationFrame(draw);
     };
-    draw();
+    animationFrame = window.requestAnimationFrame(draw);
     return () => window.cancelAnimationFrame(animationFrame);
   }, [channel, frameRef, playing]);
 
@@ -13441,6 +16089,8 @@ function SpectrogramCanvas({
   playing: boolean;
 }): ReactElement {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const playingRef = useRef(playing);
+  playingRef.current = playing;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -13449,28 +16099,27 @@ function SpectrogramCanvas({
     }
     let animationFrame = 0;
     let lastFrameId = -1;
-    let lastIdleColumnAt = 0;
     const context = prepareCanvas(canvas);
     const { width, height } = canvas.getBoundingClientRect();
     context.clearRect(0, 0, width, height);
     const draw = () => {
       const frame = frameRef.current;
-      if (!playing) {
+      if (!playingRef.current) {
         animationFrame = window.requestAnimationFrame(draw);
         return;
       }
-      if ((frame?.fftBins?.length || frame?.bands?.length) && frame.frameId !== lastFrameId && frame.status === "playing") {
+      const bins = frame?.source === "sidecar" && frame.fileId === fileId && frame.fftBins?.length
+        ? frame.fftBins
+        : null;
+      if (frame && bins && frame.frameId !== lastFrameId && frame.status === "playing" && isVisualizerFrameFresh(frame)) {
         lastFrameId = frame.frameId;
-        drawSpectrogramColumn(canvas, frame.fftBins?.length ? frame.fftBins : frame.bands);
-      } else if (!(frame?.fftBins?.length || frame?.bands?.length) && performance.now() - lastIdleColumnAt > 75) {
-        lastIdleColumnAt = performance.now();
-        drawSpectrogramColumn(canvas, fallbackPeaks(64).map((value) => value * 0.14));
+        drawSpectrogramColumn(canvas, bins);
       }
       animationFrame = window.requestAnimationFrame(draw);
     };
     draw();
     return () => window.cancelAnimationFrame(animationFrame);
-  }, [frameRef, fileId, playing]);
+  }, [frameRef, fileId]);
 
   return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
 }
@@ -13488,7 +16137,13 @@ function VisualizerPanel({
     <section className="visualizerPanel" aria-label="Playback visualizer">
       <div className="visualizerStage">
         <div className="waveformRibbon">
-          <WaveformCanvas className="heroWaveformCanvas" playback={playback} variant="hero" waveform={waveformState.waveform} />
+          <WaveformCanvas
+            className="heroWaveformCanvas"
+            playback={playback}
+            positionFrameRef={frameRef}
+            variant="hero"
+            waveform={waveformState.waveform}
+          />
         </div>
         <div className="meterRail left" aria-hidden="true">
           <div className="meterHeader">
@@ -13518,7 +16173,14 @@ function VisualizerPanel({
           </div>
           <div className="spectrogramKey" aria-hidden="true">
             <span>-60 dB</span>
-            <i />
+            <i>
+              <b />
+              <b />
+              <b />
+              <b />
+              <b />
+              <b />
+            </i>
             <span>-36</span>
             <span>-18</span>
             <span>0 dB</span>
@@ -13539,8 +16201,10 @@ function drawWaveform(canvas: HTMLCanvasElement, peaks: number[] | null, progres
   const clampedProgress = Math.max(0, Math.min(1, progress));
   const colors = getCanvasThemeColors(canvas);
   context.clearRect(0, 0, width, height);
-  const values = peaks && peaks.length > 0 ? peaks : fallbackPeaks(96);
-  const step = Math.max(1, width / values.length);
+  const sourceValues = peaks && peaks.length > 0 ? peaks : fallbackPeaks(96);
+  const targetBars = Math.max(1, Math.floor(width / (variant === "hero" ? 2 : 1.25)));
+  const values = downsampleWaveformPeaks(sourceValues, targetBars);
+  const step = width / values.length;
   const playedWidth = clampedProgress * width;
   const drawBars = (played: boolean) => {
     for (let index = 0; index < values.length; index += 1) {
@@ -13574,6 +16238,23 @@ function drawWaveform(canvas: HTMLCanvasElement, peaks: number[] | null, progres
   cursor.addColorStop(1, rgba(colors.accent, 0.18));
   context.fillStyle = cursor;
   context.fillRect(Math.max(0, playedWidth - 1), 0, variant === "hero" ? 2.25 : 1.5, height);
+}
+
+function downsampleWaveformPeaks(values: number[], maximumBars: number): number[] {
+  if (values.length <= maximumBars) {
+    return values;
+  }
+  const sampled: number[] = [];
+  for (let bar = 0; bar < maximumBars; bar += 1) {
+    const start = Math.floor((bar / maximumBars) * values.length);
+    const end = Math.max(start + 1, Math.floor(((bar + 1) / maximumBars) * values.length));
+    let peak = 0;
+    for (let index = start; index < Math.min(values.length, end); index += 1) {
+      peak = Math.max(peak, Math.abs(values[index] ?? 0));
+    }
+    sampled.push(peak);
+  }
+  return sampled;
 }
 
 function drawSpectrum(canvas: HTMLCanvasElement, levels: number[], mode: "meter" | "spectrum"): void {
@@ -13644,8 +16325,19 @@ function drawSpectrogramColumn(canvas: HTMLCanvasElement, bins: number[]): void 
   const colors = getCanvasThemeColors(canvas);
   context.setTransform(1, 0, 0, 1, 0, 0);
   const columnWidth = Math.max(2, Math.round(ratio));
-  const image = context.getImageData(columnWidth, 0, Math.max(1, canvas.width - columnWidth), canvas.height);
-  context.putImageData(image, 0, 0);
+  context.globalCompositeOperation = "copy";
+  context.drawImage(
+    canvas,
+    columnWidth,
+    0,
+    Math.max(1, canvas.width - columnWidth),
+    canvas.height,
+    0,
+    0,
+    Math.max(1, canvas.width - columnWidth),
+    canvas.height
+  );
+  context.globalCompositeOperation = "source-over";
   context.clearRect(canvas.width - columnWidth, 0, columnWidth, canvas.height);
   for (let y = 0; y < canvas.height; y += 1) {
     const bin = Math.max(0, bins[Math.floor((1 - y / Math.max(1, canvas.height - 1)) * (bins.length - 1))] ?? 0);
@@ -13654,6 +16346,28 @@ function drawSpectrogramColumn(canvas: HTMLCanvasElement, bins: number[]): void 
     context.fillRect(canvas.width - columnWidth, y, columnWidth, 1);
   }
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
+}
+
+const visualizerFrameReceivedAt = new WeakMap<VisualizerFrameResponse, number>();
+
+function getVisualizerFrameAgeMs(
+  frame: VisualizerFrameResponse,
+  now = performance.now()
+): number {
+  const receivedAt = visualizerFrameReceivedAt.get(frame);
+  if (receivedAt != null) {
+    return now - receivedAt;
+  }
+  const emittedAt = Date.parse(frame.emittedAt);
+  return Number.isFinite(emittedAt) ? Date.now() - emittedAt : Number.POSITIVE_INFINITY;
+}
+
+function isVisualizerFrameFresh(frame: VisualizerFrameResponse | null, maximumAgeMs = 600): boolean {
+  if (!frame || frame.status !== "playing") {
+    return false;
+  }
+  const ageMs = getVisualizerFrameAgeMs(frame);
+  return ageMs >= 0 && ageMs <= maximumAgeMs;
 }
 
 function prepareCanvas(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
@@ -13689,13 +16403,25 @@ interface HslColor {
   l: number;
 }
 
+const canvasThemeColorCache = new WeakMap<
+  HTMLCanvasElement,
+  { colors: { accent: RgbColor; accentInk: RgbColor; bg: RgbColor }; readAt: number }
+>();
+
 function getCanvasThemeColors(canvas: HTMLCanvasElement): { accent: RgbColor; accentInk: RgbColor; bg: RgbColor } {
+  const now = performance.now();
+  const cached = canvasThemeColorCache.get(canvas);
+  if (cached && now - cached.readAt < 250) {
+    return cached.colors;
+  }
   const styles = getComputedStyle(canvas);
-  return {
+  const colors = {
     accent: parseCssColor(styles.getPropertyValue("--acc")) ?? { r: 195, g: 245, b: 60 },
     accentInk: parseCssColor(styles.getPropertyValue("--acc-ink")) ?? { r: 16, g: 19, b: 10 },
     bg: parseCssColor(styles.getPropertyValue("--bg0")) ?? { r: 11, g: 13, b: 16 }
   };
+  canvasThemeColorCache.set(canvas, { colors, readAt: now });
+  return colors;
 }
 
 function parseCssColor(value: string): RgbColor | null {
@@ -13843,6 +16569,48 @@ function loadVisualizerMode(): VisualizerMode {
   }
 }
 
+function loadLibraryWorkbenchPreferences(): LibraryWorkbenchPreferences {
+  const defaults: LibraryWorkbenchPreferences = {
+    favoriteOnly: false,
+    artistSortMode: "artist",
+    albumSortMode: "artistAlbum",
+    selectedArtistName: null,
+    selectedAlbumId: null
+  };
+  try {
+    const raw = window.localStorage.getItem(libraryWorkbenchPreferencesStorageKey);
+    if (!raw) {
+      return defaults;
+    }
+    const value = JSON.parse(raw) as Partial<LibraryWorkbenchPreferences>;
+    return {
+      favoriteOnly: typeof value.favoriteOnly === "boolean" ? value.favoriteOnly : defaults.favoriteOnly,
+      artistSortMode: isLibraryWorkbenchArtistSortMode(value.artistSortMode) ? value.artistSortMode : defaults.artistSortMode,
+      albumSortMode: isLibraryWorkbenchAlbumSortMode(value.albumSortMode) ? value.albumSortMode : defaults.albumSortMode,
+      selectedArtistName: typeof value.selectedArtistName === "string" && value.selectedArtistName.trim() ? value.selectedArtistName : null,
+      selectedAlbumId: typeof value.selectedAlbumId === "string" && value.selectedAlbumId.trim() ? value.selectedAlbumId : null
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function saveLibraryWorkbenchPreferences(value: LibraryWorkbenchPreferences): void {
+  try {
+    window.localStorage.setItem(libraryWorkbenchPreferencesStorageKey, JSON.stringify(value));
+  } catch {
+    // Keep the Library usable when browser storage is unavailable.
+  }
+}
+
+function isLibraryWorkbenchArtistSortMode(value: unknown): value is ArtistSortMode {
+  return value === "artist" || value === "recent" || value === "listens" || value === "likes";
+}
+
+function isLibraryWorkbenchAlbumSortMode(value: unknown): value is AlbumSortMode {
+  return value === "artistAlbum" || value === "recent" || value === "listens" || value === "likes";
+}
+
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -13854,41 +16622,45 @@ function loadAppearanceSettings(): AppearanceSettings {
       return defaultAppearanceSettings;
     }
     const value = JSON.parse(raw) as Partial<AppearanceSettings>;
-    const mode = value.mode === "light" || value.mode === "dark" ? value.mode : defaultAppearanceSettings.mode;
-    const accent = isAccentColorId(value.accent) ? value.accent : defaultAppearanceSettings.accent;
-    const displayFont = isDisplayFontId(value.displayFont) ? value.displayFont : defaultAppearanceSettings.displayFont;
+    const themePreset = isThemePresetId(value.themePreset) ? value.themePreset : "custom";
+    const preset = themePreset === "custom" ? null : curatedThemePresets[themePreset];
+    const mode = preset?.mode ?? (value.mode === "light" || value.mode === "dark" ? value.mode : defaultAppearanceSettings.mode);
+    const accent = preset?.accent ?? (isAccentColorId(value.accent) ? value.accent : defaultAppearanceSettings.accent);
+    const displayFont = preset?.displayFont ?? (isDisplayFontId(value.displayFont) ? value.displayFont : defaultAppearanceSettings.displayFont);
     const backgroundImages = Array.isArray(value.backgroundImages)
       ? value.backgroundImages.map(normalizeSavedBackgroundImage).filter((image): image is SavedBackgroundImage => image != null).slice(0, 12)
       : [];
     const backgroundImagePath =
       typeof value.backgroundImagePath === "string" && value.backgroundImagePath.trim() ? value.backgroundImagePath : null;
-    const backgroundImageUrl =
-      typeof value.backgroundImageUrl === "string" && value.backgroundImageUrl.trim()
-        ? value.backgroundImageUrl
-        : backgroundImages.find((image) => image.path === backgroundImagePath)?.url ?? (backgroundImagePath ? pathToBackgroundUrl(backgroundImagePath) : null);
+    const backgroundImageUrl = backgroundImagePath ? pathToBackgroundUrl(backgroundImagePath) : null;
     const legacyBackground = backgroundImagePath && backgroundImageUrl ? { path: backgroundImagePath, url: backgroundImageUrl } : null;
     const backgroundDefaults = normalizeAppearanceBackgrounds(value.backgroundDefaults, legacyBackground);
-    return { accent, backgroundDefaults, backgroundImagePath, backgroundImageUrl, backgroundImages, displayFont, mode };
+    return { accent, backgroundDefaults, backgroundImagePath, backgroundImageUrl, backgroundImages, displayFont, mode, themePreset };
   } catch {
     return defaultAppearanceSettings;
   }
 }
 
 function getAppearanceStyle(settings: AppearanceSettings): CSSProperties {
-  const theme = settings.mode === "light" ? getLightThemeVariables() : getDarkThemeVariables();
-  const accent = accentPalettes[settings.accent][settings.mode];
-  const background = settings.backgroundDefaults[settings.mode];
+  const preset = settings.themePreset === "custom" ? null : curatedThemePresets[settings.themePreset];
+  const mode = preset?.mode ?? settings.mode;
+  const displayFont = preset?.displayFont ?? settings.displayFont;
+  const theme = mode === "light" ? getLightThemeVariables() : getDarkThemeVariables();
+  const accent = preset?.accentPalette ?? accentPalettes[settings.accent][mode];
+  const background = settings.backgroundDefaults[mode];
   const backgroundUrl = background?.url ?? "";
   return {
     ...theme,
+    ...(preset?.variables ?? {}),
     "--acc": accent.acc,
     "--acc-dim": accent.accDim,
     "--acc-ink": accent.accInk,
     "--acc-line": accent.accLine,
     "--app-bg-image": backgroundUrl ? `url("${backgroundUrl}")` : "none",
-    "--font-body": displayFonts[settings.displayFont].body,
-    "--font-head": displayFonts[settings.displayFont].head,
-    "--ok-line": accent.okLine
+    "--font-body": displayFonts[displayFont].body,
+    "--font-head": displayFonts[displayFont].head,
+    "--ok-line": accent.okLine,
+    "--scrollbar-thumb-active": accent.acc
   } as CSSProperties;
 }
 
@@ -13942,6 +16714,10 @@ function getLightThemeVariables(): Record<string, string> {
   };
 }
 
+function isThemePresetId(value: unknown): value is ThemePresetId {
+  return typeof value === "string" && themePresetIds.includes(value as ThemePresetId);
+}
+
 function isAccentColorId(value: unknown): value is AccentColorId {
   return typeof value === "string" && value in accentPalettes;
 }
@@ -13973,7 +16749,7 @@ function normalizeSelectedBackgroundImage(value: unknown): SelectedBackgroundIma
   }
   return {
     path: item.path,
-    url: typeof item.url === "string" && item.url.trim() ? item.url : pathToBackgroundUrl(item.path)
+    url: pathToBackgroundUrl(item.path)
   };
 }
 
@@ -13989,25 +16765,14 @@ function normalizeSavedBackgroundImage(value: unknown): SavedBackgroundImage | n
     id: item.id,
     name: item.name,
     path: item.path,
-    url: typeof item.url === "string" && item.url.trim() ? item.url : pathToBackgroundUrl(item.path),
+    url: pathToBackgroundUrl(item.path),
     addedAt: item.addedAt
   };
 }
 
 function pathToBackgroundUrl(path: string): string {
   const normalized = path.replaceAll("\\", "/");
-  const wslDrivePath = normalized.match(/^\/mnt\/([a-zA-Z])\/(.*)$/);
-  if (wslDrivePath) {
-    return encodeURI(`file:///${wslDrivePath[1].toUpperCase()}:/${wslDrivePath[2]}`);
-  }
-  const drivePath = normalized.match(/^([a-zA-Z]):\/(.*)$/);
-  if (drivePath) {
-    return encodeURI(`file:///${drivePath[1]}:/${drivePath[2]}`);
-  }
-  if (normalized.startsWith("/")) {
-    return encodeURI(`file://${normalized}`);
-  }
-  return encodeURI(normalized);
+  return `music-os-image://local/?path=${encodeURIComponent(normalized)}`;
 }
 
 function getFileAlbumTarget(file: LibraryFile): Pick<LibraryAlbumGroup, "artist" | "album" | "year"> | null {
@@ -14129,6 +16894,67 @@ function getReviewableImportItems(importBatch: ImportBatch): ImportItem[] {
   return importBatch.items.filter((item) => item.status === "needs_review");
 }
 
+type ReadyImportGroup = {
+  key: string;
+  batch: ImportBatch;
+  kind: "album" | "track";
+};
+
+function getAgentOwnedImportIds(
+  workflows: AgentPlaylistWorkflow[],
+  downloadJobs: DiscoveryDownloadJob[]
+): Set<string> {
+  const ids = new Set<string>();
+  const jobsById = new Map(downloadJobs.map((job) => [job.id, job]));
+  for (const workflow of workflows) {
+    if (workflow.importId) {
+      ids.add(workflow.importId);
+    }
+    if (workflow.downloadJobId) {
+      const imported = jobsById.get(workflow.downloadJobId)?.imported;
+      if (imported) {
+        ids.add(imported.id);
+      }
+    }
+  }
+  return ids;
+}
+
+function groupReadyImportBatches(
+  imports: ImportBatch[],
+  hiddenImportIds: Set<string> = new Set()
+): ReadyImportGroup[] {
+  const groups: ReadyImportGroup[] = [];
+  for (const importBatch of imports) {
+    if (hiddenImportIds.has(importBatch.id)) {
+      continue;
+    }
+    const reviewableItems = importBatch.items.filter(
+      (item) => item.status !== "imported" && item.status !== "rejected"
+    );
+    const albums = new Map<string, ImportItem[]>();
+    for (const item of reviewableItems) {
+      const artist = item.detectedArtist?.trim() || "Unknown Artist";
+      const album = item.detectedAlbum?.trim();
+      if (!album) {
+        groups.push({ key: item.id, batch: { ...importBatch, items: [item] }, kind: "track" });
+        continue;
+      }
+      const key = `${artist.toLocaleLowerCase()}\u0000${album.toLocaleLowerCase()}\u0000${item.detectedYear ?? ""}`;
+      const items = albums.get(key);
+      if (items) {
+        items.push(item);
+      } else {
+        albums.set(key, [item]);
+      }
+    }
+    for (const [key, items] of albums) {
+      groups.push({ key, batch: { ...importBatch, items }, kind: "album" });
+    }
+  }
+  return groups;
+}
+
 function deriveImportBatchTitle(importBatch: ImportBatch): string {
   const reviewableItem = getReviewableImportItems(importBatch)[0] ?? importBatch.items[0];
   if (!reviewableItem) {
@@ -14223,7 +17049,16 @@ function getPlaybackDisplayName(file: LibraryFile): string {
 
 export function BackendHealth({ state }: { state: HealthState }): ReactElement {
   if (state.status === "loading") {
-    return <div className="health loading">Backend checking</div>;
+    return <div className="health loading">Backend connecting</div>;
+  }
+
+  if (state.status === "reconnecting") {
+    return (
+      <div className="health loading">
+        Backend reconnecting
+        <span>attempt {state.attempt} / {state.maxAttempts}</span>
+      </div>
+    );
   }
 
   if (state.status === "error") {
