@@ -1,3 +1,13 @@
+import { mergePlaybackState, shouldRefreshPlaybackHistory } from "../playback-state.js";
+import { artworkObjectUrls, getArtworkObjectUrl } from "../artwork-requests";
+import { AppearanceStudio } from "./AppearanceStudio";
+import { addBackgroundImage, appearanceStorageKey, curatedThemePresets, displayFonts, getAppearanceStyle, loadAppearanceSettings, type AppearanceMode, type AppearanceSettings, type SelectedBackgroundImage } from "../appearance";
+import { HomeInsights } from "./HomeInsights";
+import { homeListeningResponseSchema, type HomeListeningResponse } from "@music-os/core";
+import "./home-journal.css";
+import { StyledSelect } from "./StyledSelect";
+import { LibraryArtistPage } from "./LibraryArtistPage";
+import { AlbumCompletion, ArtistExplorer, DiscoveryModes } from "./Explore";
 import { Fragment, memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -19,6 +29,8 @@ import {
   LibraryBig as LucideLibrary,
   ListMusic as LucidePlaylist,
   Menu as LucideMenu,
+  Moon as LucideMoon,
+  Sun as LucideSun,
   Play as LucidePlay,
   Search as LucideSearch,
   Save as LucideSave,
@@ -301,24 +313,6 @@ type LibraryWorkbenchPreferences = {
   selectedAlbumId: string | null;
 };
 type ArtistSongSortMode = "listens" | "ranking" | "albumYear";
-type AppearanceMode = "dark" | "light";
-type ThemePresetId = "custom" | "nocturne" | "newsprint" | "crt" | "blueprint";
-type CuratedThemePresetId = Exclude<ThemePresetId, "custom">;
-type AccentColorId = "lime" | "code" | "cyan" | "amber" | "rose" | "violet";
-type DisplayFontId = "space" | "grotesk" | "mono" | "system" | "wide" | "editorial" | "avant";
-type SelectedBackgroundImage = { path: string; url: string };
-type SavedBackgroundImage = { id: string; name: string; path: string; url: string; addedAt: string };
-type AppearanceBackgrounds = Record<AppearanceMode, SelectedBackgroundImage | null>;
-type AppearanceSettings = {
-  accent: AccentColorId;
-  backgroundImagePath: string | null;
-  backgroundImageUrl: string | null;
-  backgroundDefaults: AppearanceBackgrounds;
-  backgroundImages: SavedBackgroundImage[];
-  displayFont: DisplayFontId;
-  mode: AppearanceMode;
-  themePreset: ThemePresetId;
-};
 
 const emptyDuplicates: DuplicateGroupsResponse = { groups: [], totalGroups: 0, totalFiles: 0 };
 const emptyMetadataGaps: MetadataGapsResponse = { items: [], total: 0 };
@@ -361,209 +355,8 @@ const emptyTasteProfile: TasteProfileResponse = {
 };
 
 const topNavigationItems = ["Home", "Library", "Discovery", "Agent", "Playlists", "Settings"] as const;
-const appearanceStorageKey = "music-os:appearance:v1";
 const visualizerModeStorageKey = "music-os:visualizer-mode:v1";
 const libraryWorkbenchPreferencesStorageKey = "music-os:library-workbench:v1";
-const defaultAppearanceSettings: AppearanceSettings = {
-  accent: "lime",
-  backgroundImagePath: null,
-  backgroundImageUrl: null,
-  backgroundDefaults: { dark: null, light: null },
-  backgroundImages: [],
-  displayFont: "space",
-  mode: "dark",
-  themePreset: "custom"
-};
-const appearanceModes: AppearanceMode[] = ["dark", "light"];
-const accentPalettes: Record<AccentColorId, { label: string; dark: AccentPalette; light: AccentPalette }> = {
-  lime: {
-    label: "Lime",
-    dark: { acc: "#c3f53c", accDim: "rgba(195, 245, 60, 0.12)", accInk: "#10130a", accLine: "rgba(195, 245, 60, 0.38)", okLine: "#4c5f2c" },
-    light: { acc: "#6e9f00", accDim: "rgba(110, 159, 0, 0.14)", accInk: "#f8fbf0", accLine: "rgba(110, 159, 0, 0.36)", okLine: "#b8cc86" }
-  },
-  code: {
-    label: "Code",
-    dark: { acc: "#32e875", accDim: "rgba(50, 232, 117, 0.13)", accInk: "#03130a", accLine: "rgba(50, 232, 117, 0.42)", okLine: "#1d653c" },
-    light: { acc: "#087a3f", accDim: "rgba(8, 122, 63, 0.13)", accInk: "#f2fff7", accLine: "rgba(8, 122, 63, 0.34)", okLine: "#8fcaa7" }
-  },
-  cyan: {
-    label: "Cyan",
-    dark: { acc: "#62d7f4", accDim: "rgba(98, 215, 244, 0.13)", accInk: "#061014", accLine: "rgba(98, 215, 244, 0.4)", okLine: "#2d5965" },
-    light: { acc: "#007b95", accDim: "rgba(0, 123, 149, 0.13)", accInk: "#effcff", accLine: "rgba(0, 123, 149, 0.34)", okLine: "#8fc3cf" }
-  },
-  amber: {
-    label: "Amber",
-    dark: { acc: "#f2b84b", accDim: "rgba(242, 184, 75, 0.14)", accInk: "#160f04", accLine: "rgba(242, 184, 75, 0.38)", okLine: "#6b5528" },
-    light: { acc: "#a86600", accDim: "rgba(168, 102, 0, 0.13)", accInk: "#fff8ec", accLine: "rgba(168, 102, 0, 0.34)", okLine: "#d8b983" }
-  },
-  rose: {
-    label: "Rose",
-    dark: { acc: "#ff7aa7", accDim: "rgba(255, 122, 167, 0.13)", accInk: "#17070d", accLine: "rgba(255, 122, 167, 0.38)", okLine: "#6a3348" },
-    light: { acc: "#b83d68", accDim: "rgba(184, 61, 104, 0.12)", accInk: "#fff3f7", accLine: "rgba(184, 61, 104, 0.34)", okLine: "#dda0b5" }
-  },
-  violet: {
-    label: "Violet",
-    dark: { acc: "#a994ff", accDim: "rgba(169, 148, 255, 0.13)", accInk: "#0d091d", accLine: "rgba(169, 148, 255, 0.38)", okLine: "#514778" },
-    light: { acc: "#6954bb", accDim: "rgba(105, 84, 187, 0.12)", accInk: "#f7f4ff", accLine: "rgba(105, 84, 187, 0.34)", okLine: "#b1a8db" }
-  }
-};
-const displayFonts: Record<DisplayFontId, { label: string; head: string; body: string }> = {
-  space: {
-    label: "Workbench - Space Grotesk + JetBrains Mono",
-    head: "\"Space Grotesk Variable\", \"Space Grotesk\", sans-serif",
-    body: "\"JetBrains Mono Variable\", \"JetBrains Mono\", ui-monospace, monospace"
-  },
-  grotesk: {
-    label: "Space Grotesk",
-    head: "\"Space Grotesk Variable\", \"Space Grotesk\", sans-serif",
-    body: "\"Space Grotesk Variable\", \"Space Grotesk\", sans-serif"
-  },
-  mono: {
-    label: "JetBrains Mono",
-    head: "\"JetBrains Mono Variable\", \"JetBrains Mono\", ui-monospace, monospace",
-    body: "\"JetBrains Mono Variable\", \"JetBrains Mono\", ui-monospace, monospace"
-  },
-  system: {
-    label: "System Sans",
-    head: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
-    body: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
-  },
-  editorial: {
-    label: "Editorial - Fraunces Serif",
-    head: "\"Fraunces Variable\", Fraunces, Georgia, serif",
-    body: "\"Fraunces Variable\", Fraunces, Georgia, serif"
-  },
-  avant: {
-    label: "Avant-garde - Syne + Space Grotesk",
-    head: "\"Syne Variable\", Syne, \"Space Grotesk Variable\", sans-serif",
-    body: "\"Space Grotesk Variable\", \"Space Grotesk\", sans-serif"
-  },
-  wide: {
-    label: "Wide headings",
-    head: "\"Arial Black\", \"Arial\", ui-sans-serif, system-ui, sans-serif",
-    body: "\"JetBrains Mono Variable\", \"JetBrains Mono\", ui-monospace, monospace"
-  }
-};
-
-type AccentPalette = { acc: string; accDim: string; accInk: string; accLine: string; okLine: string };
-type CuratedThemePreset = {
-  label: string;
-  description: string;
-  mode: AppearanceMode;
-  accent: AccentColorId;
-  accentPalette: AccentPalette;
-  displayFont: DisplayFontId;
-  preview: { background: string; surface: string; accent: string; text: string };
-  variables: Record<string, string>;
-};
-
-const curatedThemePresets: Record<CuratedThemePresetId, CuratedThemePreset> = {
-  nocturne: {
-    label: "Nocturne",
-    description: "Velvet ink, ultraviolet signals, and sculptural Syne headings.",
-    mode: "dark",
-    accent: "violet",
-    accentPalette: {
-      acc: "#b89cff",
-      accDim: "rgba(184, 156, 255, 0.15)",
-      accInk: "#130a24",
-      accLine: "rgba(184, 156, 255, 0.46)",
-      okLine: "#5f4b88"
-    },
-    displayFont: "avant",
-    preview: { background: "#0b0914", surface: "#241f3a", accent: "#b89cff", text: "#f5f0ff" },
-    variables: {
-      "--bg0": "#0b0914", "--bg1": "#12101f", "--bg2": "#19162a", "--bg3": "#241f3a",
-      "--app-bg-opacity": "0.84",
-      "--center-bg-tint": "rgba(11, 9, 20, 0.36)", "--center-bg-vignette": "rgba(6, 4, 13, 0.7)",
-      "--line": "#2a2541", "--line2": "#443a62",
-      "--scrollbar-track": "#090711", "--scrollbar-thumb": "#4f456d", "--scrollbar-thumb-hover": "#746495",
-      "--panel-bg0": "rgba(11, 9, 20, 0.72)", "--panel-bg1": "rgba(18, 16, 31, 0.74)",
-      "--panel-bg2": "rgba(25, 22, 42, 0.7)", "--panel-bg3": "rgba(36, 31, 58, 0.66)",
-      "--tx0": "#f5f0ff", "--tx1": "#c9bfdd", "--tx2": "#817794",
-      "--r-s": "0.25rem", "--r-m": "0.5rem", "--panel-backdrop-blur": "1rem"
-    }
-  },
-  newsprint: {
-    label: "Newsprint",
-    description: "Warm paper, oxblood details, and an expressive editorial serif.",
-    mode: "light",
-    accent: "rose",
-    accentPalette: {
-      acc: "#982f45",
-      accDim: "rgba(152, 47, 69, 0.13)",
-      accInk: "#fff8ef",
-      accLine: "rgba(152, 47, 69, 0.38)",
-      okLine: "#c58f79"
-    },
-    displayFont: "editorial",
-    preview: { background: "#eee7da", surface: "#ddd0bc", accent: "#982f45", text: "#2b2520" },
-    variables: {
-      "--bg0": "#eee7da", "--bg1": "#f8f2e7", "--bg2": "#e8decf", "--bg3": "#ddd0bc",
-      "--app-bg-opacity": "0.86",
-      "--center-bg-tint": "rgba(238, 231, 218, 0.34)", "--center-bg-vignette": "rgba(225, 214, 195, 0.58)",
-      "--line": "#d4c7b3", "--line2": "#b9a78e",
-      "--scrollbar-track": "#e4dacb", "--scrollbar-thumb": "#ad9c85", "--scrollbar-thumb-hover": "#796c5d",
-      "--panel-bg0": "rgba(238, 231, 218, 0.72)", "--panel-bg1": "rgba(248, 242, 231, 0.76)",
-      "--panel-bg2": "rgba(232, 222, 207, 0.7)", "--panel-bg3": "rgba(221, 208, 188, 0.66)",
-      "--tx0": "#2b2520", "--tx1": "#584c41", "--tx2": "#7f6f60",
-      "--r-s": "0", "--r-m": "0.125rem", "--panel-backdrop-blur": "0.5rem"
-    }
-  },
-  crt: {
-    label: "Amber CRT",
-    description: "Near-black phosphor glass, hard edges, and pure terminal mono.",
-    mode: "dark",
-    accent: "amber",
-    accentPalette: {
-      acc: "#ffb72f",
-      accDim: "rgba(255, 183, 47, 0.14)",
-      accInk: "#170f02",
-      accLine: "rgba(255, 183, 47, 0.44)",
-      okLine: "#745720"
-    },
-    displayFont: "mono",
-    preview: { background: "#090b07", surface: "#202214", accent: "#ffb72f", text: "#f1d88d" },
-    variables: {
-      "--bg0": "#090b07", "--bg1": "#10120c", "--bg2": "#17190f", "--bg3": "#202214",
-      "--app-bg-opacity": "0.9",
-      "--center-bg-tint": "rgba(9, 11, 7, 0.42)", "--center-bg-vignette": "rgba(4, 5, 3, 0.74)",
-      "--line": "#292d1a", "--line2": "#464a29",
-      "--scrollbar-track": "#080906", "--scrollbar-thumb": "#504923", "--scrollbar-thumb-hover": "#796a2b",
-      "--panel-bg0": "rgba(9, 11, 7, 0.8)", "--panel-bg1": "rgba(16, 18, 12, 0.8)",
-      "--panel-bg2": "rgba(23, 25, 15, 0.76)", "--panel-bg3": "rgba(32, 34, 20, 0.72)",
-      "--tx0": "#f1d88d", "--tx1": "#c3a967", "--tx2": "#756941",
-      "--r-s": "0", "--r-m": "0", "--panel-backdrop-blur": "0.25rem"
-    }
-  },
-  blueprint: {
-    label: "Blueprint",
-    description: "Architectural navy, drafting lines, and bright cyan notation.",
-    mode: "dark",
-    accent: "cyan",
-    accentPalette: {
-      acc: "#56dcff",
-      accDim: "rgba(86, 220, 255, 0.14)",
-      accInk: "#04141e",
-      accLine: "rgba(86, 220, 255, 0.44)",
-      okLine: "#31748d"
-    },
-    displayFont: "space",
-    preview: { background: "#061a2a", surface: "#123a58", accent: "#56dcff", text: "#edf8ff" },
-    variables: {
-      "--bg0": "#061a2a", "--bg1": "#092238", "--bg2": "#0d2d47", "--bg3": "#123a58",
-      "--app-bg-opacity": "0.86",
-      "--center-bg-tint": "rgba(6, 26, 42, 0.36)", "--center-bg-vignette": "rgba(2, 13, 22, 0.68)",
-      "--line": "#174867", "--line2": "#29698e",
-      "--scrollbar-track": "#051622", "--scrollbar-thumb": "#286584", "--scrollbar-thumb-hover": "#3f8eb1",
-      "--panel-bg0": "rgba(6, 26, 42, 0.74)", "--panel-bg1": "rgba(9, 34, 56, 0.76)",
-      "--panel-bg2": "rgba(13, 45, 71, 0.72)", "--panel-bg3": "rgba(18, 58, 88, 0.68)",
-      "--tx0": "#edf8ff", "--tx1": "#afd2e5", "--tx2": "#719db6",
-      "--r-s": "0.125rem", "--r-m": "0.25rem", "--panel-backdrop-blur": "0.75rem"
-    }
-  }
-};
-const themePresetIds: ThemePresetId[] = ["custom", "nocturne", "newsprint", "crt", "blueprint"];
 
 export function App(): ReactElement {
   const discoverySearchRequestId = useRef(0);
@@ -676,6 +469,7 @@ export function App(): ReactElement {
   const [visualizerMode, setVisualizerMode] = useState<VisualizerMode>(() => loadVisualizerMode());
   const [visualizerCapabilities, setVisualizerCapabilities] = useState<VisualizerCapabilitiesResponse | null>(null);
   const [appearance, setAppearance] = useState<AppearanceSettings>(() => loadAppearanceSettings());
+  const [appearanceSaveError, setAppearanceSaveError] = useState<string | null>(null);
   const [artistsViewResetKey, setArtistsViewResetKey] = useState(0);
   const [albumsViewResetKey, setAlbumsViewResetKey] = useState(0);
   const [artistViewTarget, setArtistViewTarget] = useState<ArtistViewTarget | null>(null);
@@ -714,7 +508,12 @@ export function App(): ReactElement {
   const currentWaveform = useWaveform(playback.currentFileId, documentVisible && playback.status !== "stopped");
 
   useEffect(() => {
-    window.localStorage.setItem(appearanceStorageKey, JSON.stringify(appearance));
+    try {
+      window.localStorage.setItem(appearanceStorageKey, JSON.stringify(appearance));
+      setAppearanceSaveError(null);
+    } catch {
+      setAppearanceSaveError("Your changes are visible, but this device could not save them. Free some browser storage before closing the app.");
+    }
   }, [appearance]);
 
   useEffect(() => {
@@ -908,6 +707,12 @@ export function App(): ReactElement {
       }));
     }
   }
+
+  useEffect(() => {
+    const refresh = () => { void refreshLibrary(); void refreshAlbums(); void refreshImports(); };
+    window.addEventListener("music-library-changed", refresh);
+    return () => window.removeEventListener("music-library-changed", refresh);
+  }, [search]);
 
   async function refreshAlbums(): Promise<AlbumGroupsResponse | null> {
     try {
@@ -2282,16 +2087,17 @@ export function App(): ReactElement {
     setDiagnosticsState({ status: "ready", diagnostics: await getImportItemDiagnostics(importItemId) });
   }
 
+  async function refreshPlaybackHistoryViews(): Promise<void> {
+    // The Library workbench reads album files; Library Manager reads the file list.
+    await Promise.all([refreshLibrary(), refreshAlbums()]);
+  }
+
   async function refreshPlayback(signal?: AbortSignal): Promise<void> {
     const next = await getPlaybackState(signal);
     const current = playbackRef.current;
     setPlayback((current) => mergePlaybackState(current, next));
-    if (
-      current &&
-      ((current.currentFileId != null && current.currentFileId !== next.currentFileId) ||
-        (current.status !== "stopped" && next.status === "stopped"))
-    ) {
-      void refreshLibrary();
+    if (shouldRefreshPlaybackHistory(current, next)) {
+      void refreshPlaybackHistoryViews();
     }
   }
 
@@ -2334,7 +2140,7 @@ export function App(): ReactElement {
       }
       setPlayback(next);
       if (playback.currentFileId && playback.currentFileId !== next.currentFileId) {
-        void refreshLibrary();
+        void refreshPlaybackHistoryViews();
       }
     } catch (error) {
       if (actionId !== playbackActionIdRef.current) {
@@ -2468,7 +2274,7 @@ export function App(): ReactElement {
     setPlaybackBusy(true);
     try {
       setPlayback(await stopPlayback());
-      void refreshLibrary();
+      void refreshPlaybackHistoryViews();
     } catch (error) {
       setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
     } finally {
@@ -2484,7 +2290,7 @@ export function App(): ReactElement {
     setPlaybackBusy(true);
     try {
       setPlayback(await previousPlayback());
-      void refreshLibrary();
+      void refreshPlaybackHistoryViews();
     } catch (error) {
       setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
     } finally {
@@ -2500,7 +2306,7 @@ export function App(): ReactElement {
     setPlaybackBusy(true);
     try {
       setPlayback(await nextPlayback());
-      void refreshLibrary();
+      void refreshPlaybackHistoryViews();
     } catch (error) {
       setPlayback((current) => ({ ...current, status: "error", error: getErrorMessage(error) }));
     } finally {
@@ -2664,34 +2470,11 @@ export function App(): ReactElement {
   }
 
   async function handleSelectBackgroundImage(mode: AppearanceMode): Promise<void> {
-    const image = (await window.musicOs?.selectBackgroundImage()) as SelectedBackgroundImage | null | undefined;
-    if (!image) {
-      return;
+    if (!window.musicOs?.selectBackgroundImage) {
+      throw new Error("Open negi in the desktop app to choose a local background image.");
     }
-    const normalizedImage: SelectedBackgroundImage = {
-      path: image.path,
-      url: pathToBackgroundUrl(image.path)
-    };
-
-    setAppearance((current) => {
-      const existing = current.backgroundImages.filter((item) => item.path !== normalizedImage.path);
-      const nextImage: SavedBackgroundImage = {
-        id: crypto.randomUUID(),
-        name: basenameFromPath(normalizedImage.path),
-        ...normalizedImage,
-        addedAt: new Date().toISOString()
-      };
-      return {
-        ...current,
-        backgroundDefaults: {
-          ...current.backgroundDefaults,
-          [mode]: normalizedImage
-        },
-        backgroundImagePath: normalizedImage.path,
-        backgroundImageUrl: normalizedImage.url,
-        backgroundImages: [nextImage, ...existing].slice(0, 12)
-      };
-    });
+    const image = await window.musicOs.selectBackgroundImage() as SelectedBackgroundImage | null;
+    if (image) setAppearance((current) => addBackgroundImage(current, mode, image));
   }
 
   async function handleAgentSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -3153,7 +2936,9 @@ export function App(): ReactElement {
     }
     for (const playlist of playlists) {
       for (const item of playlist.items) {
-        fileMap.set(item.file.id, item.file);
+        if (!fileMap.has(item.file.id)) {
+          fileMap.set(item.file.id, item.file);
+        }
       }
     }
     return [...fileMap.values()];
@@ -3163,7 +2948,7 @@ export function App(): ReactElement {
     [playback.currentFileId, playbackFiles]
   );
   const appearanceStyle = useMemo(() => getAppearanceStyle(appearance), [appearance]);
-  const hasBackgroundImage = Boolean(appearance.backgroundDefaults[appearance.mode]?.url);
+  const hasBackgroundImage = Boolean(appearance.profiles[appearance.mode].background?.url);
   const appShellClassName = `appShell theme-${appearance.mode}${hasBackgroundImage ? " hasBackgroundImage" : ""}`;
   const nowPlayingTitle = currentPlaybackFile?.displayTags.title ?? playback.currentDisplayName ?? "Nothing queued";
   const nowPlayingArtist =
@@ -3200,7 +2985,9 @@ export function App(): ReactElement {
     <main className={appShellClassName} style={appearanceStyle}>
       <header className="appTopbar">
         <button className="topBrand" type="button" onClick={() => navigateToView("Home")}>
-          <span className="topBrandMark" aria-hidden="true">n</span>
+          <span className="topBrandMark" aria-hidden="true">
+            <span className="topBrandIcon" />
+          </span>
           <span className="topBrandCopy">
             <strong>negi</strong>
             <small>workbench</small>
@@ -3282,6 +3069,16 @@ export function App(): ReactElement {
         </div>
 
         <button
+          className="topAppearanceSwitch"
+          type="button"
+          aria-label={`Switch to saved ${appearance.mode === "dark" ? "light" : "dark"} appearance`}
+          title={`Switch to saved ${appearance.mode === "dark" ? "light" : "dark"} appearance`}
+          onClick={() => setAppearance((current) => ({ ...current, mode: current.mode === "dark" ? "light" : "dark" }))}
+        >
+          {appearance.mode === "dark" ? <LucideSun size={16} /> : <LucideMoon size={16} />}
+        </button>
+
+        <button
           className="topSearch"
           type="button"
           onClick={() => setCommandPaletteOpen(true)}
@@ -3316,6 +3113,7 @@ export function App(): ReactElement {
       <section className="centerPane">
         {activeView === "Home" ? (
           <HomeAnalyticsView
+            onOpenSettings={() => navigateToView("Settings")}
             albumsState={albumsState}
             recentAlbums={homeRecentAlbums}
             libraryTotal={library.status === "ready" ? library.total : total}
@@ -3510,7 +3308,7 @@ export function App(): ReactElement {
             onRevert={handleRevertBatch}
           />
         ) : activeView === "Discovery" ? (
-          <DiscoveryView
+          <DiscoveryModes><DiscoveryView
             busyImportBatchId={busyImportBatchId}
             discoveryQuery={discoveryQuery}
             downloadState={discoveryDownloadState}
@@ -3566,7 +3364,7 @@ export function App(): ReactElement {
             onToggleFileSelect={toggleDiscoveryFileSelection}
             onToggleCluster={toggleDiscoveryCluster}
             onToggleGroup={toggleDiscoveryGroup}
-          />
+          /></DiscoveryModes>
         ) : activeView === "Playlists" ? (
           <PlaylistsView
             playbackBusy={playbackBusy}
@@ -3613,6 +3411,7 @@ export function App(): ReactElement {
             draft={tasteProfileDraft}
             state={tasteProfileState}
             setAppearance={setAppearance}
+            appearanceSaveError={appearanceSaveError}
             setDraft={setTasteProfileDraft}
             onSelectBackgroundImage={handleSelectBackgroundImage}
             onSave={handleSaveTasteProfile}
@@ -3808,14 +3607,7 @@ function artistImageUrl(artist: string): string {
 
 const loadedArtworkSrcs = new Set<string>();
 const failedArtworkSrcs = new Map<string, number>();
-const artworkObjectUrls = new Map<string, string>();
-const pendingArtworkObjectUrls = new Map<string, Promise<string>>();
 const FAILED_ARTWORK_RETRY_MS = 30_000;
-// Chromium permits six HTTP/1 connections per origin. Keep one lane free for
-// playback and settings mutations while allowing artwork grids to fill quickly.
-const MAX_CONCURRENT_ARTWORK_REQUESTS = 5;
-const artworkRequestQueue: Array<() => void> = [];
-let activeArtworkRequestCount = 0;
 
 function invalidateAlbumArtworkUrls(album: AlbumGroupItem): void {
   const urls = [artworkAlbumUrl(album.id), ...album.files.map((file) => artworkFileUrl(file.id))];
@@ -3929,11 +3721,13 @@ function Artwork({ src, className, eager }: { src: string | null; className: str
     let cancelled = false;
     setDisplaySrc(null);
     setStatus("pending");
-    void getArtworkObjectUrl(src, Boolean(eager))
+    const controller = new AbortController();
+    void getArtworkObjectUrl(src, Boolean(eager), controller.signal)
       .then((objectUrl) => {
         if (cancelled) {
           return;
         }
+        failedArtworkSrcs.delete(src);
         setDisplaySrc(objectUrl);
         setStatus("ready");
       })
@@ -3948,6 +3742,7 @@ function Artwork({ src, className, eager }: { src: string | null; className: str
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [retryVersion, shouldLoad, src]);
 
@@ -3978,60 +3773,6 @@ function Artwork({ src, className, eager }: { src: string | null; className: str
       }}
     />
   );
-}
-
-function getArtworkObjectUrl(src: string, highPriority = false): Promise<string> {
-  const cachedObjectUrl = artworkObjectUrls.get(src);
-  if (cachedObjectUrl) {
-    return Promise.resolve(cachedObjectUrl);
-  }
-  const pendingObjectUrl = pendingArtworkObjectUrls.get(src);
-  if (pendingObjectUrl) {
-    return pendingObjectUrl;
-  }
-
-  const request = scheduleArtworkRequest(async () => {
-    const response = await fetch(src, { cache: "no-store" });
-      if (!response.ok) {
-        throw new Error(`Artwork request failed with ${response.status}`);
-      }
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      artworkObjectUrls.set(src, objectUrl);
-      loadedArtworkSrcs.add(src);
-      failedArtworkSrcs.delete(src);
-      return objectUrl;
-    }, highPriority)
-    .finally(() => {
-      pendingArtworkObjectUrls.delete(src);
-    });
-
-  pendingArtworkObjectUrls.set(src, request);
-  return request;
-}
-
-function scheduleArtworkRequest<T>(request: () => Promise<T>, highPriority: boolean): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const run = () => {
-      activeArtworkRequestCount += 1;
-      void request()
-        .then(resolve, reject)
-        .finally(() => {
-          activeArtworkRequestCount = Math.max(0, activeArtworkRequestCount - 1);
-          artworkRequestQueue.shift()?.();
-        });
-    };
-
-    if (activeArtworkRequestCount < MAX_CONCURRENT_ARTWORK_REQUESTS) {
-      run();
-      return;
-    }
-    if (highPriority) {
-      artworkRequestQueue.unshift(run);
-    } else {
-      artworkRequestQueue.push(run);
-    }
-  });
 }
 
 function artworkFailedRecently(src: string): boolean {
@@ -4069,7 +3810,8 @@ function useArtworkVisualizerPalette(src: string | null, mode: AppearanceMode): 
 
     let cancelled = false;
     setPalette(null);
-    void getArtworkObjectUrl(src, true)
+    const controller = new AbortController();
+    void getArtworkObjectUrl(src, true, controller.signal)
       .then((objectUrl) => extractArtworkVisualizerPalette(objectUrl, mode))
       .then((nextPalette) => {
         artworkVisualizerPaletteCache.set(cacheKey, nextPalette);
@@ -4078,6 +3820,7 @@ function useArtworkVisualizerPalette(src: string | null, mode: AppearanceMode): 
         }
       })
       .catch(() => {
+        if (cancelled) return;
         artworkVisualizerPaletteCache.set(cacheKey, null);
         if (!cancelled) {
           setPalette(null);
@@ -4086,6 +3829,7 @@ function useArtworkVisualizerPalette(src: string | null, mode: AppearanceMode): 
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [cacheKey, mode, src]);
 
@@ -4715,123 +4459,6 @@ function UiIcon({ name }: { name: string }): ReactElement {
   return <Icon aria-hidden="true" focusable="false" size={16} strokeWidth={1.55} />;
 }
 
-type StyledSelectOption<T extends string> = { value: T; label: string };
-
-function SelectChevronIcon(): ReactElement {
-  return (
-    <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" viewBox="0 0 16 16">
-      <path d="m4.5 6.5 3.5 3 3.5-3" />
-    </svg>
-  );
-}
-
-function StyledSelect<T extends string>({
-  ariaLabel,
-  className,
-  disabled = false,
-  options,
-  title,
-  value,
-  onChange
-}: {
-  ariaLabel: string;
-  className?: string;
-  disabled?: boolean;
-  options: Array<StyledSelectOption<T>>;
-  title?: string;
-  value: T;
-  onChange(value: T): void;
-}): ReactElement {
-  const id = useId();
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const [open, setOpen] = useState(false);
-  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
-  const selectedOption = options.find((option) => option.value === value) ?? options[0] ?? null;
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const syncMenuPosition = () => {
-      const rect = rootRef.current?.getBoundingClientRect();
-      if (!rect) {
-        return;
-      }
-      setMenuStyle({
-        left: rect.left,
-        width: rect.width,
-        maxWidth: Math.max(0, window.innerWidth - rect.left - 16),
-        top: rect.bottom + 4,
-        maxHeight: Math.max(120, window.innerHeight - rect.bottom - 16)
-      });
-    };
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && !rootRef.current?.contains(target) && !menuRef.current?.contains(target)) {
-        setOpen(false);
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    };
-    syncMenuPosition();
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", syncMenuPosition);
-    window.addEventListener("scroll", syncMenuPosition, true);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", syncMenuPosition);
-      window.removeEventListener("scroll", syncMenuPosition, true);
-    };
-  }, [open]);
-
-  return (
-    <div className={className ? `styledSelect ${className}` : "styledSelect"} ref={rootRef}>
-      <button
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        aria-label={ariaLabel}
-        className="styledSelectButton"
-        disabled={disabled}
-        title={title}
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-      >
-        <span>{selectedOption?.label ?? ""}</span>
-        <SelectChevronIcon />
-      </button>
-      {open
-        ? createPortal(
-        <div className="styledSelectMenu" id={id} ref={menuRef} role="listbox" aria-label={ariaLabel} style={menuStyle}>
-          {options.map((option) => (
-            <button
-              aria-selected={option.value === value}
-              className={option.value === value ? "styledSelectOption active" : "styledSelectOption"}
-              key={option.value}
-              role="option"
-              title={option.label}
-              type="button"
-              onClick={() => {
-                onChange(option.value);
-                setOpen(false);
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>,
-        themedPortalRoot(rootRef.current)
-          )
-        : null}
-    </div>
-  );
-}
-
 function IndeterminateCheckbox({
   ariaLabel,
   checked,
@@ -5049,6 +4676,11 @@ const DEFAULT_ALBUM_ARTWORK_SOURCES: AlbumArtworkCandidate["source"][] = [
   "cover_art_archive"
 ];
 const MAX_ALBUM_ARTWORK_CANDIDATES = 48;
+const ALBUM_ARTWORK_TABS = [
+  { id: "search", label: "Search covers" },
+  { id: "automatic", label: "Automatic" },
+  { id: "upload", label: "Upload image" }
+] as const;
 
 function AlbumArtworkDialog({
   album,
@@ -5059,6 +4691,12 @@ function AlbumArtworkDialog({
   onChanged(): void;
   onClose(): void;
 }): ReactElement {
+  const [activeTab, setActiveTab] = useState<(typeof ALBUM_ARTWORK_TABS)[number]["id"]>("search");
+  const [localImage, setLocalImage] = useState<SelectedBackgroundImage | null>(null);
+  const [localImageReady, setLocalImageReady] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [previewRevision, setPreviewRevision] = useState(0);
+  const tabId = useId();
   const [query, setQuery] = useState(`${album.artist} ${album.album}`);
   const [candidates, setCandidates] = useState<AlbumArtworkCandidate[]>([]);
   const [searching, setSearching] = useState(true);
@@ -5121,22 +4759,36 @@ function AlbumArtworkDialog({
   }
 
   async function handleChooseLocal(): Promise<void> {
+    setLocalError(null);
     if (!window.musicOs?.selectBackgroundImage) {
-      setError("Local image selection is available in the Electron app.");
+      setLocalError("Open Music OS in the desktop app to choose an image from your computer.");
       return;
     }
-    const selection = await window.musicOs.selectBackgroundImage();
-    if (!selection) {
-      return;
-    }
-    setSavingId("local");
-    setError(null);
+    setSavingId("picking");
     try {
-      await setAlbumArtworkFromPath(album.id, selection.path);
+      const selection = await window.musicOs.selectBackgroundImage();
+      if (selection) {
+        setLocalImageReady(false);
+        setPreviewRevision((current) => current + 1);
+        setLocalImage(selection);
+      }
+    } catch (selectionError) {
+      setLocalError(getErrorMessage(selectionError));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function handleUpload(): Promise<void> {
+    if (!localImage || !localImageReady || savingId) return;
+    setSavingId("local");
+    setLocalError(null);
+    try {
+      await setAlbumArtworkFromPath(album.id, localImage.path);
       onChanged();
       onClose();
     } catch (saveError) {
-      setError(getErrorMessage(saveError));
+      setLocalError(getErrorMessage(saveError));
     } finally {
       setSavingId(null);
     }
@@ -5191,15 +4843,43 @@ function AlbumArtworkDialog({
           <button aria-label="Close artwork manager" disabled={Boolean(savingId)} type="button" onClick={onClose}>×</button>
         </header>
 
-        <div className="albumArtworkActions">
-          <button disabled={Boolean(savingId)} type="button" onClick={() => void handleChooseLocal()}>
-            {savingId === "local" ? "Copying…" : "Choose local image"}
-          </button>
-          <button disabled={Boolean(savingId)} type="button" onClick={() => void handleUseAutomatic()}>
-            {savingId === "automatic" ? "Resetting…" : "Use automatic artwork"}
-          </button>
+        <div aria-label="Artwork source" className="albumArtworkTabs" role="tablist">
+          {ALBUM_ARTWORK_TABS.map((tab, index) => (
+            <button
+              aria-controls={`${tabId}-panel-${tab.id}`}
+              aria-selected={activeTab === tab.id}
+              disabled={Boolean(savingId)}
+              id={`${tabId}-tab-${tab.id}`}
+              key={tab.id}
+              role="tab"
+              tabIndex={activeTab === tab.id ? 0 : -1}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              onKeyDown={(event) => {
+                let nextIndex = index;
+                if (event.key === "ArrowRight") nextIndex = (index + 1) % ALBUM_ARTWORK_TABS.length;
+                else if (event.key === "ArrowLeft") nextIndex = (index + ALBUM_ARTWORK_TABS.length - 1) % ALBUM_ARTWORK_TABS.length;
+                else if (event.key === "Home") nextIndex = 0;
+                else if (event.key === "End") nextIndex = ALBUM_ARTWORK_TABS.length - 1;
+                else return;
+                event.preventDefault();
+                const nextTab = ALBUM_ARTWORK_TABS[nextIndex];
+                setActiveTab(nextTab.id);
+                document.getElementById(`${tabId}-tab-${nextTab.id}`)?.focus();
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
-
+        <div
+          aria-labelledby={`${tabId}-tab-${activeTab}`}
+          className="albumArtworkPanel"
+          id={`${tabId}-panel-${activeTab}`}
+          role="tabpanel"
+          tabIndex={0}
+        >
+        {activeTab === "search" ? <>
         <form className="albumArtworkSearch" onSubmit={(event) => void handleSearch(event)}>
           <UiIcon name="search" />
           <input
@@ -5236,8 +4916,54 @@ function AlbumArtworkDialog({
             </button>
           ))}
         </div>
+        </> : activeTab === "automatic" ? (
+          <div className="albumArtworkLocal">
+            <h3>Use automatic artwork</h3>
+            <p>Remove your chosen cover and let Music OS find artwork for this album again.</p>
+            {error ? <div className="albumArtworkError" role="alert">{error}</div> : null}
+            <div className="albumArtworkActions">
+              <button disabled={Boolean(savingId)} type="button" onClick={() => void handleUseAutomatic()}>
+                {savingId === "automatic" ? "Resetting…" : "Use automatic artwork"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="albumArtworkLocal">
+            <h3>Upload an album cover</h3>
+            <p>Choose a picture from your computer, preview it, then use it for this album.</p>
+            <p>JPG, PNG, WebP, GIF, or AVIF · Up to 12 MB</p>
+            {localImage ? (
+              <figure>
+                <img
+                  alt="Selected album cover preview"
+                  className="albumArtworkUploadPreview"
+                  key={previewRevision}
+                  src={localImage.url}
+                  onLoad={() => setLocalImageReady(true)}
+                  onError={() => {
+                    setLocalImageReady(false);
+                    setLocalError("This image could not be previewed. Please choose another picture.");
+                  }}
+                />
+                <figcaption>{localImage.path.split(/[\\/]/).pop()}</figcaption>
+              </figure>
+            ) : null}
+            {localError ? <div className="albumArtworkError" role="alert">{localError}</div> : null}
+            <div className="albumArtworkActions">
+              <button disabled={Boolean(savingId)} type="button" onClick={() => void handleChooseLocal()}>
+                {savingId === "picking" ? "Choosing…" : localImage ? "Choose another image" : "Choose image"}
+              </button>
+              <button disabled={Boolean(savingId) || !localImageReady} type="button" onClick={() => void handleUpload()}>
+                {savingId === "local" ? "Saving…" : "Use this image"}
+              </button>
+            </div>
+          </div>
+        )}
+        </div>
         <footer>
-          {searching ? "Searching" : "Results"} from Apple Music, Deezer, and Cover Art Archive. Selected images are copied into Music OS.
+          {activeTab === "search"
+            ? `${searching ? "Searching" : "Results"} from Apple Music, Deezer, and Cover Art Archive.`
+            : "Selected images are copied into Music OS and kept even if you move the original file."}
         </footer>
       </section>
     </div>,
@@ -5326,6 +5052,8 @@ function LibraryWorkbenchView({
 }): ReactElement {
   const albums = "albums" in albumsState ? albumsState.albums.albums : [];
   const [initialPreferences] = useState(loadLibraryWorkbenchPreferences);
+  const [browseArtist, setBrowseArtist] = useState<string | null>(null);
+  const [artistOverview, setArtistOverview] = useState(false);
   const [artistQuery, setArtistQuery] = useState("");
   const [favoriteOnly, setFavoriteOnly] = useState(initialPreferences.favoriteOnly);
   const [artistSortMode, setArtistSortMode] = useState<ArtistSortMode>(initialPreferences.artistSortMode);
@@ -5344,6 +5072,7 @@ function LibraryWorkbenchView({
     if (!initialTarget) {
       return;
     }
+    setArtistOverview(false);
     setArtistQuery("");
     setSelectedArtistName(initialTarget.artist);
     setSelectedAlbumId(initialTarget.albumId ?? null);
@@ -5414,6 +5143,7 @@ function LibraryWorkbenchView({
   }, [albumSortMode, artistSortMode, favoriteOnly, selectedAlbum?.id, selectedAlbumId, selectedArtist?.artist, selectedArtistName]);
 
   function selectArtist(artist: string): void {
+    setArtistOverview(false);
     const firstAlbum = visibleArtists.find((section) => section.artist === artist)?.albums[0] ?? null;
     setSelectedArtistName(artist);
     setSelectedAlbumId(firstAlbum?.id ?? null);
@@ -5421,6 +5151,7 @@ function LibraryWorkbenchView({
   }
 
   function selectAlbum(albumId: string): void {
+    setArtistOverview(false);
     setSelectedAlbumId(albumId);
     setSelectedFileId(null);
   }
@@ -5487,6 +5218,8 @@ function LibraryWorkbenchView({
       </div>
     );
   }
+
+  if (browseArtist) return <ArtistExplorer initialArtist={browseArtist} onBack={() => setBrowseArtist(null)} />;
 
   return (
     <section className="libraryWorkbench" aria-label="Library browser">
@@ -5601,7 +5334,7 @@ function LibraryWorkbenchView({
       <section className="libraryBrowserPane albumBrowserPane">
         <header className="libraryPaneHeader libraryAlbumPaneHeader">
           <div className="libraryAlbumPaneTitle">
-            <strong title={selectedArtist?.artist}>{selectedArtist?.artist ?? "Albums"}</strong>
+            {selectedArtist ? <button type="button" className="libraryArtistProfileLink" title={`About ${selectedArtist.artist}`} aria-label={`About ${selectedArtist.artist}`} aria-pressed={artistOverview} onClick={() => setArtistOverview(true)}><span className="libraryArtistProfileName">{selectedArtist.artist}</span><span className="libraryArtistProfileArrow" aria-hidden="true">↗</span></button> : <strong>Albums</strong>}
             <span>{selectedArtistAlbums.length} album{selectedArtistAlbums.length === 1 ? "" : "s"}</span>
           </div>
           {selectedArtist ? (
@@ -5631,7 +5364,7 @@ function LibraryWorkbenchView({
             const favorite = isAlbumFavorite(album, favoriteAlbumEntries);
             return (
               <button
-                className={`${album.id === selectedAlbum?.id ? "active" : ""}${favorite ? " favorite" : ""}`.trim()}
+                className={`${!artistOverview && album.id === selectedAlbum?.id ? "active" : ""}${favorite ? " favorite" : ""}`.trim()}
                 key={album.id}
                 type="button"
                 onClick={() => selectAlbum(album.id)}
@@ -5654,8 +5387,8 @@ function LibraryWorkbenchView({
         </footer>
       </section>
 
-      <section className="libraryTrackPane">
-        {selectedAlbum ? (
+      <section className={"libraryTrackPane" + (artistOverview ? " libraryArtistContentPane" : "")}>
+        {artistOverview && selectedArtist ? <LibraryArtistPage key={selectedArtist.artist} artist={selectedArtist.artist} albums={selectedArtistAlbums} allAlbums={albums} onBack={() => setArtistOverview(false)} onOpenAlbum={(id) => { const album = albums.find((item) => item.id === id); if (album) { setArtistQuery(""); setFavoriteOnly(false); selectArtist(album.artist); } selectAlbum(id); }} /> : selectedAlbum ? (
           <>
             <header className="libraryAlbumTitlebar">
               <div className="libraryAlbumIdentity">
@@ -5713,11 +5446,13 @@ function LibraryWorkbenchView({
                 >
                   Queue
                 </button>
+                <button type="button" onClick={() => setBrowseArtist(selectedAlbum.artist)}>Browse discography ↗</button>
                 <button type="button" onClick={() => setArtworkAlbum(selectedAlbum)}>Artwork</button>
                 <button type="button" onClick={onManage}>Manage</button>
               </div>
             </header>
 
+            <div className="workbenchCompletion"><AlbumCompletion key={selectedAlbum.id} album={selectedAlbum} compact /></div>
             <div className="libraryArtistReassignBar">
               <span className="libraryArtistReassignLabel">Reassign artist</span>
               {reassignArtistOptions.length > 0 ? (
@@ -7667,8 +7402,13 @@ function DuplicatesView({
                   </strong>
                   <span>
                     {album.year ? `${album.year} · ` : ""}
+                    {album.source === "tags" ? "Track tags suggest " : ""}
                     {album.presentTracks} of {album.expectedTracks} tracks indexed · missing{" "}
-                    {formatTrackNumberList(album.missingTrackNumbers)}
+                    {album.missingTracks?.length
+                      ? album.missingTracks.map((track) => `Disc ${track.disc}, track ${track.number}: ${track.title}`).join("; ")
+                      : album.missingTrackPositions?.length
+                        ? album.missingTrackPositions.map((track) => `Disc ${track.disc}, track ${track.number}`).join("; ")
+                        : formatTrackNumberList(album.missingTrackNumbers)}
                   </span>
                 </div>
               </div>
@@ -8278,6 +8018,7 @@ const tasteListFields: Array<{ key: keyof Pick<
 
 function SettingsView({
   appearance,
+  appearanceSaveError,
   draft,
   state,
   setAppearance,
@@ -8286,6 +8027,7 @@ function SettingsView({
   onSave
 }: {
   appearance: AppearanceSettings;
+  appearanceSaveError: string | null;
   draft: TasteProfile;
   state: TasteProfileState;
   setAppearance(settings: AppearanceSettings | ((current: AppearanceSettings) => AppearanceSettings)): void;
@@ -8294,13 +8036,8 @@ function SettingsView({
   onSave(): Promise<void>;
 }): ReactElement {
   const latest = "profile" in state ? state.profile : emptyTasteProfile;
-  const accentOptions = Object.entries(accentPalettes) as Array<[AccentColorId, (typeof accentPalettes)[AccentColorId]]>;
-  const fontOptions = Object.entries(displayFonts) as Array<[DisplayFontId, (typeof displayFonts)[DisplayFontId]]>;
-  const customPreviewTheme = appearance.mode === "light" ? getLightThemeVariables() : getDarkThemeVariables();
-  const customPreviewAccent = accentPalettes[appearance.accent][appearance.mode];
-  const activeThemePreset = isThemePresetId(appearance.themePreset) ? appearance.themePreset : "custom";
-  const activeThemeLabel =
-    activeThemePreset === "custom" ? "Custom" : curatedThemePresets[activeThemePreset].label;
+  const profile = appearance.profiles[appearance.mode];
+  const activeThemeLabel = profile.themePreset === "custom" ? "Custom" : curatedThemePresets[profile.themePreset].label;
 
   return (
     <section className="settingsWorkbench" aria-label="Settings">
@@ -8314,6 +8051,10 @@ function SettingsView({
         </header>
         <nav aria-label="Settings sections">
           <a href="#settings-appearance"><UiIcon name="preference" /><span>Appearance</span></a>
+          <a className="settingsAppearanceLink" href="#studio-presets"><span>Theme presets</span></a>
+          <a className="settingsAppearanceLink" href="#studio-type"><span>Typography</span></a>
+          <a className="settingsAppearanceLink" href="#studio-background"><span>Background images</span></a>
+          <a className="settingsAppearanceLink" href="#studio-looks"><span>Saved looks</span></a>
           <a href="#settings-taste"><UiIcon name="artist" /><span>Taste profile</span></a>
           <a href="#settings-quality"><UiIcon name="format" /><span>Discovery quality</span></a>
           <a href="#settings-workflows"><UiIcon name="operations" /><span>Workflows</span></a>
@@ -8321,7 +8062,7 @@ function SettingsView({
         <div className="settingsNavigatorSummary">
           <span>Theme</span>
           <strong>{activeThemeLabel}</strong>
-          <small>{displayFonts[appearance.displayFont].label}</small>
+          <small>{displayFonts[profile.displayFont].label}</small>
         </div>
       </aside>
       <div className="settingsView">
@@ -8330,193 +8071,7 @@ function SettingsView({
         <span>Appearance, library behavior, and agent preferences</span>
       </header>
       {state.status === "error" ? <div className="inlineError">{state.message}</div> : null}
-      <section className="settingsPanel appearancePanel" id="settings-appearance" aria-label="Appearance preferences">
-        <div>
-          <strong>Appearance</strong>
-          <span>Start with a complete visual preset, then remix its mode, accent, typography, and background.</span>
-        </div>
-        <div className="appearanceSubhead">
-          <strong>Theme presets</strong>
-          <span>Each preset changes the surfaces, contrast, geometry, accent treatment, and font pairing together.</span>
-        </div>
-        <div className="themePresetGrid" aria-label="Theme presets">
-          {themePresetIds.map((id) => {
-            const preset = id === "custom" ? null : curatedThemePresets[id];
-            const preview = preset?.preview ?? {
-              background: customPreviewTheme["--bg0"],
-              surface: customPreviewTheme["--bg3"],
-              accent: customPreviewAccent.acc,
-              text: customPreviewTheme["--tx0"]
-            };
-            const fontId = preset?.displayFont ?? appearance.displayFont;
-            const label = preset?.label ?? "Custom";
-            const description = preset?.description ?? "Your own mode, accent, font, and background combination.";
-            return (
-              <button
-                aria-pressed={activeThemePreset === id}
-                className={activeThemePreset === id ? "themePresetCard active" : "themePresetCard"}
-                key={id}
-                style={{
-                  "--preset-bg": preview.background,
-                  "--preset-surface": preview.surface,
-                  "--preset-accent": preview.accent,
-                  "--preset-text": preview.text,
-                  "--preset-font": displayFonts[fontId].head
-                } as CSSProperties}
-                type="button"
-                onClick={() =>
-                  setAppearance((current) => {
-                    if (id === "custom") {
-                      return { ...current, themePreset: "custom" };
-                    }
-                    const next = curatedThemePresets[id];
-                    return {
-                      ...current,
-                      accent: next.accent,
-                      displayFont: next.displayFont,
-                      mode: next.mode,
-                      themePreset: id
-                    };
-                  })
-                }
-              >
-                <span aria-hidden="true" className="themePresetPreview"><i /><i /><i /></span>
-                <span className="themePresetCopy"><strong>{label}</strong><small>{description}</small></span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="appearanceSubhead">
-          <strong>Fine tune</strong>
-          <span>Changing any control below turns the current look into a custom theme.</span>
-        </div>
-        <div className="appearanceGrid">
-          <label className="settingsField compact">
-            <span>Mode</span>
-            <StyledSelect<AppearanceMode>
-              ariaLabel="Appearance mode"
-              options={[
-                { value: "dark", label: "Dark" },
-                { value: "light", label: "Light" }
-              ]}
-              value={appearance.mode}
-              onChange={(value) =>
-                setAppearance((current) => ({
-                  ...current,
-                  mode: value,
-                  accent: isAccentColorId(current.accent) ? current.accent : defaultAppearanceSettings.accent,
-                  themePreset: "custom"
-                }))
-              }
-            />
-          </label>
-          <label className="settingsField compact">
-            <span>Display font</span>
-            <StyledSelect<DisplayFontId>
-              ariaLabel="Display font"
-              options={fontOptions.map(([id, font]) => ({ value: id, label: font.label }))}
-              value={appearance.displayFont}
-              onChange={(value) =>
-                setAppearance((current) => ({
-                  ...current,
-                  displayFont: value,
-                  themePreset: "custom"
-                }))
-              }
-            />
-          </label>
-        </div>
-        <div className="appearanceSwatches" aria-label="Highlight color">
-          {accentOptions.map(([id, palette]) => {
-            const color = palette[appearance.mode].acc;
-            return (
-              <button
-                aria-label={`Use ${palette.label} highlight`}
-                className={appearance.themePreset === "custom" && appearance.accent === id ? "colorSwatch active" : "colorSwatch"}
-                key={id}
-                style={{ "--swatch": color } as CSSProperties}
-                title={palette.label}
-                type="button"
-                onClick={() => setAppearance((current) => ({ ...current, accent: id, themePreset: "custom" }))}
-              >
-                <span>{palette.label}</span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="backgroundModes" aria-label="Mode background images">
-          {appearanceModes.map((mode) => {
-            const modeBackground = appearance.backgroundDefaults[mode];
-            return (
-              <div className="backgroundPicker" key={mode}>
-                <div>
-                  <strong>{mode === "dark" ? "Dark background" : "Light background"}</strong>
-                  <span>{modeBackground ? basenameFromPath(modeBackground.path) : "No image selected."}</span>
-                </div>
-                <button type="button" onClick={() => void onSelectBackgroundImage(mode)}>
-                  Choose Image
-                </button>
-                <button
-                  className="secondary"
-                  disabled={!modeBackground}
-                  type="button"
-                  onClick={() =>
-                    setAppearance((current) => ({
-                      ...current,
-                      backgroundDefaults: { ...current.backgroundDefaults, [mode]: null },
-                      backgroundImagePath: current.mode === mode ? null : current.backgroundImagePath,
-                      backgroundImageUrl: current.mode === mode ? null : current.backgroundImageUrl
-                    }))
-                  }
-                >
-                  Clear
-                </button>
-              </div>
-            );
-          })}
-        </div>
-        {appearance.backgroundImages.length > 0 ? (
-          <div className="backgroundHistory" aria-label="Saved background images">
-            {appearance.backgroundImages.map((image) => (
-              <div className={appearance.backgroundDefaults[appearance.mode]?.path === image.path ? "backgroundHistoryItem active" : "backgroundHistoryItem"} key={image.id}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setAppearance((current) => ({
-                      ...current,
-                      backgroundDefaults: { ...current.backgroundDefaults, [current.mode]: { path: image.path, url: image.url } },
-                      backgroundImagePath: image.path,
-                      backgroundImageUrl: image.url
-                    }))
-                  }
-                >
-                  <span>{image.name}</span>
-                  <small>{image.path}</small>
-                </button>
-                <button
-                  aria-label={`Remove ${image.name}`}
-                  className="secondary"
-                  type="button"
-                  onClick={() =>
-                    setAppearance((current) => ({
-                      ...current,
-                      backgroundDefaults: {
-                        dark: current.backgroundDefaults.dark?.path === image.path ? null : current.backgroundDefaults.dark,
-                        light: current.backgroundDefaults.light?.path === image.path ? null : current.backgroundDefaults.light
-                      },
-                      backgroundImagePath: current.backgroundImagePath === image.path ? null : current.backgroundImagePath,
-                      backgroundImageUrl: current.backgroundImagePath === image.path ? null : current.backgroundImageUrl,
-                      backgroundImages: current.backgroundImages.filter((item) => item.id !== image.id)
-                    }))
-                  }
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </section>
+      <AppearanceStudio appearance={appearance} setAppearance={setAppearance} onSelectBackgroundImage={onSelectBackgroundImage} saveError={appearanceSaveError} />
 
       <section className="settingsHeader" id="settings-taste">
         <div>
@@ -8695,7 +8250,7 @@ function DiscoveryView(props: Parameters<typeof LegacyDiscoveryView>[0]): ReactE
     <section className="discovery-v2 discovery-v10 discovery-v11 discoveryPage" aria-label="Discovery">
       <header className="discovery-functional-head">
         <div>
-          <h1>Discovery</h1>
+          <h1>Soulseek</h1>
           <div className="network-facts">
             <span className={healthReady ? "connected" : ""}><i />{healthReady ? "slskd connected" : "slskd offline"}</span>
             <span>{groups.length.toLocaleString()} folders</span>
@@ -10859,16 +10414,9 @@ function DiscoveryGroupResult({
 type HomeAnalyticsPeriod = "7d" | "30d" | "90d" | "all";
 
 function HomeAnalyticsView({
-  albumsState,
-  recentAlbums,
-  libraryTotal,
-  playback,
-  playbackBusy,
-  onOpenAlbum,
-  onOpenArtistPage,
-  onPlayAlbum,
-  onPlayFile
+  albumsState, playback, playbackBusy, onOpenAlbum, onOpenArtistPage, onPlayAlbum, onPlayFile, onOpenSettings
 }: {
+  onOpenSettings(): void;
   albumsState: AlbumsState;
   recentAlbums: AlbumGroupItem[];
   libraryTotal: number;
@@ -10880,315 +10428,167 @@ function HomeAnalyticsView({
   onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
 }): ReactElement {
   const [period, setPeriod] = useState<HomeAnalyticsPeriod>("30d");
-  const [showLabels, setShowLabels] = useState(true);
-  const albums = "albums" in albumsState ? albumsState.albums.albums : [];
-  const files = useMemo(() => {
-    const byId = new Map<string, LibraryFile>();
-    for (const album of albums) {
-      for (const file of album.files) {
-        byId.set(file.id, file);
-      }
-    }
-    return [...byId.values()];
-  }, [albums]);
-  const periodCutoff = useMemo(() => {
-    if (period === "all") {
-      return 0;
-    }
-    const days = period === "7d" ? 7 : period === "30d" ? 30 : 90;
-    return Date.now() - days * 24 * 60 * 60 * 1000;
-  }, [period]);
-  const periodFiles = useMemo(
-    () =>
-      period === "all"
-        ? files
-        : files.filter((file) => {
-            if (!file.lastPlayedAt) {
-              return false;
-            }
-            const playedAt = new Date(file.lastPlayedAt).getTime();
-            return Number.isFinite(playedAt) && playedAt >= periodCutoff;
-          }),
-    [files, period, periodCutoff]
-  );
-  const periodFileIds = useMemo(() => new Set(periodFiles.map((file) => file.id)), [periodFiles]);
-  const periodAlbums = useMemo(
-    () => (period === "all" ? albums : albums.filter((album) => album.files.some((file) => periodFileIds.has(file.id)))),
-    [albums, period, periodFileIds]
-  );
-  const usesAllTimeFallback = period !== "all" && periodAlbums.length === 0;
-  const signalAlbums = periodAlbums.length > 0 ? periodAlbums : albums;
-  const signalFiles = periodFiles.length > 0 ? periodFiles : files;
-  const rankedAlbums = useMemo(
-    () =>
-      [...signalAlbums].sort(
-        (left, right) =>
-          albumPlayCount(right.files) - albumPlayCount(left.files) ||
-          albumLikeCount(right.files) - albumLikeCount(left.files) ||
-          albumAverageRating(right.files) - albumAverageRating(left.files) ||
-          compareAlbumsByMode(left, right, "artistAlbum")
-      ),
-    [signalAlbums]
-  );
-  const topAlbums = rankedAlbums.slice(0, 20);
-  const artistSections = useMemo(() => groupAlbumsByArtist(signalAlbums), [signalAlbums]);
-  const topArtists = useMemo(() => sortArtistSections(artistSections, "listens"), [artistSections]);
-  const recentFiles = useMemo(
-    () =>
-      [...files]
-        .filter((file) => Boolean(file.lastPlayedAt))
-        .sort((left, right) => (right.lastPlayedAt ?? "").localeCompare(left.lastPlayedAt ?? ""))
-        .slice(0, 8),
-    [files]
-  );
-  const recentQueue = useMemo(() => recentFiles.map((file) => file.id), [recentFiles]);
-  const playCount = signalFiles.reduce((sum, file) => sum + file.playCount, 0);
-  const listenTimeMs = getFilesListenTimeMs(signalFiles);
-  const losslessCount = signalFiles.filter((file) => isLosslessFile(file)).length;
-  const ratedCount = signalFiles.filter((file) => file.rating != null || file.liked != null || file.disliked != null).length;
-  const maxAlbumPlays = Math.max(1, ...rankedAlbums.slice(0, 24).map((album) => albumPlayCount(album.files)));
-  const distributionAlbums = rankedAlbums.slice(0, 24);
-  const heatmapFiles = useMemo(
-    () =>
-      [...signalFiles]
-        .sort(
-          (left, right) =>
-            right.playCount - left.playCount ||
-            (right.lastPlayedAt ?? "").localeCompare(left.lastPlayedAt ?? "")
-        )
-        .slice(0, 56),
-    [signalFiles]
-  );
-  const maxFilePlays = Math.max(1, ...heatmapFiles.map((file) => file.playCount));
-  const heatmapLevels = Array.from({ length: 56 }, (_, index) => {
-    const file = heatmapFiles[index];
-    return file ? Math.max(1, Math.min(5, Math.ceil((file.playCount / maxFilePlays) * 5))) : 0;
-  });
-  const formatRows = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const file of signalFiles) {
-      const format = (file.codec ?? file.extension ?? "other").toUpperCase();
-      counts.set(format, (counts.get(format) ?? 0) + 1);
-    }
-    return [...counts.entries()]
-      .sort((left, right) => right[1] - left[1])
-      .slice(0, 4)
-      .map(([format, count]) => ({
-        format,
-        count,
-        percent: signalFiles.length > 0 ? Math.round((count / signalFiles.length) * 100) : 0
-      }));
-  }, [signalFiles]);
-  const genreRows = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const file of signalFiles) {
-      const genre = file.displayTags.genre?.trim();
-      if (!genre) {
-        continue;
-      }
-      for (const value of genre.split(/[,;/]/).map((item) => item.trim()).filter(Boolean)) {
-        counts.set(value, (counts.get(value) ?? 0) + Math.max(1, file.playCount));
-      }
-    }
-    const max = Math.max(1, ...counts.values());
-    return [...counts.entries()]
-      .sort((left, right) => right[1] - left[1])
-      .slice(0, 7)
-      .map(([genre, count]) => ({ genre, width: Math.max(24, Math.round((count / max) * 100)) }));
-  }, [signalFiles]);
-  const periodLabel =
-    period === "7d" ? "Last 7 days" : period === "30d" ? "Last 30 days" : period === "90d" ? "Last 90 days" : "All time";
-  const periodDescription = usesAllTimeFallback ? `${periodLabel} - no timestamped plays; showing all-time signals` : periodLabel;
-  const topArtist = topArtists[0] ?? null;
-  const topAlbum = topAlbums[0] ?? recentAlbums[0] ?? null;
-  const topAlbumPlays = topAlbum ? albumPlayCount(topAlbum.files) : 0;
+  const [showLabels, setShowLabels] = useState(false);
+  const [snapshot, setSnapshot] = useState<{ albums: AlbumGroupItem[]; listening: HomeListeningResponse; taste: TasteProfileResponse | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refresh, setRefresh] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      getJson("/library/albums", albumGroupsResponseSchema, controller.signal),
+      getJson(`/home/listening?period=${period}`, homeListeningResponseSchema, controller.signal),
+      getJson("/settings/taste-profile", tasteProfileResponseSchema, controller.signal).catch(() => null)
+    ]).then(([library, listening, taste]) => {
+      if (!controller.signal.aborted) setSnapshot({ albums: library.albums, listening, taste });
+    }).catch((reason: unknown) => {
+      if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Could not load listening history.");
+    }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [period, playback.currentFileId, playback.status, albumsState.status, refresh]);
 
+  const data = useMemo(() => {
+    if (!snapshot) return null;
+    const { albums, listening } = snapshot;
+    const stats = new Map(listening.files.map((row) => [row.fileId, row]));
+    const files = new Map(albums.flatMap((album) => album.files.map((file) => [file.id, file] as const)));
+    const rank = albums.map((album) => ({ album, plays: album.files.reduce((sum, file) => sum + (stats.get(file.id)?.plays ?? 0), 0) }))
+      .filter((row) => row.plays > 0).sort((a, b) => b.plays - a.plays || a.album.album.localeCompare(b.album.album));
+    const artistMap = new Map<string, { artist: string; plays: number; albums: number; cover: string }>();
+    for (const row of rank) {
+      const entry = artistMap.get(row.album.artist) ?? { artist: row.album.artist, plays: 0, albums: 0, cover: row.album.id };
+      entry.plays += row.plays;
+      entry.albums += 1;
+      artistMap.set(entry.artist, entry);
+    }
+    const artists = [...artistMap.values()].sort((a, b) => b.plays - a.plays || a.artist.localeCompare(b.artist));
+    const tracks = listening.files.filter((row) => row.plays > 0 && files.has(row.fileId))
+      .map((row) => ({ ...row, file: files.get(row.fileId)! }))
+      .sort((a, b) => b.plays - a.plays || a.file.filename.localeCompare(b.file.filename)).slice(0, 6);
+    const waiting = albums.filter((album) => album.files.every((file) => file.playCount === 0))
+      .sort((a, b) => albumLikeCount(b.files) - albumLikeCount(a.files) || albumAverageRating(b.files) - albumAverageRating(a.files) || (artistMap.get(b.artist)?.plays ?? 0) - (artistMap.get(a.artist)?.plays ?? 0) || a.album.localeCompare(b.album));
+    const plays = listening.files.reduce((sum, row) => sum + row.plays, 0);
+    const listenedMs = listening.files.reduce((sum, row) => sum + row.listenedMs, 0);
+    const end = new Date(listening.until);
+    const start = listening.since ? new Date(listening.since) : new Date(Math.max(
+      end.getTime() - 89 * 86400000, new Date(listening.days[0]?.day ?? listening.until).getTime()
+    ));
+    start.setUTCHours(0, 0, 0, 0);
+    const dayMap = new Map(listening.days.map((row) => [row.day, row]));
+    const days: Array<{ day: string; plays: number; listenedMs: number }> = [];
+    for (let time = start.getTime(); time <= end.getTime(); time += 86400000) {
+      const day = new Date(time).toISOString().slice(0, 10);
+      days.push(dayMap.get(day) ?? { day, plays: 0, listenedMs: 0 });
+    }
+    const hours = Array.from({ length: 24 }, (_, hour) => ({ hour, plays: listening.hours.find((row) => row.hour === hour)?.plays ?? 0 }));
+    const recent = listening.recent.map((row) => ({ ...row, file: files.get(row.fileId) })).filter((row) => row.file != null);
+    return { rank, artists, tracks, waiting, plays, listenedMs, days, hours, recent,
+      activeDays: listening.days.filter((day) => day.plays > 0).length,
+      maxDay: Math.max(1, ...days.map((day) => day.plays)),
+      maxHour: Math.max(1, ...hours.map((hour) => hour.plays)) };
+  }, [snapshot]);
+  const label = period === "all" ? "All time" : `Last ${period.slice(0, -1)} days`;
+  const shortDate = (day: string) => new Date(`${day}T00:00:00Z`).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
   return (
-    <section className="homeAnalyticsView" aria-label="Home analytics">
+    <section className="homeAnalyticsView homeJournal" aria-label="Home listening overview">
       <header className="homeAnalyticsHeader">
-        <div>
-          <h1>Home</h1>
-          <span>Listening history and library signals</span>
-        </div>
-        <div className="homePeriodTabs" role="group" aria-label="Analytics period">
-          {([
-            ["7d", "7 days"],
-            ["30d", "30 days"],
-            ["90d", "90 days"],
-            ["all", "All time"]
-          ] as Array<[HomeAnalyticsPeriod, string]>).map(([value, label]) => (
-            <button className={period === value ? "active" : ""} key={value} type="button" onClick={() => setPeriod(value)}>
-              {label}
-            </button>
+        <div><h1>Home</h1><span>Your music, in rotation.</span></div>
+        <div className="homePeriodTabs" role="group" aria-label="Listening period">
+          {([["7d", "7 days"], ["30d", "30 days"], ["90d", "90 days"], ["all", "All time"]] as const).map(([value, title]) => (
+            <button type="button" key={value} aria-pressed={period === value} className={period === value ? "active" : ""} onClick={() => setPeriod(value)}>{title}</button>
           ))}
         </div>
       </header>
-
-      <div className="homeAnalyticsScroll">
-        {albumsState.status === "error" ? <div className="inlineError">{albumsState.message}</div> : null}
-        {albumsState.status === "loading" && albums.length === 0 ? <div className="emptyState">Loading home.</div> : null}
-
-        <section className="homeAnalyticsTop">
-          <article className="homeCollagePanel">
-            <header>
-              <div>
-                <span className="eyebrow">Generated from listening history</span>
-                <h2>Top albums</h2>
+      <div className="homeAnalyticsScroll" aria-busy={loading}>
+        {error ? <div className="inlineError" role="alert">{error} <button type="button" onClick={() => setRefresh((value) => value + 1)}>Retry</button></div> : null}
+        {loading ? <div className="hjLoading" role="status">Reading your listening history…</div> : !error && data ? <>
+          <div className="hjEdition"><span>LISTENING JOURNAL <b>/ {label}</b></span><span>{snapshot?.albums.length.toLocaleString()} albums on your shelves</span></div>
+          <div className="hjMain">
+            <article className="hjWall">
+              <header className="hjSectionHead"><div><span className="eyebrow">01 / The heavy rotation</span><h2>Your top 25</h2></div>
+                <button type="button" className={showLabels ? "active" : "secondary"} aria-pressed={showLabels} onClick={() => setShowLabels((value) => !value)}>Labels</button>
+              </header>
+              <div className={`homeCollageGrid${showLabels ? " showLabels" : ""}`} aria-label="Top albums, five by five">
+                {Array.from({ length: 25 }, (_, index) => {
+                  const row = data.rank[index];
+                  return row ? <button className="homeCollageTile" type="button" key={row.album.id}
+                    aria-label={`${index + 1}. ${row.album.album} by ${row.album.artist}, ${row.plays} plays`}
+                    title={`${row.album.album} — ${row.album.artist} · ${row.plays} plays`} onClick={() => onOpenAlbum(row.album)}>
+                    <Artwork className="homeCollageArtwork" eager={index < 10} src={artworkAlbumUrl(row.album.id)} />
+                    <span className="homeCollageRank">{String(index + 1).padStart(2, "0")}</span>
+                    <span className="homeCollageLabel"><strong>{row.album.album}</strong><small>{row.album.artist} / {row.plays} plays</small></span>
+                  </button> : <div className="hjEmptyTile" key={`empty-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><small>—</small></div>;
+                })}
               </div>
-              <button className={showLabels ? "active" : ""} type="button" onClick={() => setShowLabels((value) => !value)}>
-                Labels
-              </button>
-            </header>
-            <div className={showLabels ? "homeCollageGrid showLabels" : "homeCollageGrid"}>
-              {topAlbums.map((album, index) => (
-                <button
-                  aria-label={`${index + 1}. ${album.album} by ${album.artist}`}
-                  className="homeCollageTile"
-                  key={album.id}
-                  type="button"
-                  onClick={() => onOpenAlbum(album)}
-                >
-                  <Artwork className="homeCollageArtwork" eager={index < 5} src={artworkAlbumUrl(album.id)} />
-                  <span className="homeCollageRank">{String(index + 1).padStart(2, "0")}</span>
-                  <span className="homeCollageLabel">
-                    <strong>{album.album}</strong>
-                    <small>{album.artist} / {albumPlayCount(album.files)} plays</small>
-                  </span>
-                </button>
-              ))}
-            </div>
-            <footer>
-              <span>{topAlbums.length} ranked albums</span>
-              <span>{periodDescription}</span>
-            </footer>
-          </article>
-
-          <aside className="homeSummaryPanel">
-            <header>
-              <span className="eyebrow">Selected period</span>
-              <h2>{periodLabel}</h2>
-            </header>
-            <div className="homeMetricGrid">
-              <span><small>Listen time</small><strong>{formatListenTime(listenTimeMs)}</strong></span>
-              <span><small>Track plays</small><strong>{playCount.toLocaleString()}</strong></span>
-              <span><small>Artists</small><strong>{topArtists.length.toLocaleString()}</strong></span>
-              <span><small>Albums</small><strong>{signalAlbums.length.toLocaleString()}</strong></span>
-            </div>
-            <section className="homeCompactDistribution">
-              <div><span>Album play distribution</span><small>{rankedAlbums.length} albums</small></div>
-              <div className="homeCompactBars">
-                {rankedAlbums.slice(0, 14).map((album) => (
-                  <i key={album.id} style={{ height: `${Math.max(5, (albumPlayCount(album.files) / maxAlbumPlays) * 100)}%` }} title={album.album} />
-                ))}
-              </div>
-            </section>
-            <dl className="homeSignalList">
-              <div><dt>Most played artist</dt><dd>{topArtist?.artist ?? "-"}</dd></div>
-              <div><dt>Most played album</dt><dd>{topAlbum?.album ?? "-"}</dd></div>
-              <div><dt>Lossless files</dt><dd>{losslessCount.toLocaleString()}</dd></div>
-              <div><dt>Rated or marked</dt><dd>{ratedCount.toLocaleString()}</dd></div>
-            </dl>
-          </aside>
-        </section>
-
-        <section className="homeAnalysisGrid">
-          <article className="homeDistributionPanel">
-            <header><div><span className="eyebrow">Ranked albums</span><h3>Play distribution</h3></div><small>{distributionAlbums.length} albums</small></header>
-            <div className="homeDistributionChart">
-              {distributionAlbums.map((album, index) => (
-                <button
-                  className={index < 5 ? "peak" : ""}
-                  key={album.id}
-                  style={{ height: `${Math.max(4, (albumPlayCount(album.files) / maxAlbumPlays) * 100)}%` }}
-                  title={`${album.album}: ${albumPlayCount(album.files)} plays`}
-                  type="button"
-                  onClick={() => onOpenAlbum(album)}
-                />
-              ))}
-            </div>
-            <footer><span>Highest</span><span>Lower activity</span></footer>
-          </article>
-
-          <article className="homeHeatmapPanel">
-            <header><div><span className="eyebrow">Track activity</span><h3>Listening intensity</h3></div><small>{heatmapFiles.length} tracks</small></header>
-            <div className="homeHistoryHeatmap">
-              {heatmapLevels.map((level, index) => <i className={`level${level}`} key={index} />)}
-            </div>
-            <footer><span>Less</span><span className="homeHeatLegend">{[0, 1, 2, 3, 4, 5].map((level) => <i className={`level${level}`} key={level} />)}</span><span>More</span></footer>
-          </article>
-
-          <article className="homeFormatPanel">
-            <header><div><span className="eyebrow">Library mix</span><h3>Formats played</h3></div><small>{signalFiles.length} files</small></header>
-            <div className="homeFormatRows">
-              {formatRows.map((row) => (
-                <div key={row.format}>
-                  <span>{row.format}</span>
-                  <i><b style={{ width: `${row.percent}%` }} /></i>
-                  <strong>{row.percent}%</strong>
+              <footer className="hjWallFooter"><span>{Math.min(25, data.rank.length)} / 25 albums</span><span>{data.rank.length ? "Select a cover to explore ↗" : "Your next listen starts the story"}</span></footer>
+            </article>
+            <div className="hjRight">
+              <article className="hjPulse">
+                <header className="hjSectionHead"><div><span className="eyebrow">02 / The listening pulse</span><h2>{label}, in sound</h2></div><span className="hjLiveMark">● HISTORY</span></header>
+                <div className="hjMetrics">
+                  <div><span>Recorded listening</span><strong>{data.listenedMs > 0 ? formatListenTime(data.listenedMs).replace(/ listened$/, "") : "0m"}</strong></div>
+                  <div><span>Plays</span><strong>{data.plays.toLocaleString()}</strong></div>
+                  <div><span>Artists</span><strong>{data.artists.length}</strong></div>
+                  <div><span>Active days</span><strong>{data.activeDays}</strong></div>
                 </div>
-              ))}
-            </div>
-          </article>
-        </section>
-
-        <section className="homeAnalyticsBottom">
-          <article className="homeRecentListens">
-            <header><div><span className="eyebrow">Playback history</span><h3>Recently played</h3></div></header>
-            <div className="homeRecentHead"><span>When</span><span>Track</span><span>Album</span><span>Time</span><span /></div>
-            {recentFiles.map((file) => (
-              <div className={file.id === playback.currentFileId ? "homeRecentRow active" : "homeRecentRow"} key={file.id}>
-                <span>{file.lastPlayedAt ? formatDateTime(file.lastPlayedAt) : "-"}</span>
-                <span className="homeRecentTitle">
-                  <Artwork className="homeRecentThumb" src={artworkFileUrl(file.id)} />
-                  <span><strong>{file.displayTags.title ?? file.filename}</strong><small>{file.displayTags.artist ?? "Unknown artist"}</small></span>
-                </span>
-                <span>{file.displayTags.album ?? "Unknown album"}</span>
-                <span>{file.durationMs == null ? "-" : formatTime(file.durationMs)}</span>
-                <button
-                  aria-label={`Play ${file.displayTags.title ?? file.filename}`}
-                  disabled={playbackBusy}
-                  type="button"
-                  onClick={() => void onPlayFile(file.id, recentQueue)}
-                >
-                  <TransportIcon shape={file.id === playback.currentFileId && playback.status === "playing" ? "pause" : "play"} />
-                </button>
+                <div className="hjActivity">
+                  <div className="hjChartCaption"><strong>Day by day</strong><span>{period === "all" ? "Latest 90 days · UTC" : "Plays · UTC"}</span></div>
+                  <div className="hjDayBars" role="group" aria-label="Daily play counts">
+                    {data.days.map((day) => <div key={day.day} className="hjDayColumn" tabIndex={0} aria-label={`${shortDate(day.day)}: ${day.plays} plays`} title={`${shortDate(day.day)} · ${day.plays} plays · ${formatListenTime(day.listenedMs)}`}>
+                      <i style={{ height: day.plays ? `${Math.max(3, day.plays / data.maxDay * 100)}%` : "2px" }} className={day.plays ? "" : "empty"} />
+                      <span className="hjTip">{shortDate(day.day)} · {day.plays} plays</span>
+                    </div>)}
+                  </div>
+                  <div className="hjAxis"><span>{shortDate(data.days[0]!.day)}</span><span>{data.maxDay === 1 && data.plays === 0 ? "No plays yet" : `${data.maxDay} peak plays / day`}</span><span>{shortDate(data.days[data.days.length - 1]!.day)}</span></div>
+                  <div className="hjHourRow"><span>By the hour <small>UTC</small></span><div className="hjHours" aria-label="Hourly listening pattern">{data.hours.map((hour) => <i key={hour.hour} tabIndex={0} aria-label={`${hour.hour}:00 UTC: ${hour.plays} plays`} title={`${String(hour.hour).padStart(2, "0")}:00 UTC · ${hour.plays} plays`} style={{ background: `color-mix(in srgb, var(--acc) ${hour.plays ? 15 + hour.plays / data.maxHour * 85 : 0}%, var(--bg2))` }} />)}</div><small>00 — 23</small></div>
+                </div>
+              </article>
+              <div className="hjRankings">
+                <article><header className="hjSectionHead"><div><span className="eyebrow">03 / Familiar voices</span><h2>Artist rotation</h2></div></header>
+                  {data.artists.slice(0, 6).map((artist, index) => <button className="hjRankRow" type="button" key={artist.artist} onClick={() => onOpenArtistPage(artist.artist)}>
+                    <span className="hjIndex">{String(index + 1).padStart(2, "0")}</span><Artwork className="hjThumb" src={artworkAlbumUrl(artist.cover)} />
+                    <span className="hjRowText"><strong>{artist.artist}</strong><small>{artist.albums} {artist.albums === 1 ? "album" : "albums"} in rotation</small><i className="hjMeter"><b style={{ width: `${artist.plays / (data.artists[0]?.plays || 1) * 100}%` }} /></i></span><span className="hjCount">{artist.plays}<small>plays</small></span>
+                  </button>)}
+                  {!data.artists.length ? <p className="hjEmpty">Artists will appear here as you listen.</p> : null}
+                </article>
+                <article><header className="hjSectionHead"><div><span className="eyebrow">04 / Worth another spin</span><h2>On repeat</h2></div></header>
+                  {data.tracks.map((row, index) => <button className="hjRankRow" type="button" key={row.fileId} disabled={playbackBusy} onClick={() => void onPlayFile(row.fileId, data.tracks.map((track) => track.fileId))} aria-label={`Play ${row.file.displayTags.title ?? row.file.filename}`}>
+                    <span className="hjIndex">{String(index + 1).padStart(2, "0")}</span><Artwork className="hjThumb" src={artworkFileUrl(row.fileId)} />
+                    <span className="hjRowText"><strong>{row.file.displayTags.title ?? row.file.filename}</strong><small>{row.file.displayTags.artist ?? "Unknown artist"}</small></span><span className="hjCount">{row.plays}<small>▶</small></span>
+                  </button>)}
+                  {!data.tracks.length ? <p className="hjEmpty">No played tracks in this period. Pick an album below.</p> : null}
+                </article>
               </div>
-            ))}
-            {recentFiles.length === 0 ? <div className="homeAnalyticsEmpty">No playback history yet.</div> : null}
-          </article>
-
-          <aside className="homeFingerprintPanel">
-            <header><span className="eyebrow">Habit signals</span><h3>Listening fingerprint</h3></header>
-            <div className="homeFingerprintTags">
-              {genreRows.map((row) => <button key={row.genre} style={{ flexBasis: `${row.width}%` }} type="button">{row.genre}</button>)}
-              {genreRows.length === 0 ? <span>No genre tags available.</span> : null}
             </div>
-            <div className="homeHabitFacts">
-              <button disabled={!topArtist} type="button" onClick={() => topArtist ? onOpenArtistPage(topArtist.artist) : undefined}>
-                <strong>{topArtist?.artist ?? "No artist signal"}</strong>
-                <span>{topArtist ? `${artistPlayCount(topArtist.albums)} plays across ${topArtist.albums.length} albums` : "Play music to build this view"}</span>
-              </button>
-              <button disabled={!topAlbum} type="button" onClick={() => topAlbum ? onOpenAlbum(topAlbum) : undefined}>
-                <strong>{topAlbum?.album ?? "No album signal"}</strong>
-                <span>{topAlbum ? `${topAlbumPlays} plays / ${topAlbum.artist}` : "No ranked album yet"}</span>
-              </button>
-              <button disabled={!topAlbum || playbackBusy} type="button" onClick={() => topAlbum ? void onPlayAlbum(topAlbum.id) : undefined}>
-                <strong>Start top album</strong>
-                <span>{topAlbum ? topAlbum.album : "Nothing available"}</span>
-              </button>
-            </div>
-          </aside>
-        </section>
-
-        <footer className="homeAnalyticsFooter">
-          <span>{libraryTotal.toLocaleString()} indexed tracks</span>
-          <span>{files.length.toLocaleString()} loaded into analytics</span>
-        </footer>
+          </div>
+          {snapshot ? <HomeInsights albums={snapshot.albums} listening={snapshot.listening} taste={snapshot.taste} onOpenSettings={onOpenSettings} /> : null}
+          <div className="hjLower">
+            <article className="hjHistory"><header className="hjSectionHead"><div><span className="eyebrow">05 / The latest spins</span><h2>Recently played</h2></div><span>{label}</span></header>
+              <div className="hjHistoryHead"><span>Track / artist</span><span>Album</span><span>Played</span><span /></div>
+              {data.recent.map((row) => <div className={`hjHistoryRow${row.fileId === playback.currentFileId ? " active" : ""}`} key={row.id}>
+                <div className="hjTrackIdentity"><Artwork className="hjThumb" src={artworkFileUrl(row.fileId)} /><span className="hjRowText"><strong>{row.file!.displayTags.title ?? row.file!.filename}</strong><small>{row.file!.displayTags.artist ?? "Unknown artist"}</small></span></div>
+                <span className="hjTruncate" title={row.file!.displayTags.album ?? ""}>{row.file!.displayTags.album ?? "—"}</span><time dateTime={row.playedAt}>{formatDateTime(row.playedAt)}</time>
+                <button type="button" disabled={playbackBusy} aria-label={`Play ${row.file!.displayTags.title ?? row.file!.filename}`} onClick={() => void onPlayFile(row.fileId)}><TransportIcon shape="play" /></button>
+              </div>)}
+              {!data.recent.length ? <p className="hjEmpty">No recorded plays in this period. Choose an album and press play.</p> : null}
+            </article>
+            <article className="hjWaiting"><header className="hjSectionHead"><div><span className="eyebrow">06 / Off the beaten path</span><h2>Still waiting</h2></div><span>{data.waiting.length} unplayed</span></header>
+              <p className="hjShelfNote">Unplayed albums. Familiar artists get the first spin.</p>
+              {data.waiting.slice(0, 4).map((album) => <div className="hjShelfRow" key={album.id}>
+                <button className="hjShelfAlbum" type="button" onClick={() => onOpenAlbum(album)}><Artwork className="hjShelfCover" src={artworkAlbumUrl(album.id)} /><span className="hjRowText"><strong>{album.album}</strong><small>{album.artist}</small><small>{album.year ?? "Undated"} · {album.fileCount} {album.fileCount === 1 ? "track" : "tracks"}</small></span></button>
+                <button className="hjShelfPlay" type="button" disabled={playbackBusy} onClick={() => void onPlayAlbum(album.id)} aria-label={`Play ${album.album}`}><TransportIcon shape="play" /></button>
+              </div>)}
+              {!data.waiting.length ? <p className="hjEmpty">Every album has had a first spin. Nicely explored.</p> : null}
+            </article>
+          </div>
+          <footer className="hjFooter"><span>From your playback history · refreshed when playback changes</span><span>Charts use UTC · listening is recorded playback position <button type="button" onClick={() => setRefresh((value) => value + 1)}>Refresh ↻</button></span></footer>
+        </> : null}
       </div>
     </section>
   );
 }
-
 
 function AlbumsView({
   albumLayout,
@@ -12016,6 +11416,7 @@ function NowPlayingModal({
   const displayTitle = currentFile?.displayTags.title ?? playback.currentDisplayName ?? "Nothing queued";
   const displayArtist = currentFile?.displayTags.artist ?? currentFile?.displayTags.albumartist ?? "Unknown Artist";
   const displayAlbum = currentFile?.displayTags.album ?? "Unknown Album";
+  const displayYear = currentFile ? cleanDisplayYear(currentFile.displayTags.year ?? currentFile.displayTags.date) : null;
   const albumTarget = currentFile ? getFileAlbumTarget(currentFile) : null;
   const artworkUrl = playback.currentFileId ? artworkFileUrl(playback.currentFileId) : null;
   const visualizerPalette = useArtworkVisualizerPalette(artworkUrl, appearanceMode);
@@ -12161,6 +11562,24 @@ function NowPlayingModal({
                     onRating={onRating}
                   />
                 ) : null}
+                {currentFile ? (
+                  <dl className="nowPlayingSongDetails" aria-label="Song details">
+                    <div>
+                      <dt>Plays</dt>
+                      <dd title="Recorded plays, including completed listens">{currentFile.playCount.toLocaleString()}</dd>
+                    </div>
+                    {displayYear ? <div><dt>Released</dt><dd>{displayYear}</dd></div> : null}
+                    {currentFile.extension ? (
+                      <div>
+                        <dt>Audio</dt>
+                        <dd title={formatFileFormat(currentFile)}>
+                          {currentFile.extension.toUpperCase()}
+                          {currentFile.sampleRate ? <span> · {Number((currentFile.sampleRate / 1000).toFixed(1))} kHz</span> : null}
+                        </dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                ) : null}
               </div>
               <div className="focusSpectrum" aria-hidden="true">
                 <div className="focusSpectrumLabel">
@@ -12171,101 +11590,103 @@ function NowPlayingModal({
               </div>
             </div>
             <div className="nowPlayingControlDeck">
-              <div className="overlayPlaybackControls">
-                <div className="nowPlayingModalTime">
-                  <span>{formatTime(playback.positionMs)}</span>
-                  <button
-                    aria-label="Seek playback"
-                    className="modalProgressSeek"
-                    disabled={playbackBusy || playback.status === "stopped" || !playback.durationMs || playback.durationMs <= 0}
-                    type="button"
-                    onClick={(event) => void onSeek(getPointerRatio(event.currentTarget, event.clientX))}
-                  >
-                    <span className="progressRail">
-                      <WaveformCanvas
-                        className="modalWaveformRailCanvas"
-                        playback={playback}
-                        positionFrameRef={visualizerFrameRef}
-                        variant="rail"
-                        waveform={waveformState.waveform}
+              <div className="nowPlayingControlSurface">
+                <div className="overlayPlaybackControls">
+                  <div className="nowPlayingModalTime">
+                    <span>{formatTime(playback.positionMs)}</span>
+                    <button
+                      aria-label="Seek playback"
+                      className="modalProgressSeek"
+                      disabled={playbackBusy || playback.status === "stopped" || !playback.durationMs || playback.durationMs <= 0}
+                      type="button"
+                      onClick={(event) => void onSeek(getPointerRatio(event.currentTarget, event.clientX))}
+                    >
+                      <span className="progressRail">
+                        <WaveformCanvas
+                          className="modalWaveformRailCanvas"
+                          playback={playback}
+                          positionFrameRef={visualizerFrameRef}
+                          variant="rail"
+                          waveform={waveformState.waveform}
+                        />
+                      </span>
+                    </button>
+                    <span>{formatTime(playback.durationMs)}</span>
+                  </div>
+                  <div className="overlayControls">
+                    <RepeatControls
+                      disabled={playbackBusy || playback.status === "stopped"}
+                      repeatMode={playback.repeatMode}
+                      variant="modal"
+                      onRepeatMode={onRepeatMode}
+                    />
+                    <div className="transport modalTransport">
+                      <button aria-label="Previous track" disabled={playbackBusy || playback.status === "stopped"} title="Previous" type="button" onClick={() => void onPrevious()}>
+                        <TransportIcon shape="previous" />
+                      </button>
+                      <button
+                        aria-label={playback.status === "playing" ? "Pause" : "Play"}
+                        className="tPlay"
+                        disabled={(playback.status === "stopped" && !playback.currentFileId) || (playbackBusy && playback.status !== "playing")}
+                        title={playback.status === "playing" ? "Pause" : "Play"}
+                        type="button"
+                        onClick={() => void onPauseResume()}
+                      >
+                        <TransportIcon shape={playback.status === "playing" ? "pause" : "play"} />
+                      </button>
+                      <button aria-label="Next track" disabled={playbackBusy || playback.status === "stopped"} title="Next" type="button" onClick={() => void onNext()}>
+                        <TransportIcon shape="next" />
+                      </button>
+                    </div>
+                    <label className="volumeControl modal">
+                      <span className="volumeIcon" aria-hidden="true">
+                        <UiIcon name="volume" />
+                      </span>
+                      <input
+                        aria-label="Playback volume"
+                        max={100}
+                        min={0}
+                        type="range"
+                        value={playback.volumePercent}
+                        onChange={(event) => void onVolumeChange(event.target.value)}
                       />
+                      <strong>{playback.volumePercent}</strong>
+                    </label>
+                  </div>
+                </div>
+                <div aria-label="Playback context" className="nowPlayingContextRail">
+                  <button
+                    className="nowPlayingContextTrack previous"
+                    disabled={playbackBusy || !previousFile}
+                    type="button"
+                    onClick={() => void onPrevious()}
+                  >
+                    {previousFile ? <Artwork className="nowPlayingContextArt" src={artworkFileUrl(previousFile.id)} /> : <span className="nowPlayingContextPlaceholder"><UiIcon name="album" /></span>}
+                    <span>
+                      <small>Previous</small>
+                      <strong>{previousFile?.displayTags.title ?? "Start of queue"}</strong>
+                      <em>{previousFile?.displayTags.artist ?? "No earlier track"}</em>
                     </span>
                   </button>
-                  <span>{formatTime(playback.durationMs)}</span>
-                </div>
-                <div className="overlayControls">
-                  <RepeatControls
-                    disabled={playbackBusy || playback.status === "stopped"}
-                    repeatMode={playback.repeatMode}
-                    variant="modal"
-                    onRepeatMode={onRepeatMode}
-                  />
-                  <div className="transport modalTransport">
-                    <button aria-label="Previous track" disabled={playbackBusy || playback.status === "stopped"} title="Previous" type="button" onClick={() => void onPrevious()}>
-                      <TransportIcon shape="previous" />
-                    </button>
-                    <button
-                      aria-label={playback.status === "playing" ? "Pause" : "Play"}
-                      className="tPlay"
-                      disabled={(playback.status === "stopped" && !playback.currentFileId) || (playbackBusy && playback.status !== "playing")}
-                      title={playback.status === "playing" ? "Pause" : "Play"}
-                      type="button"
-                      onClick={() => void onPauseResume()}
-                    >
-                      <TransportIcon shape={playback.status === "playing" ? "pause" : "play"} />
-                    </button>
-                    <button aria-label="Next track" disabled={playbackBusy || playback.status === "stopped"} title="Next" type="button" onClick={() => void onNext()}>
-                      <TransportIcon shape="next" />
-                    </button>
+                  <div className="nowPlayingContextCurrent">
+                    <small>Queue position</small>
+                    <strong>{activeQueueIndex >= 0 ? `${activeQueueIndex + 1} / ${playback.queue.length}` : "—"}</strong>
+                    <span>{currentFile ? formatFileFormat(currentFile) : "Playback idle"}</span>
                   </div>
-                  <label className="volumeControl modal">
-                    <span className="volumeIcon" aria-hidden="true">
-                      <UiIcon name="volume" />
+                  <button
+                    className="nowPlayingContextTrack next"
+                    disabled={playbackBusy || !nextFile}
+                    type="button"
+                    onClick={() => void onNext()}
+                  >
+                    <span>
+                      <small>Up next</small>
+                      <strong>{nextFile?.displayTags.title ?? "End of queue"}</strong>
+                      <em>{nextFile?.displayTags.artist ?? "No upcoming track"}</em>
                     </span>
-                    <input
-                      aria-label="Playback volume"
-                      max={100}
-                      min={0}
-                      type="range"
-                      value={playback.volumePercent}
-                      onChange={(event) => void onVolumeChange(event.target.value)}
-                    />
-                    <strong>{playback.volumePercent}</strong>
-                  </label>
+                    {nextFile ? <Artwork className="nowPlayingContextArt" src={artworkFileUrl(nextFile.id)} /> : <span className="nowPlayingContextPlaceholder"><UiIcon name="album" /></span>}
+                  </button>
                 </div>
-              </div>
-              <div aria-label="Playback context" className="nowPlayingContextRail">
-                <button
-                  className="nowPlayingContextTrack previous"
-                  disabled={playbackBusy || !previousFile}
-                  type="button"
-                  onClick={() => void onPrevious()}
-                >
-                  {previousFile ? <Artwork className="nowPlayingContextArt" src={artworkFileUrl(previousFile.id)} /> : <span className="nowPlayingContextPlaceholder"><UiIcon name="album" /></span>}
-                  <span>
-                    <small>Previous</small>
-                    <strong>{previousFile?.displayTags.title ?? "Start of queue"}</strong>
-                    <em>{previousFile?.displayTags.artist ?? "No earlier track"}</em>
-                  </span>
-                </button>
-                <div className="nowPlayingContextCurrent">
-                  <small>Queue position</small>
-                  <strong>{activeQueueIndex >= 0 ? `${activeQueueIndex + 1} / ${playback.queue.length}` : "—"}</strong>
-                  <span>{currentFile ? formatFileFormat(currentFile) : "Playback idle"}</span>
-                </div>
-                <button
-                  className="nowPlayingContextTrack next"
-                  disabled={playbackBusy || !nextFile}
-                  type="button"
-                  onClick={() => void onNext()}
-                >
-                  <span>
-                    <small>Up next</small>
-                    <strong>{nextFile?.displayTags.title ?? "End of queue"}</strong>
-                    <em>{nextFile?.displayTags.artist ?? "No upcoming track"}</em>
-                  </span>
-                  {nextFile ? <Artwork className="nowPlayingContextArt" src={artworkFileUrl(nextFile.id)} /> : <span className="nowPlayingContextPlaceholder"><UiIcon name="album" /></span>}
-                </button>
               </div>
             </div>
           </div>
@@ -12947,6 +12368,7 @@ function AlbumDetailView({
               <dd>{album.formats.join("/")}</dd>
             </div>
           </dl>
+          <AlbumCompletion album={album} />
           <div className="albumDetailQueueActions">
             <button
               aria-label={`Play ${album.album}`}
@@ -13082,6 +12504,7 @@ function ArtistDetailView({
   onOpenAlbum(album: AlbumGroupItem): void;
   onPlayFile(fileId: string, queueFileIds?: string[]): Promise<void>;
 }): ReactElement {
+  const [browsing, setBrowsing] = useState(false);
   const songs = useMemo(() => albums.flatMap((album) => album.files), [albums]);
   const [songSortMode, setSongSortMode] = useState<ArtistSongSortMode>("listens");
   const albumByFileId = useMemo(() => {
@@ -13102,6 +12525,7 @@ function ArtistDetailView({
   const heroAlbums = albums.slice(0, 6);
   const totalListenTimeMs = useMemo(() => getAlbumsListenTimeMs(albums), [albums]);
 
+  if (browsing) return <ArtistExplorer key={artist} initialArtist={artist} onBack={() => setBrowsing(false)} />;
   return (
     <section className="artistDetailView" aria-label={`${artist} artist detail`}>
       <div className="artistHero">
@@ -13116,6 +12540,7 @@ function ArtistDetailView({
             Back to Artists
           </button>
           <h2>{artist}</h2>
+          <button type="button" onClick={() => setBrowsing(true)}>Browse discography ↗</button>
           <span>
             {albums.length.toLocaleString()} album{albums.length === 1 ? "" : "s"} · {songs.length.toLocaleString()} indexed song
             {songs.length === 1 ? "" : "s"} · {formatListenTime(totalListenTimeMs)}
@@ -15712,37 +15137,6 @@ function getEffectiveVisualizerMode(mode: VisualizerMode, capabilities: Visualiz
   return mode;
 }
 
-export function mergePlaybackState(
-  current: PlaybackStateResponse,
-  next: PlaybackStateResponse
-): PlaybackStateResponse {
-  const samePlayingFile =
-    current.status === "playing" &&
-    next.status === "playing" &&
-    current.currentFileId != null &&
-    current.currentFileId === next.currentFileId;
-
-  if (!samePlayingFile) {
-    return next;
-  }
-
-  const loopedToStart =
-    current.durationMs != null &&
-    current.durationMs > 0 &&
-    current.positionMs >= current.durationMs - 3000 &&
-    next.positionMs <= 2500 &&
-    next.positionMs < current.positionMs;
-
-  if (loopedToStart) {
-    return next;
-  }
-
-  return {
-    ...next,
-    positionMs: Math.max(current.positionMs, next.positionMs)
-  };
-}
-
 function useVisualizerStream(
   enabled: boolean,
   mode: VisualizerMode,
@@ -16613,166 +16007,6 @@ function isLibraryWorkbenchAlbumSortMode(value: unknown): value is AlbumSortMode
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function loadAppearanceSettings(): AppearanceSettings {
-  try {
-    const raw = window.localStorage.getItem(appearanceStorageKey);
-    if (!raw) {
-      return defaultAppearanceSettings;
-    }
-    const value = JSON.parse(raw) as Partial<AppearanceSettings>;
-    const themePreset = isThemePresetId(value.themePreset) ? value.themePreset : "custom";
-    const preset = themePreset === "custom" ? null : curatedThemePresets[themePreset];
-    const mode = preset?.mode ?? (value.mode === "light" || value.mode === "dark" ? value.mode : defaultAppearanceSettings.mode);
-    const accent = preset?.accent ?? (isAccentColorId(value.accent) ? value.accent : defaultAppearanceSettings.accent);
-    const displayFont = preset?.displayFont ?? (isDisplayFontId(value.displayFont) ? value.displayFont : defaultAppearanceSettings.displayFont);
-    const backgroundImages = Array.isArray(value.backgroundImages)
-      ? value.backgroundImages.map(normalizeSavedBackgroundImage).filter((image): image is SavedBackgroundImage => image != null).slice(0, 12)
-      : [];
-    const backgroundImagePath =
-      typeof value.backgroundImagePath === "string" && value.backgroundImagePath.trim() ? value.backgroundImagePath : null;
-    const backgroundImageUrl = backgroundImagePath ? pathToBackgroundUrl(backgroundImagePath) : null;
-    const legacyBackground = backgroundImagePath && backgroundImageUrl ? { path: backgroundImagePath, url: backgroundImageUrl } : null;
-    const backgroundDefaults = normalizeAppearanceBackgrounds(value.backgroundDefaults, legacyBackground);
-    return { accent, backgroundDefaults, backgroundImagePath, backgroundImageUrl, backgroundImages, displayFont, mode, themePreset };
-  } catch {
-    return defaultAppearanceSettings;
-  }
-}
-
-function getAppearanceStyle(settings: AppearanceSettings): CSSProperties {
-  const preset = settings.themePreset === "custom" ? null : curatedThemePresets[settings.themePreset];
-  const mode = preset?.mode ?? settings.mode;
-  const displayFont = preset?.displayFont ?? settings.displayFont;
-  const theme = mode === "light" ? getLightThemeVariables() : getDarkThemeVariables();
-  const accent = preset?.accentPalette ?? accentPalettes[settings.accent][mode];
-  const background = settings.backgroundDefaults[mode];
-  const backgroundUrl = background?.url ?? "";
-  return {
-    ...theme,
-    ...(preset?.variables ?? {}),
-    "--acc": accent.acc,
-    "--acc-dim": accent.accDim,
-    "--acc-ink": accent.accInk,
-    "--acc-line": accent.accLine,
-    "--app-bg-image": backgroundUrl ? `url("${backgroundUrl}")` : "none",
-    "--font-body": displayFonts[displayFont].body,
-    "--font-head": displayFonts[displayFont].head,
-    "--ok-line": accent.okLine,
-    "--scrollbar-thumb-active": accent.acc
-  } as CSSProperties;
-}
-
-function getDarkThemeVariables(): Record<string, string> {
-  return {
-    "--bg0": "#0b0d10",
-    "--bg1": "#10131a",
-    "--bg2": "#151923",
-    "--bg3": "#1b2130",
-    "--app-bg-opacity": "0.86",
-    "--center-bg-tint": "rgba(11, 13, 16, 0.32)",
-    "--center-bg-vignette": "rgba(11, 13, 16, 0.58)",
-    "--line": "#1f2633",
-    "--line2": "#2b3445",
-    "--scrollbar-track": "#090b0e",
-    "--scrollbar-thumb": "#344054",
-    "--scrollbar-thumb-hover": "#536178",
-    "--scrollbar-thumb-active": "#c3f53c",
-    "--panel-bg0": "rgba(11, 13, 16, 0.68)",
-    "--panel-bg1": "rgba(16, 19, 26, 0.7)",
-    "--panel-bg2": "rgba(21, 25, 35, 0.64)",
-    "--panel-bg3": "rgba(27, 33, 48, 0.6)",
-    "--tx0": "#e9eef5",
-    "--tx1": "#aab3c5",
-    "--tx2": "#69748c"
-  };
-}
-
-function getLightThemeVariables(): Record<string, string> {
-  return {
-    "--bg0": "#eef1ed",
-    "--bg1": "#f8faf6",
-    "--bg2": "#eef2ec",
-    "--bg3": "#e4eadf",
-    "--app-bg-opacity": "0.82",
-    "--center-bg-tint": "rgba(238, 241, 237, 0.32)",
-    "--center-bg-vignette": "rgba(238, 241, 237, 0.56)",
-    "--line": "#d8dfd4",
-    "--line2": "#c1ccbd",
-    "--scrollbar-track": "#e5eae3",
-    "--scrollbar-thumb": "#9aa79b",
-    "--scrollbar-thumb-hover": "#68766c",
-    "--scrollbar-thumb-active": "#5b721e",
-    "--panel-bg0": "rgba(238, 241, 237, 0.66)",
-    "--panel-bg1": "rgba(248, 250, 246, 0.68)",
-    "--panel-bg2": "rgba(238, 242, 236, 0.62)",
-    "--panel-bg3": "rgba(228, 234, 223, 0.58)",
-    "--tx0": "#151a17",
-    "--tx1": "#344038",
-    "--tx2": "#5f6d64"
-  };
-}
-
-function isThemePresetId(value: unknown): value is ThemePresetId {
-  return typeof value === "string" && themePresetIds.includes(value as ThemePresetId);
-}
-
-function isAccentColorId(value: unknown): value is AccentColorId {
-  return typeof value === "string" && value in accentPalettes;
-}
-
-function isDisplayFontId(value: unknown): value is DisplayFontId {
-  return typeof value === "string" && value in displayFonts;
-}
-
-function normalizeAppearanceBackgrounds(value: unknown, fallback: SelectedBackgroundImage | null): AppearanceBackgrounds {
-  if (value == null || typeof value !== "object") {
-    return { dark: fallback, light: fallback };
-  }
-  const item = value as Partial<Record<AppearanceMode, SelectedBackgroundImage>>;
-  const hasDark = Object.prototype.hasOwnProperty.call(item, "dark");
-  const hasLight = Object.prototype.hasOwnProperty.call(item, "light");
-  return {
-    dark: hasDark ? normalizeSelectedBackgroundImage(item.dark) : fallback,
-    light: hasLight ? normalizeSelectedBackgroundImage(item.light) : fallback
-  };
-}
-
-function normalizeSelectedBackgroundImage(value: unknown): SelectedBackgroundImage | null {
-  if (value == null || typeof value !== "object") {
-    return null;
-  }
-  const item = value as Partial<SelectedBackgroundImage>;
-  if (typeof item.path !== "string" || !item.path.trim()) {
-    return null;
-  }
-  return {
-    path: item.path,
-    url: pathToBackgroundUrl(item.path)
-  };
-}
-
-function normalizeSavedBackgroundImage(value: unknown): SavedBackgroundImage | null {
-  if (value == null || typeof value !== "object") {
-    return null;
-  }
-  const item = value as Partial<SavedBackgroundImage>;
-  if (typeof item.id !== "string" || typeof item.name !== "string" || typeof item.path !== "string" || typeof item.addedAt !== "string") {
-    return null;
-  }
-  return {
-    id: item.id,
-    name: item.name,
-    path: item.path,
-    url: pathToBackgroundUrl(item.path),
-    addedAt: item.addedAt
-  };
-}
-
-function pathToBackgroundUrl(path: string): string {
-  const normalized = path.replaceAll("\\", "/");
-  return `music-os-image://local/?path=${encodeURIComponent(normalized)}`;
 }
 
 function getFileAlbumTarget(file: LibraryFile): Pick<LibraryAlbumGroup, "artist" | "album" | "year"> | null {

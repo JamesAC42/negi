@@ -8,6 +8,7 @@ import type { SlskdDownloadInspection, SlskdService } from "./slskd-service.js";
 type DownloadJobPayload = {
   results: DiscoveryResult[];
   libraryRootId?: string;
+  queuedTimeoutMs?: number;
 };
 
 type DownloadJobResult = {
@@ -53,14 +54,14 @@ export class DiscoveryDownloadService {
     return this.mapJob(row);
   }
 
-  createJob(results: DiscoveryResult[], libraryRootId?: string): DiscoveryDownloadJob {
+  createJob(results: DiscoveryResult[], libraryRootId?: string, options?: { queuedTimeoutMs?: number }): DiscoveryDownloadJob {
     const unlocked = results.filter((result) => !result.isLocked && isAudioDiscoveryResult(result));
     if (unlocked.length === 0) {
       throw new Error("No unlocked audio discovery results were selected");
     }
 
     const id = nanoid();
-    const payload: DownloadJobPayload = { results: unlocked, libraryRootId };
+    const payload: DownloadJobPayload = { results: unlocked, libraryRootId, queuedTimeoutMs: options?.queuedTimeoutMs };
     this.db
       .prepare(
         `INSERT INTO jobs (id, type, status, progress, payload_json)
@@ -154,16 +155,30 @@ export class DiscoveryDownloadService {
 
       let completedPaths: string[] = [];
       let lastCompletedCount = 0;
+      let queuedSince: number | null = null;
       let lastDownloadProgressAt = Date.now();
       let lastInspection: SlskdDownloadInspection | null = null;
       let lastInspectionSignature: string | null = null;
       let nextInspectionAt = Date.now() + downloadInspectionIntervalMs();
       let nextLocalScanAt = 0;
       let nextHeartbeatAt = Date.now() + downloadHeartbeatIntervalMs();
-      const deadline = Date.now() + discoveryDownloadTimeoutMs();
-      for (let attempt = 0; Date.now() < deadline; attempt += 1) {
+      let deadline = Date.now() + discoveryDownloadTimeoutMs();
+      for (let attempt = 0; ; attempt += 1) {
         if (this.isCancelRequested(jobId)) {
           return;
+        }
+        if (Date.now() >= deadline) {
+          if (!payload.queuedTimeoutMs) break;
+          // Album recovery may select another peer. Never leave an old active or
+          // unconfirmed transfer behind when releasing this job for recovery.
+          try {
+            await this.discovery.cancelDownloadResults(queued);
+            completedPaths = await this.discovery.findCompletedDownloadPaths(queued);
+            break;
+          } catch {
+            this.addEvent(jobId, "warning", "Download monitoring extended: remote transfers are active or cancellation could not be confirmed");
+            deadline = Date.now() + Math.max(payload.queuedTimeoutMs, 1000);
+          }
         }
         await delay(attempt === 0 ? 1200 : discoveryDownloadPollIntervalMs());
         if (Date.now() >= nextLocalScanAt) {
@@ -180,6 +195,7 @@ export class DiscoveryDownloadService {
 
         if (Date.now() >= nextInspectionAt) {
           lastInspection = await this.discovery.inspectDownloadResults(queued);
+          if (this.isCancelRequested(jobId)) return;
           const signature = downloadInspectionSignature(lastInspection);
           const shouldRecordEvent = signature !== lastInspectionSignature || Date.now() >= nextHeartbeatAt;
           if (shouldRecordEvent) {
@@ -198,10 +214,39 @@ export class DiscoveryDownloadService {
           }
           nextLocalScanAt = Date.now() + nextLocalScanDelayMs(lastInspection);
           nextInspectionAt = Date.now() + downloadInspectionIntervalMs();
+          const entirelyQueued = completedPaths.length === 0 && lastInspection.transfers.error == null &&
+            lastInspection.transfers.matched >= queued.length && lastInspection.transfers.queued > 0 &&
+            lastInspection.transfers.queued + lastInspection.transfers.failed >= queued.length &&
+            lastInspection.transfers.active === 0 && lastInspection.transfers.completed === 0 &&
+            lastInspection.transfers.other === 0;
+          queuedSince = entirelyQueued ? queuedSince ?? Date.now() : null;
+          if (payload.queuedTimeoutMs && queuedSince != null &&
+            Date.now() - Math.max(queuedSince, lastDownloadProgressAt) >= payload.queuedTimeoutMs) {
+            // Remove only these obsolete transfers before another album source is tried.
+            let cancelled = false;
+            try {
+              await this.discovery.cancelDownloadResults(queued);
+              cancelled = true;
+            } catch {
+              this.addEvent(jobId, "warning", "Could not confirm cancellation of queued transfers; continuing to monitor this source");
+              queuedSince = Date.now();
+            }
+            if (cancelled) throw new Error("Remaining transfers remained queued without starting; trying another source.");
+          }
           if (allKnownTransfersFailed(lastInspection, queued.length)) {
             throw new Error(formatNoCompletedDownloadsError(lastInspection));
           }
           if (shouldSettlePartialDownload(lastInspection, queued.length, completedPaths.length, lastDownloadProgressAt)) {
+            if (payload.queuedTimeoutMs) {
+              try {
+                await this.discovery.cancelDownloadResults(queued);
+                completedPaths = await this.discovery.findCompletedDownloadPaths(queued);
+              } catch {
+                this.addEvent(jobId, "warning", "Partial album is waiting for confirmed cancellation of remaining transfers");
+                lastDownloadProgressAt = Date.now();
+                continue;
+              }
+            }
             this.addEvent(
               jobId,
               "warning",
@@ -233,6 +278,7 @@ export class DiscoveryDownloadService {
           sizeBytes: item.sizeBytes
         }))
       });
+      if (this.isCancelRequested(jobId)) return;
       const result: DownloadJobResult = {
         importId: imported.id,
         completedPaths,
@@ -246,12 +292,13 @@ export class DiscoveryDownloadService {
                result_json = ?,
                started_at = COALESCE(started_at, datetime('now')),
                completed_at = datetime('now')
-           WHERE id = ?`
+           WHERE id = ? AND status IN ('queued', 'running') AND cancel_requested = 0`
         )
         .run(JSON.stringify(result), jobId);
       this.addEvent(jobId, "info", `Staged ${completedPaths.length} completed file${completedPaths.length === 1 ? "" : "s"} into Imports`);
       this.notifySucceeded(jobId);
     } catch (error) {
+      if (this.isCancelRequested(jobId)) return;
       this.db
         .prepare(
           `UPDATE jobs
@@ -259,7 +306,7 @@ export class DiscoveryDownloadService {
                error_json = ?,
                started_at = COALESCE(started_at, datetime('now')),
                completed_at = datetime('now')
-           WHERE id = ?`
+           WHERE id = ? AND status IN ('queued', 'running') AND cancel_requested = 0`
         )
         .run(JSON.stringify({ message: getErrorMessage(error) }), jobId);
       this.addEvent(jobId, "error", getErrorMessage(error));

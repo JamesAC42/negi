@@ -1,0 +1,104 @@
+/* Home's editorial layout uses the same theme, geometry and type as the workbench. */
+.homeJournal { container-type: inline-size; --font-data: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace; }
+.homeJournal .homeAnalyticsScroll { overflow-x: hidden; }
+.homeJournal button:focus-visible, .homeJournal [tabindex]:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
+.homeJournal .homeCollageTile:focus-visible .homeCollageLabel { opacity: 1; transform: none; }
+.hjEdition, .hjFooter, .hjWallFooter, .hjAxis { display: flex; justify-content: space-between; gap: 1rem; }
+.hjEdition { padding: .65rem .9rem; border-bottom: 1px solid var(--line); font: .6875rem var(--font-data); letter-spacing: .07em; color: var(--tx2); }
+.hjEdition b { color: var(--acc); font-weight: 500; }
+.hjMain { display: grid; grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr); border-bottom: 1px solid var(--line); }
+.hjMain article, .hjLower article { min-width: 0; background: var(--bg0); }
+.hjWall { border-right: 1px solid var(--line); }
+.hjSectionHead { min-height: 3.8rem; display: flex; align-items: center; justify-content: space-between; gap: .65rem; padding: .65rem .9rem; border-bottom: 1px solid var(--line); background: var(--bg1); }
+.hjSectionHead > div { display: grid; gap: .22rem; min-width: 0; }
+.homeJournal .eyebrow { font-size: .6rem; letter-spacing: .1em; }
+.hjSectionHead h2 { margin: 0; font: 720 1.2rem/1.1 var(--font-head); letter-spacing: -.035em; color: var(--tx0); }
+.hjSectionHead > span { color: var(--tx2); font-size: .65rem; white-space: nowrap; }
+.hjSectionHead > button { min-height: 1.8rem; padding: .25rem .55rem; font-size: .65rem; }
+.hjSectionHead > button.active { color: var(--acc); background: var(--acc-dim); border-color: var(--acc-line); }
+.homeJournal .homeCollageRank { top: .3rem; left: .3rem; min-width: 1.25rem; padding: .15rem .2rem; font-size: .625rem; }
+.homeJournal .homeCollageLabel { padding: .4rem; }
+.homeJournal .homeCollageLabel strong { font-size: .65rem; }
+.homeJournal .homeCollageLabel small { font-size: .625rem; }
+.hjEmptyTile { aspect-ratio: 1; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); position: relative; color: var(--tx2); background: var(--bg1); display: grid; place-items: center; }
+.hjEmptyTile > span { position: absolute; top: .4rem; left: .4rem; font-size: .625rem; }
+.hjEmptyTile > small { opacity: .4; }
+.hjWallFooter { padding: .65rem .8rem; color: var(--tx2); font-size: .6rem; border-top: 1px solid var(--line); }
+.hjRight { min-width: 0; display: flex; flex-direction: column; background: var(--bg0); }
+.hjLiveMark { color: var(--acc) !important; font: .625rem var(--font-data); letter-spacing: .06em; }
+.hjMetrics { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; border-bottom: 1px solid var(--line); }
+.hjMetrics > div { padding: .9rem .8rem; display: grid; gap: .45rem; border-right: 1px solid var(--line); }
+.hjMetrics > div:last-child { border: 0; }
+.hjMetrics span { font: .6875rem var(--font-data); color: var(--tx2); }
+.hjMetrics strong { font: 700 clamp(1.3rem, 2.2cqw, 2.3rem)/1 var(--font-head); color: var(--tx0); white-space: nowrap; letter-spacing: -.04em; }
+.hjMetrics > div:first-child strong { color: var(--acc); }
+.hjActivity { padding: .75rem .9rem .9rem; }
+.hjChartCaption { display: flex; align-items: center; justify-content: space-between; font-size: .65rem; color: var(--tx2); }
+.hjChartCaption strong { font: 600 .85rem var(--font-head); color: var(--tx1); }
+.hjDayBars { display: flex; align-items: end; height: 6.5rem; gap: 3px; margin-top: .7rem; border-bottom: 1px solid var(--line2); background: repeating-linear-gradient(to top, transparent 0, transparent calc(33.33% - 1px), var(--line) calc(33.33% - 1px), var(--line) 33.33%); }
+.hjDayColumn { position: relative; flex: 1; min-width: 0; height: 100%; display: flex; align-items: end; }
+.hjDayColumn > i { width: 100%; background: color-mix(in srgb, var(--acc) 65%, var(--bg0)); }
+.hjDayColumn:nth-last-child(-n+7) > i { background: var(--acc); }
+.hjDayColumn > i.empty { background: var(--line2); }
+.hjDayColumn:hover > i, .hjDayColumn:focus > i { background: var(--tx0); }
+.hjTip { display: none; position: absolute; bottom: 100%; left: 50%; z-index: 3; padding: .35rem; white-space: nowrap; font-size: .6rem; color: var(--tx0); background: var(--bg2); border: 1px solid var(--line2); transform: translateX(-50%); pointer-events: none; }
+.hjDayColumn:hover .hjTip, .hjDayColumn:focus .hjTip { display: block; }
+.hjDayColumn:first-child .hjTip { left: 0; transform: none; }
+.hjDayColumn:last-child .hjTip { left: auto; right: 0; transform: none; }
+.hjAxis { margin-top: .4rem; font: .625rem var(--font-data); color: var(--tx2); }
+.hjHourRow { display: flex; align-items: center; gap: .6rem; margin-top: 1rem; color: var(--tx1); font-size: .6rem; }
+.hjHourRow > span { white-space: nowrap; }
+.hjHourRow small { color: var(--tx2); font-size: .625rem; }
+.hjHours { flex: 1; display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px; }
+.hjHours i { height: .75rem; }
+.hjRankings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--line); flex: 1; }
+.hjRankings > article:first-child { border-right: 1px solid var(--line); }
+.hjRankings .hjSectionHead { min-height: 3.4rem; }
+.hjRankings .hjSectionHead h2 { font-size: 1rem; }
+.homeJournal .hjRankRow { display: flex; width: 100%; align-items: center; gap: .55rem; min-height: 3.6rem; padding: .45rem .7rem; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--tx1); text-align: left; border-radius: 0; }
+.homeJournal .hjRankRow:hover, .hjShelfAlbum:hover { background: var(--bg2); color: var(--acc); }
+.hjIndex { color: var(--tx2); font: .625rem var(--font-data); }
+.homeJournal .hjThumb, .homeJournal img.hjThumb, .homeJournal .hjThumb.artFallback { flex: 0 0 2rem; width: 2rem; height: 2rem; min-width: 2rem; object-fit: cover; }
+.hjRowText { min-width: 0; flex: 1; display: grid; gap: .2rem; }
+.hjRowText strong { font: 650 .79rem/1.2 var(--font-head); color: var(--tx0); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.hjRowText small { font: .625rem/1.3 var(--font-data); color: var(--tx2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.hjCount { color: var(--acc); font: .8rem var(--font-data); text-align: right; display: grid; gap: .2rem; }
+.hjCount small { color: var(--tx2); font-size: .625rem; }
+.hjMeter { height: 2px; background: var(--bg2); max-width: 8rem; }
+.hjMeter b { display: block; height: 100%; background: var(--acc); opacity: .6; }
+.hjLower { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+.hjHistory { border-right: 1px solid var(--line); }
+.hjHistoryHead, .hjHistoryRow { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, .8fr) 8rem 1.8rem; align-items: center; gap: .75rem; padding: .5rem .9rem; border-bottom: 1px solid var(--line); }
+.hjHistoryHead { color: var(--tx2); text-transform: uppercase; letter-spacing: .06em; font-size: .625rem; }
+.hjHistoryRow { min-height: 3.3rem; color: var(--tx1); font-size: .62rem; }
+.hjHistoryRow.active { background: var(--acc-dim); }
+.hjTrackIdentity { display: flex; align-items: center; min-width: 0; gap: .65rem; }
+.hjHistoryRow time { color: var(--tx2); font-size: .57rem; }
+.hjTruncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hjHistoryRow > button, .hjShelfPlay { width: 1.7rem; height: 1.7rem; min-height: 0; padding: .4rem; background: var(--bg1); color: var(--tx1); }
+.hjHistoryRow svg, .hjShelfPlay svg { width: .7rem; height: .7rem; }
+.hjShelfNote { margin: 0; padding: .65rem .9rem; border-bottom: 1px solid var(--line); color: var(--tx2); font-size: .6rem; }
+.hjShelfRow { display: flex; align-items: center; gap: .6rem; padding-right: .9rem; border-bottom: 1px solid var(--line); }
+.hjShelfAlbum { display: flex; flex: 1; min-width: 0; gap: .8rem; align-items: center; border: 0; border-radius: 0; background: transparent; text-align: left; padding: .65rem .9rem; }
+.homeJournal .hjShelfCover, .homeJournal img.hjShelfCover, .homeJournal .hjShelfCover.artFallback { width: 3.4rem; height: 3.4rem; min-width: 3.4rem; object-fit: cover; }
+.hjFooter { padding: .8rem .9rem; border-top: 1px solid var(--line); color: var(--tx2); font-size: .625rem; flex-wrap: wrap; }
+.hjFooter button { margin-left: .6rem; min-height: 0; padding: .25rem .4rem; font-size: .625rem; background: transparent; color: var(--tx1); }
+.hjEmpty, .hjLoading { padding: 1.2rem .9rem; color: var(--tx2); font-size: .75rem; line-height: 1.6; }
+@container (max-width: 65rem) {
+  .hjMain { grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); }
+  .hjRankRow .hjThumb { display: none; }
+  .hjMetrics > div { padding: .7rem .5rem; }
+  .hjSectionHead { padding: .6rem; }
+  .hjLower { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); }
+  .hjHistoryHead, .hjHistoryRow { grid-template-columns: minmax(0, 1fr) 7.5rem 1.8rem; }
+  .hjHistoryHead > span:nth-child(2), .hjHistoryRow > .hjTruncate { display: none; }
+}
+@container (max-width: 46rem) {
+  .hjMain, .hjLower { grid-template-columns: minmax(0, 1fr); }
+  .hjWall, .hjHistory { border-right: 0; }
+  .hjWall { border-bottom: 1px solid var(--line); }
+  .hjRankRow .hjThumb { display: block; }
+  .hjEdition > span:last-child { display: none; }
+  .homeJournal .homeAnalyticsHeader { flex-wrap: wrap; height: auto; gap: .75rem; padding: .8rem; }
+  .homeJournal .homePeriodTabs button { min-width: 3.3rem; padding: 0 .5rem; }
+}

@@ -1,3 +1,5 @@
+import { YoutubeArtwork } from "./youtube-artwork.js";
+import { CatalogueArtworkCache } from "./catalogue-artwork-cache.js";
 import { parseFile, selectCover } from "music-metadata";
 import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -59,6 +61,8 @@ const REMOTE_ARTWORK_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/web
  * Results (including misses) are cached in memory.
  */
 export class ArtworkService {
+  readonly catalogue: CatalogueArtworkCache;
+  readonly youtube: YoutubeArtwork;
   private readonly fileCache = new Map<string, FileArtworkCacheEntry>();
   private readonly pendingFiles = new Map<string, Promise<ArtworkResult | null>>();
   private readonly albumCache = new Map<string, AlbumArtworkCacheEntry>();
@@ -74,7 +78,7 @@ export class ArtworkService {
     private readonly db: Database.Database,
     private readonly library: LibraryRepository,
     private readonly config: BackendConfig
-  ) {}
+  ) { this.catalogue = new CatalogueArtworkCache(db); this.youtube = new YoutubeArtwork(db); }
 
   async getFileArtwork(fileId: string): Promise<ArtworkResult | null> {
     const albumId = this.findAlbumIdForFile(fileId);
@@ -82,6 +86,8 @@ export class ArtworkService {
     if (override) {
       return override;
     }
+    const thumbnail = await this.youtube.forFile(fileId);
+    if (thumbnail) return thumbnail;
     const embedded = await this.getEmbeddedFileArtwork(fileId);
     if (embedded) {
       return embedded;
@@ -166,6 +172,8 @@ export class ArtworkService {
     }
 
     for (const file of album.files.slice(0, EMBEDDED_PROBE_LIMIT)) {
+      const thumbnail = await this.youtube.forFile(file.id);
+      if (thumbnail) return thumbnail;
       const embedded = await this.getEmbeddedFileArtwork(file.id).catch(() => null);
       if (embedded) {
         return embedded;

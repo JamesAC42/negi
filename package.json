@@ -16,7 +16,8 @@
     "dev:sync": "node scripts/dev-app.mjs sync",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "setup:youtube": "node scripts/setup-youtube.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",

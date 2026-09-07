@@ -1,0 +1,196 @@
+/* Appearance studio: scoped so the rest of Settings keeps its existing layout. */
+.appearanceStudio {
+  container-type: inline-size;
+  min-width: 0;
+  margin: 1.25rem;
+  color: var(--tx0);
+  font-family: var(--font-body);
+  scroll-margin-top: 1rem;
+}
+.appearanceStudio *, .appearanceStudio *::before, .appearanceStudio *::after { box-sizing: border-box; }
+.appearanceStudio button { min-width: 0; min-height: 0; text-align: left; cursor: pointer; box-shadow: none; }
+.appearanceStudio button:disabled { cursor: default; opacity: .45; }
+.appearanceStudio button:focus-visible, .appearanceStudio input:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; }
+.appearanceStudio p { margin: 0; }
+.appearanceStudio h2, .appearanceStudio h3 { margin: 0; color: var(--tx0); font-family: var(--font-head); letter-spacing: -.035em; }
+.appearanceStudio h2 { font-size: clamp(1.8rem, 4cqi, 2.75rem); line-height: 1.12; font-weight: 650; }
+.studioHeading { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem; }
+.studioHeading > div { max-width: 42rem; }
+.studioHeading p { margin-top: .7rem; color: var(--tx1); font-size: .78rem; line-height: 1.7; }
+.studioEyebrow { display: flex; align-items: center; gap: .4rem; margin-bottom: .75rem; color: var(--acc); font-size: .62rem; font-weight: 700; letter-spacing: .12em; }
+.studioSaveState { display: flex; align-items: center; gap: .35rem; padding: .4rem .6rem; color: var(--tx1); background: var(--bg1); border: 1px solid var(--line); border-radius: 99px; font-size: .6rem; white-space: nowrap; }
+.studioSaveState svg { color: var(--acc); }
+.studioSaveState.error, .studioError { color: var(--danger); }
+.appearanceStudio .studioError { padding: .75rem; margin: .75rem 0; border: 1px solid var(--danger-line); background: var(--bg1); font-size: .75rem; }
+.studioModeGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.appearanceStudio .studioModeCard { padding: .65rem; border: 1px solid var(--line2); border-radius: .75rem; background: var(--bg1); color: var(--tx0); }
+.appearanceStudio .selected { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
+.studioModeCopy { display: grid; gap: .4rem; padding: .85rem .4rem .35rem; }
+.studioModeCopy > span { display: flex; align-items: center; gap: .5rem; }
+.studioModeCopy strong { font-family: var(--font-head); font-size: .95rem; }
+.studioModeCopy > span > svg:last-child { margin-left: auto; color: var(--acc); }
+.studioModeCopy small { color: var(--tx1); font-size: .65rem; line-height: 1.5; }
+.studioEditing { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin: 1rem 0 .25rem; font-size: .68rem; }
+.studioEditing > span:last-child { color: var(--tx2); margin-left: auto; }
+.studioDot { width: .4rem; height: .4rem; border-radius: 50%; background: var(--acc); }
+.studioSection { padding: 1.75rem 0; border-bottom: 1px solid var(--line); }
+.studioSection:last-child { border-bottom: 0; }
+.studioSectionHeading { display: flex; align-items: baseline; gap: .75rem; margin-bottom: 1.1rem; }
+.studioSectionHeading > span { color: var(--acc); font-size: .6rem; font-family: "JetBrains Mono Variable", monospace; }
+.studioSectionHeading h3 { font-size: 1.4rem; font-weight: 650; }
+.studioSectionHeading p { margin-top: .35rem; max-width: 50rem; color: var(--tx1); font-size: .72rem; line-height: 1.65; }
+.studioPresetGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: .75rem; }
+.appearanceStudio .studioPresetCard { display: flex; flex-direction: column; align-items: stretch; gap: .65rem; padding: .5rem .5rem .85rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--bg1); color: var(--tx0); }
+.studioPresetCard:hover, .studioFontCard:hover, .studioModeCard:hover { border-color: var(--acc) !important; }
+.studioPresetName { display: flex; justify-content: space-between; align-items: center; padding: 0 .25rem; font-family: var(--font-head); font-size: .9rem; }
+.studioPresetName svg { color: var(--acc); }
+.studioPresetCard > small { padding: 0 .25rem; color: var(--tx1); font-size: .65rem; line-height: 1.6; }
+/* Each preview receives the same variables as the real app, including wallpaper controls. */
+.studioMiniPreview { display: block; position: relative; isolation: isolate; overflow: hidden; padding: .65rem; min-width: 0; width: 100%; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--bg0); color: var(--tx0); text-align: left; }
+.studioMiniWallpaper { position: absolute; z-index: -1; inset: 0; background-image: var(--app-bg-image); background-size: var(--app-bg-fit); background-position: var(--app-bg-position); background-repeat: no-repeat; opacity: var(--app-bg-opacity); filter: blur(var(--app-bg-blur)); }
+.studioMiniTop { display: flex; align-items: center; gap: .4rem; padding-bottom: .5rem; border-bottom: 1px solid var(--line); }
+.studioMiniTop > span { margin-right: auto; font: 750 .75rem var(--font-head); color: var(--tx0); }
+.studioMiniTop i { width: .65rem; height: 3px; background: var(--tx2); border-radius: 2px; }
+.studioMiniTop b { width: .65rem; height: .65rem; margin-left: .2rem; border-radius: 50%; background: var(--acc); }
+.studioMiniBody { display: grid; grid-template-columns: 32% minmax(0, 1fr); align-items: stretch; gap: .65rem; margin-top: .65rem; }
+.studioMiniArt { position: relative; display: grid; place-items: center; min-height: 4.4rem; background: var(--bg3); border-radius: var(--r-s); overflow: hidden; }
+.studioMiniArt i:first-child { width: 75%; aspect-ratio: 1; border-radius: 50%; border: .7rem solid var(--acc); opacity: .75; }
+.studioMiniArt i:last-child { position: absolute; width: 15%; aspect-ratio: 1; border-radius: 50%; background: var(--acc); }
+.studioMiniTracks { display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; padding: .15rem 0; }
+.studioMiniTracks strong { color: var(--tx0); font: 650 .85rem var(--font-head); letter-spacing: -.03em; }
+.studioMiniTracks > span { color: var(--tx1); font: .5rem var(--font-body); line-height: 1.4; }
+.studioMiniTracks i { display: block; width: 95%; height: 3px; background: var(--tx2); opacity: .45; border-radius: 2px; }
+.studioMiniTracks i:nth-of-type(2) { width: 72%; }
+.studioMiniTracks i:nth-of-type(3) { width: 84%; }
+.studioMiniTracks b { width: 2rem; height: .5rem; margin-top: .2rem; border-radius: var(--r-s); background: var(--acc); }
+.studioMiniPreview.large { margin-top: 1rem; padding: 1.2rem; max-width: 40rem; }
+.studioMiniPreview.large .studioMiniArt { min-height: 8rem; }
+.studioMiniPreview.large .studioMiniTracks { justify-content: center; gap: .6rem; }
+.studioMiniPreview.large .studioMiniTracks strong { font-size: clamp(.95rem, 3cqi, 1.7rem); }
+.studioMiniPreview.large .studioMiniTracks > span { font-size: .65rem; }
+.studioToolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; margin-bottom: .75rem; }
+.studioToolbar > span { display: flex; align-items: center; gap: .45rem; color: var(--tx1); font-size: .7rem; }
+.studioToolbar input { width: min(100%, 15rem); }
+.studioFontGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: .6rem; }
+.appearanceStudio .studioFontCard { display: grid; align-content: start; gap: .65rem; padding: 1rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--bg1); color: var(--tx0); }
+.studioFontSample { font-size: 2rem; font-weight: 550; line-height: 1.25; letter-spacing: -.04em; }
+.studioFontLabel { display: flex; justify-content: space-between; align-items: center; gap: .4rem; font-size: .65rem; line-height: 1.5; }
+.studioFontLabel svg { flex: 0 0 auto; color: var(--acc); }
+.studioFontCard small { color: var(--tx1); font-size: .65rem; line-height: 1.5; }
+.studioControlGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
+.studioControlGrid label, .studioCustomColor label, .studioSaveLook label { display: grid; gap: .55rem; min-width: 0; color: var(--tx1); font-size: .7rem; }
+.studioControlGrid label > span { display: flex; justify-content: space-between; gap: .5rem; }
+.studioControlGrid output { color: var(--acc); font-variant-numeric: tabular-nums; }
+.appearanceStudio input { min-width: 0; border: 1px solid var(--line2); border-radius: .375rem; padding: .6rem .7rem; background: var(--bg1); color: var(--tx0); font-size: .75rem; }
+.appearanceStudio input[type="range"] { width: 100%; padding: 0; accent-color: var(--acc); cursor: pointer; }
+.appearanceStudio input[type="color"] { width: 3.5rem; height: 2.35rem; padding: .2rem; cursor: pointer; }
+.appearanceStudio input[aria-invalid="true"] { border-color: var(--danger); }
+.studioAccentRow { display: flex; flex-wrap: wrap; gap: .6rem; }
+.appearanceStudio .studioSwatch, .appearanceStudio .studioPaletteDefault { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; border: 1px solid var(--line2); padding: .65rem .75rem; border-radius: .4rem; background: var(--bg1); color: var(--tx0); font-size: .7rem; }
+.studioSwatch i { width: 1rem; height: 1rem; border-radius: 50%; background: var(--swatch); }
+.studioCustomColor { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 1rem; margin-top: 1.1rem; }
+.studioCustomColor input[type="text"] { width: 7rem; font-family: "JetBrains Mono Variable", monospace; }
+.studioCustomColor > small { align-self: center; color: var(--tx2); font-size: .65rem; }
+.studioAccentExample { color: var(--acc); }
+.studioWallpaperGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.studioWallpaperCard { overflow: hidden; border: 1px solid var(--line); border-radius: .65rem; background: var(--bg1); }
+.appearanceStudio .studioWallpaperBrowse { position: relative; display: block; width: 100%; aspect-ratio: 16/9; overflow: hidden; border: 0; padding: 0; background: var(--bg2); color: var(--tx1); border-radius: 0; }
+.studioWallpaperBrowse img, .studioRecentImage img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.studioWallpaperEmpty, .studioImageMissing { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .6rem; height: 100%; padding: 1rem; text-align: center; }
+.studioWallpaperEmpty svg { color: var(--acc); }
+.studioWallpaperEmpty strong, .studioImageMissing strong { font-size: .8rem; }
+.studioWallpaperEmpty small, .studioImageMissing small { font-size: .6rem; line-height: 1.5; }
+.studioWallpaperOverlay { position: absolute; display: flex; align-items: center; gap: .4rem; right: .65rem; bottom: .65rem; padding: .5rem .7rem; border-radius: 99px; background: #111c; color: white; font-size: .65rem; }
+.studioWallpaperInfo { display: grid; gap: .4rem; padding: .9rem .85rem .65rem; }
+.studioWallpaperInfo > span { display: flex; align-items: center; gap: .4rem; font-size: .8rem; }
+.studioWallpaperInfo svg { color: var(--acc); }
+.studioWallpaperInfo small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tx2); font-size: .65rem; }
+.studioWallpaperActions { display: flex; gap: .5rem; padding: 0 .85rem .85rem; }
+.appearanceStudio .studioWallpaperActions button, .studioRecentCard button { padding: .45rem .6rem; background: var(--bg2); border: 1px solid var(--line2); border-radius: .35rem; color: var(--tx0); font-size: .65rem; }
+.studioWallpaperTuning { padding: 1rem; margin-top: 1rem; border: 1px solid var(--line); border-radius: .65rem; background: var(--bg1); }
+.studioWallpaperTuning > div:first-child { display: grid; gap: .35rem; }
+.studioWallpaperTuning > div:first-child strong { font-size: .8rem; }
+.studioWallpaperTuning > div:first-child small { color: var(--tx1); font-size: .65rem; line-height: 1.6; }
+.studioRecentHeading { display: grid; gap: .35rem; margin: 1.25rem 0 .75rem; font-size: .8rem; }
+.studioRecentHeading span { color: var(--tx1); font-size: .65rem; line-height: 1.6; }
+.studioRecentGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: .75rem; }
+.studioRecentCard { min-width: 0; padding: .45rem; background: var(--bg1); border: 1px solid var(--line); border-radius: .5rem; }
+.studioRecentImage { aspect-ratio: 16/9; overflow: hidden; border-radius: .25rem; background: var(--bg2); }
+.studioRecentCard > strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: .6rem .2rem; font-size: .65rem; }
+.studioRecentCard > div:last-child { display: flex; gap: .3rem; }
+.studioRecentCard button { display: inline-flex; align-items: center; justify-content: center; gap: .2rem; }
+.studioRecentCard button[aria-pressed="true"] { color: var(--acc); border-color: var(--acc-line); }
+.appearanceStudio .studioRemove { margin-left: auto; color: var(--tx2); background: transparent; border: 1px solid transparent; }
+.appearanceStudio .studioRemove:hover { color: var(--danger); border-color: var(--danger-line); }
+.studioSaveLook { display: flex; align-items: flex-end; gap: .75rem; }
+.studioSaveLook label { flex: 1; }
+.studioSaveLook button { padding: .65rem .9rem; border: 1px solid var(--acc); border-radius: .375rem; background: var(--acc); color: var(--acc-ink); font-size: .75rem; }
+.appearanceStudio .studioHint { margin: .75rem 0; color: var(--tx2); font-size: .65rem; line-height: 1.65; }
+.studioLookGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: .75rem; }
+.studioLookCard { display: flex; align-items: stretch; position: relative; min-width: 0; padding: .5rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--bg1); }
+.appearanceStudio .studioLookCard > button:first-child { display: grid; width: 100%; gap: .6rem; padding: 0; border: 0; background: transparent; color: var(--tx0); }
+.studioLookCard > button:first-child > strong { padding-right: 1.5rem; overflow-wrap: anywhere; font-size: .8rem; }
+.studioLookCard small { padding-right: 1.5rem; color: var(--tx2); font-size: .65rem; }
+.studioLookCard .studioRemove { position: absolute; right: .5rem; bottom: .5rem; padding: .3rem; }
+@container (max-width: 540px) {
+  .studioModeGrid, .studioWallpaperGrid, .studioControlGrid { grid-template-columns: 1fr; }
+  .studioEditing > span:last-child { width: 100%; margin-left: .9rem; }
+  .studioSaveLook { align-items: stretch; flex-direction: column; }
+  .studioPresetGrid, .studioFontGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .studioFontCard small { overflow-wrap: anywhere; }
+  .studioModeCard .studioMiniBody { grid-template-columns: 25% 1fr; }
+}
+@media (max-width: 1050px) {
+  .appShell .settingsWorkbench { grid-template-columns: 11rem minmax(0, 1fr); }
+  .appearanceStudio { margin: 1rem; }
+}
+@media (max-width: 720px) {
+  .appShell .settingsWorkbench { grid-template-columns: minmax(0, 1fr); }
+  .settingsNavigator { display: none; }
+  .studioPresetGrid, .studioFontGrid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .appShell .settingsWorkbench > .settingsView { scroll-behavior: auto; }
+}
+
+.topAppearanceSwitch {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  background: var(--bg1);
+  color: var(--acc);
+  cursor: pointer;
+}
+.topAppearanceSwitch:hover { border-color: var(--acc-line); background: var(--acc-dim); }
+
+/* Override the workbench's compact, square button defaults inside the studio. */
+.appShell .appearanceStudio button { white-space: normal; }
+.studioMiniTracks { min-width: 0; }
+.studioMiniTracks strong, .studioMiniTracks > span { display: block; overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
+.studioMiniPreview.large .studioMiniTracks strong { white-space: normal; }
+.appShell .appearanceStudio .studioModeCard,
+.appShell .appearanceStudio .studioPresetCard,
+.appShell .appearanceStudio .studioWallpaperCard,
+.appShell .appearanceStudio .studioWallpaperTuning,
+.appShell .appearanceStudio .studioLookCard { border-radius: .65rem !important; }
+.appShell .appearanceStudio .studioFontCard,
+.appShell .appearanceStudio .studioRecentCard { border-radius: .5rem !important; }
+.appShell .appearanceStudio .studioMiniPreview { border-radius: var(--r-m) !important; }
+.appShell .appearanceStudio .studioMiniArt { border-radius: var(--r-s) !important; }
+.appShell .appearanceStudio .studioMiniArt i,
+.appShell .appearanceStudio .studioMiniTop b,
+.appShell .appearanceStudio .studioSwatch i,
+.appShell .appearanceStudio .studioDot { border-radius: 50% !important; }
+.appShell .appearanceStudio .studioSaveState,
+.appShell .appearanceStudio .studioWallpaperOverlay { border-radius: 99px !important; }
+.topAppearanceSwitch { align-self: center; }
+
+.settingsNavigator nav a.settingsAppearanceLink { min-height: 1.875rem; padding-left: 2.4rem; font-size: .68rem; font-weight: 450; color: var(--tx2); }
+.settingsNavigator nav a.settingsAppearanceLink:hover { color: var(--acc); }
+.studioSectionHeading h3 { scroll-margin-top: 1.5rem; }

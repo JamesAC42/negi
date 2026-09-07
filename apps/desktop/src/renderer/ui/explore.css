@@ -1,0 +1,630 @@
+.exploreWorkspace,
+.artistExplorer,
+.youtubeExplorer {
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+  min-width: 0;
+  width: 100%;
+}
+.exploreModeBar,
+.exploreCatalogueHeader,
+.exploreJobTop,
+.exploreReviewBottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.exploreModeBar {
+  border-bottom: 1px solid var(--line);
+  padding: 0 0 1rem;
+}
+.exploreModeBar h2 {
+  font: 600 1.3rem var(--font-head);
+  margin: 0.3rem 0;
+}
+.exploreEyebrow {
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  color: var(--acc);
+  display: block;
+  line-height: 1.5;
+}
+.exploreWorkspace button,
+.artistExplorer button,
+.youtubeExplorer button,
+.exploreCompletion button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+}
+.exploreHero {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  background: var(--panel-bg1);
+  border: 1px solid var(--line2);
+  border-left: 3px solid var(--acc);
+  padding: 2rem;
+}
+.exploreHero > div {
+  position: relative;
+  z-index: 1;
+  max-width: 46rem;
+}
+.exploreHero h2 {
+  font: 500 clamp(1.7rem, 3vw, 2.8rem) / 1.1 var(--font-head);
+  letter-spacing: -0.035em;
+  margin: 0.8rem 0;
+}
+.exploreHero p {
+  color: var(--tx1);
+  font-size: 0.78rem;
+  line-height: 1.8;
+  max-width: 40rem;
+  margin: 0.8rem 0;
+}
+.exploreHeroDisc {
+  color: var(--acc);
+  opacity: 0.28;
+  flex-shrink: 0;
+}
+.youtubeHero {
+  border-left-color: var(--cyan);
+}
+.youtubeHero .exploreHeroDisc {
+  color: var(--cyan);
+}
+.exploreTags,
+.exploreSteps {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+.exploreTags span {
+  border: 1px solid var(--line2);
+  color: var(--tx1);
+  padding: 0.25rem 0.45rem;
+  font-size: 0.65rem;
+}
+.exploreSearch {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.55rem 0.65rem 0.55rem 1rem;
+  background: var(--bg1);
+  border: 1px solid var(--line2);
+}
+.exploreSearch:focus-within {
+  border-color: var(--acc);
+}
+.exploreSearch > svg {
+  color: var(--tx2);
+}
+.exploreSearch input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font-size: 0.85rem;
+  outline: none;
+}
+.exploreSteps {
+  justify-content: space-between;
+  color: var(--tx2);
+  font-size: 0.65rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 1rem;
+}
+.exploreFilters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+.exploreFilters input {
+  flex: 1;
+  min-width: 8rem;
+}
+.exploreFilters select {
+  max-width: 12rem;
+}
+.exploreCatalogueHeader small {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--tx2);
+  font-size: 0.68rem;
+}
+.exploreCatalogueHeader h3 {
+  font-family: var(--font-head);
+  margin: 0.35rem 0;
+}
+.exploreCatalogueHeader a,
+.exploreReleaseDetails a,
+.exploreReview a,
+.exploreJob a {
+  font-size: 0.67rem;
+  color: var(--cyan);
+}
+.exploreAlbumGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.exploreRelease {
+  min-width: 0;
+  background: var(--panel-bg1);
+  border: 1px solid var(--line);
+  transition: border-color var(--fast);
+}
+.exploreRelease:hover {
+  border-color: var(--line2);
+}
+.exploreCover {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: var(--bg2) !important;
+  color: var(--tx2) !important;
+  overflow: hidden;
+  padding: 0 !important;
+}
+.exploreCover > img {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  inset: 0;
+  transition: transform var(--med);
+}
+.exploreCover:hover > img {
+  transform: scale(1.025);
+}
+.exploreCover > span {
+  position: absolute;
+  bottom: 0.65rem;
+  left: 0.65rem;
+  background: var(--bg0);
+  color: var(--tx0);
+  padding: 0.25rem 0.4rem;
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+}
+.exploreReleaseBody {
+  padding: 0.85rem;
+}
+.exploreRelease h3 {
+  font: 600 1rem/1.3 var(--font-head);
+  margin: 0.6rem 0 0.3rem;
+  overflow-wrap: anywhere;
+}
+.exploreRelease small {
+  font-size: 0.65rem;
+  color: var(--tx2);
+}
+.exploreBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.59rem;
+  padding: 0.23rem 0.4rem;
+  line-height: 1.3;
+  border: 1px solid var(--line2);
+  color: var(--tx1);
+}
+.exploreBadge.complete,
+.exploreBadge.succeeded {
+  color: var(--acc);
+  border-color: var(--acc-line);
+  background: var(--acc-dim);
+}
+.exploreBadge.partial,
+.exploreBadge.review {
+  color: var(--warn);
+  border-color: var(--warn-line);
+}
+.exploreBadge.failed {
+  color: var(--danger);
+  border-color: var(--danger-line);
+}
+.exploreBadge.running,
+.exploreBadge.queued {
+  color: var(--cyan);
+}
+.exploreReleaseActions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 1rem;
+}
+.exploreReleaseActions button {
+  font-size: 0.62rem;
+  padding: 0.45rem 0.55rem;
+}
+.exploreReleaseActions button:first-child {
+  flex: 1;
+}
+.exploreReleaseDetails {
+  border-top: 1px solid var(--line);
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+  font-size: 0.7rem;
+}
+.exploreReleaseDetails ol {
+  list-style: none;
+  padding: 0;
+  max-height: 20rem;
+  overflow: auto;
+}
+.exploreReleaseDetails li {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--line);
+  line-height: 1.5;
+}
+.exploreReleaseDetails li > span {
+  color: var(--tx2);
+  white-space: nowrap;
+}
+.exploreArtistChoices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.6rem;
+}
+.exploreArtistChoices button {
+  display: grid !important;
+  grid-template-columns: 1fr auto;
+  text-align: left;
+  justify-items: start !important;
+  background: var(--panel-bg1);
+  border: 1px solid var(--line2);
+  color: var(--tx0);
+  padding: 1rem;
+}
+.exploreArtistChoices small {
+  grid-column: 1;
+  font-size: 0.67rem;
+  color: var(--tx2);
+  line-height: 1.6;
+}
+.exploreArtistChoices svg {
+  grid-column: 2;
+  grid-row: 1/3;
+  color: var(--acc);
+}
+.exploreNote,
+.exploreFootnote {
+  color: var(--tx2);
+  font-size: 0.68rem;
+  line-height: 1.7;
+}
+.exploreError {
+  border-left: 2px solid var(--danger);
+  padding: 0.6rem 0.8rem;
+  background: var(--bg1);
+  color: var(--danger);
+  font-size: 0.74rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.exploreEmpty,
+.exploreLoading {
+  padding: 2rem;
+  text-align: center;
+  color: var(--tx2);
+  border: 1px dashed var(--line2);
+  font-size: 0.8rem;
+}
+.exploreLoading span {
+  color: var(--acc);
+  margin-left: 0.6rem;
+}
+.exploreJobs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+.exploreJob {
+  background: var(--panel-bg1);
+  border: 1px solid var(--line);
+  padding: 0.9rem;
+  min-width: 0;
+}
+.exploreJob strong {
+  font-size: 0.8rem;
+}
+.exploreJob small {
+  color: var(--tx2);
+  font-size: 0.65rem;
+}
+.exploreJob p {
+  font-size: 0.71rem;
+  color: var(--tx1);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.exploreJob button {
+  font-size: 0.65rem;
+  margin-left: 0.5rem;
+}
+.exploreJob progress {
+  width: 100%;
+  height: 3px;
+  accent-color: var(--acc);
+  display: block;
+  margin: 0.6rem 0;
+}
+.exploreCompletion {
+  border: 1px solid var(--acc-line);
+  background: var(--acc-dim);
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  margin: 1rem 0;
+}
+.exploreCompletion strong {
+  font: 500 1.3rem var(--font-head);
+}
+.exploreCompletion p {
+  font-size: 0.7rem;
+  color: var(--tx1);
+  line-height: 1.7;
+  margin: 0;
+}
+.exploreCompletion .exploreMissingTracks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: 400 0.72rem/1.5 var(--font-body);
+  color: var(--tx1);
+}
+.exploreMissingTracks li {
+  margin: 0;
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+.exploreCompletion.compact .exploreMissingTracks {
+  flex-basis: 100%;
+  order: 1;
+}
+.exploreTrackDots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.exploreTrackDots i {
+  height: 4px;
+  min-width: 8px;
+  flex: 1;
+  background: var(--acc);
+}
+.exploreTrackDots i.missing {
+  background: var(--line2);
+}
+.exploreVideoGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 1rem;
+}
+.exploreVideo {
+  border: 1px solid var(--line);
+  background: var(--panel-bg1);
+  min-width: 0;
+}
+.exploreVideoArt {
+  position: relative;
+  aspect-ratio: 16/9;
+  background: var(--bg2);
+}
+.exploreVideoArt img {
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+}
+.exploreVideoArt span {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  background: var(--bg0);
+  padding: 0.2rem 0.4rem;
+  font-size: 0.65rem;
+}
+.exploreVideo > div:last-child {
+  padding: 1rem;
+}
+.exploreVideo h3 {
+  font: 500 1rem/1.4 var(--font-head);
+  margin: 0;
+}
+.exploreVideo p {
+  font-size: 0.7rem;
+  color: var(--tx2);
+}
+.exploreVideo button {
+  font-size: 0.7rem;
+}
+.exploreVideoInbox {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.exploreReview {
+  border: 1px solid var(--acc-line);
+  background: var(--panel-bg1);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.exploreReview h3 {
+  font: 500 1.1rem var(--font-head);
+  margin: 0.4rem 0;
+}
+.exploreReviewFields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+}
+.exploreReview label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  text-transform: capitalize;
+  font-size: 0.66rem;
+  color: var(--tx2);
+  min-width: 0;
+}
+.exploreReview input,
+.exploreReview select {
+  color: var(--tx0);
+  width: 100%;
+}
+.exploreReviewBottom label {
+  flex: 1;
+  min-width: 12rem;
+}
+.exploreReview small {
+  color: var(--tx2);
+  font-size: 0.66rem;
+}
+@media (max-width: 750px) {
+  .exploreHero {
+    padding: 1.3rem;
+  }
+  .exploreHeroDisc {
+    position: absolute;
+    right: -1.5rem;
+    opacity: 0.1;
+  }
+  .exploreModeBar {
+    align-items: flex-start;
+  }
+  .exploreReviewFields {
+    grid-template-columns: 1fr;
+  }
+  .exploreAlbumGrid {
+    grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+  }
+  .exploreSearch {
+    gap: 0.4rem;
+  }
+  .exploreSearch button {
+    font-size: 0.65rem;
+  }
+  .exploreSteps {
+    line-height: 1.7;
+  }
+  .exploreModeBar .segmentedControl {
+    flex-wrap: wrap;
+  }
+}
+
+.exploreModeBar .segmentedControl button.active,
+.exploreFilters .segmentedControl button.active {
+  color: var(--acc);
+  background: var(--acc-dim);
+  border-color: var(--acc-line);
+}
+
+.workbenchCompletion {
+  flex-shrink: 0;
+}
+.workbenchCompletion:empty {
+  display: none;
+}
+.exploreCompletion.compact {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0.55rem 1rem;
+  gap: 0.6rem;
+  border-width: 0 0 1px;
+}
+.exploreCompletion.compact .exploreEyebrow,
+.exploreCompletion.compact .exploreTrackDots,
+.exploreCompletion.compact p {
+  display: none;
+}
+.exploreCompletion.compact strong {
+  font: 400 0.7rem var(--font-body);
+  color: var(--tx1);
+}
+.exploreCompletion.compact button {
+  font-size: 0.65rem;
+  padding: 0.3rem 0.55rem;
+  margin-left: auto;
+}
+.workbenchCompletion > .exploreNote {
+  padding: 0 1rem;
+}
+.workbenchCompletion .exploreJobs {
+  padding: 0.6rem 1rem;
+}
+
+.albumAgentHistory {
+  border-bottom: 1px solid var(--line);
+}
+.albumAgentHistory > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  color: var(--tx2);
+  font-size: 0.72rem;
+  cursor: pointer;
+  list-style: none;
+}
+.albumAgentHistory > summary::-webkit-details-marker {
+  display: none;
+}
+.albumAgentHistory > summary:hover,
+.albumAgentHistory[open] > summary {
+  color: var(--acc);
+  background: var(--acc-dim);
+}
+.albumAgentHistory > summary:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: -2px;
+}
+.albumAgentHistory .albumAgentCollapse,
+.albumAgentHistory[open] .albumAgentExpand {
+  display: none;
+}
+.albumAgentHistory[open] .albumAgentCollapse {
+  display: block;
+}
+.albumAgentHistory > .exploreJobs {
+  border-top: 0;
+  padding: 0.75rem 1rem 1rem;
+}
+/* Expanded history and tracks share the album pane's scroll area. */
+.libraryTrackPane:has(.albumAgentHistory[open]) {
+  overflow-y: auto;
+}
+.libraryTrackPane:has(.albumAgentHistory[open]) > * {
+  flex-shrink: 0;
+}
+.libraryTrackPane:has(.albumAgentHistory[open]) .libraryTrackList {
+  overflow: visible;
+  flex: 0 0 auto;
+}

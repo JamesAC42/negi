@@ -1,3 +1,5 @@
+import { getHomeListening } from "./services/home-listening.js";
+import { handleExplore } from "./explore-routes.js";
 import { createServer } from "node:http";
 import {
   addLibraryRootRequestSchema,
@@ -121,6 +123,7 @@ const server = createServer(async (request, response) => {
   }
 
   try {
+    if (await handleExplore(request, response, url, app, readJson, writeJson)) return;
     if (request.method === "GET" && url.pathname === "/health") {
       writeJson(response, 200, app.health());
       return;
@@ -342,6 +345,15 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/home/listening") {
+      const period = url.searchParams.get("period") ?? "30d";
+      if (!["7d", "30d", "90d", "all"].includes(period)) {
+        writeJson(response, 400, { error: "Invalid listening period" });
+        return;
+      }
+      writeJson(response, 200, getHomeListening(app.db, period));
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/library/albums") {
       const limit = parseOptionalPositiveInteger(url.searchParams.get("limit"));
       const offset = parseOptionalPositiveInteger(url.searchParams.get("offset")) ?? 0;

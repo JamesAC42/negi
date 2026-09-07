@@ -1,4 +1,4 @@
-import { mergePlaybackState } from "../renderer/ui/App.js";
+import { mergePlaybackState, shouldRefreshPlaybackHistory } from "../renderer/playback-state.js";
 import type { PlaybackStateResponse } from "@music-os/core";
 
 const current: PlaybackStateResponse = {
@@ -49,6 +49,15 @@ const loopedTrack: PlaybackStateResponse = {
   positionMs: 500
 };
 assert(mergePlaybackState(nearTrackEnd, loopedTrack).positionMs === 500, "expected looped track to reset position");
+
+assert(shouldRefreshPlaybackHistory(current, nextTrack), "expected auto-advance to refresh library statistics");
+assert(shouldRefreshPlaybackHistory(current, { ...current, status: "stopped", currentFileId: null }),
+  "expected queue completion to refresh library statistics");
+assert(shouldRefreshPlaybackHistory(nearTrackEnd, loopedTrack), "expected repeating a song to refresh statistics");
+assert(!shouldRefreshPlaybackHistory(current, freshBackendPoll), "ordinary progress must not reload the library");
+assert(!shouldRefreshPlaybackHistory(current, staleBackendPoll), "stale position must not reload the library");
+assert(!shouldRefreshPlaybackHistory(current, { ...current, status: "paused" }), "pausing must not reload the library");
+assert(!shouldRefreshPlaybackHistory(null, current), "initial playback fetch must not reload the library");
 
 console.log(JSON.stringify({ ok: true }, null, 2));
 

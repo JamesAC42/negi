@@ -5,6 +5,12 @@ import "@fontsource-variable/fraunces";
 import "@fontsource-variable/jetbrains-mono";
 import "@fontsource-variable/space-grotesk";
 import "@fontsource-variable/syne";
+import "@fontsource-variable/inter";
+import "@fontsource-variable/manrope";
+import "@fontsource-variable/outfit";
+import "@fontsource-variable/dm-sans";
+import "@fontsource-variable/lora";
+import "@fontsource-variable/roboto-slab";
 import "./styles.css";
 
 const root = document.getElementById("root");

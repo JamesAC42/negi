@@ -1,0 +1,865 @@
+.artistExplorer.discographyPage {
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+  gap: 1.25rem;
+  padding-bottom: 2rem;
+}
+.discographyNav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-width: 0;
+  color: var(--tx2);
+  font-size: 0.65rem;
+}
+.discographyPage .discographyBack {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 0.4rem 0.6rem;
+  border-color: transparent;
+  background: transparent;
+  color: var(--tx1);
+  font-size: 0.72rem;
+}
+.discographyPage .discographyBack:hover {
+  color: var(--tx0);
+  border-color: var(--line2);
+  background: var(--bg1);
+}
+.discographyProvider {
+  font-size: 0.62rem;
+  text-align: right;
+}
+.discographyHeader {
+  padding: 0.35rem 0 1.25rem;
+  border-bottom: 1px solid var(--line2);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.discographyIdentity {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+}
+.discographyIdentity > div {
+  min-width: 0;
+}
+.discographyIdentityIcon {
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  flex: 0 0 auto;
+  border: 1px solid var(--acc-line);
+  background: var(--acc-dim);
+  color: var(--acc);
+}
+.discographyHeader h2 {
+  font: 600 clamp(1.45rem, 2.2vw, 2rem) / 1.18 var(--font-head);
+  letter-spacing: -0.025em;
+  margin: 0.3rem 0 0.4rem;
+  overflow-wrap: anywhere;
+}
+.discographyHeader p {
+  margin: 0;
+  color: var(--tx1);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+.discographyHeader .exploreTags {
+  margin-left: 4.5rem;
+}
+.discographySearchArea {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+.discographySearch {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 46rem;
+  min-width: 0;
+  border: 1px solid var(--line2);
+  background: var(--bg1);
+  padding: 0.4rem 0.4rem 0.4rem 0.8rem;
+}
+.discographySearch:focus-within {
+  border-color: var(--acc-line);
+}
+.discographySearch > svg {
+  color: var(--tx2);
+  flex-shrink: 0;
+}
+.discographyPage .discographySearch input {
+  min-width: 0;
+  width: 100%;
+  flex: 1;
+  border: 0;
+  box-shadow: none;
+  outline: none;
+  background: transparent;
+  font-size: 0.78rem;
+  padding: 0.35rem 0;
+}
+.discographyPage .discographySearch button {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  padding: 0.4rem 0.65rem;
+}
+.discographyDestination {
+  margin: 0;
+  color: var(--tx2);
+  font-size: 0.65rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.discographyDestination strong {
+  color: var(--tx1);
+  font-weight: 500;
+}
+.discographyMatches {
+  min-width: 0;
+  padding-top: 0.35rem;
+}
+.discographySectionHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.discographySectionHeading h3 {
+  font: 600 0.95rem var(--font-head);
+  margin: 0 0 0.3rem;
+}
+.discographySectionHeading p {
+  font-size: 0.7rem;
+  color: var(--tx2);
+  margin: 0;
+  line-height: 1.6;
+}
+.discographySectionHeading > span {
+  color: var(--tx2);
+  font-size: 0.65rem;
+  white-space: nowrap;
+}
+.discographyMatchGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+.discographyPage .discographyMatch {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.8rem;
+  width: 100%;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg1) 94%, transparent);
+  color: var(--tx0);
+  text-align: left;
+  white-space: normal;
+  min-height: 5.4rem;
+  transition:
+    border-color var(--fast),
+    background var(--fast);
+}
+.discographyPage .discographyMatch:hover {
+  background: var(--bg2);
+  border-color: var(--acc-line);
+}
+.discographyPage .discographyMatch:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+.discographyMatchAvatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 2.1rem;
+  height: 2.1rem;
+  color: var(--tx2);
+  background: var(--bg2);
+  border: 1px solid var(--line2);
+  font: 500 1rem var(--font-head);
+}
+.discographyMatchCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.discographyMatchCopy strong {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--tx0);
+  white-space: normal;
+}
+.discographyMatchCopy small,
+.discographyMatchDescription {
+  font-size: 0.65rem;
+  line-height: 1.5;
+  color: var(--tx2);
+  white-space: normal;
+}
+.discographyMatchDescription {
+  color: var(--tx1);
+}
+.discographyMatchAction {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--tx2);
+  flex-shrink: 0;
+  font-size: 0.7rem;
+}
+.discographyPage .discographyMatch.featured {
+  border-color: var(--acc-line);
+  padding: 1.1rem 1.25rem;
+  min-height: 6rem;
+  background: color-mix(in srgb, var(--bg1) 94%, var(--acc));
+}
+.discographyMatch.featured .discographyMatchAvatar {
+  color: var(--acc);
+  border-color: var(--acc-line);
+  background: var(--acc-dim);
+  flex-basis: 2.65rem;
+  height: 2.65rem;
+}
+.discographyMatch.featured .discographyMatchAction {
+  color: var(--acc);
+}
+.discographyMatchLabel {
+  font-size: 0.55rem;
+  color: var(--acc);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.discographyOtherHeading {
+  font-size: 0.6rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tx2);
+  margin: 1.5rem 0 0.7rem;
+}
+.discographyLoading {
+  padding-top: 0.25rem;
+}
+.discographyLoading > p {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--tx1);
+  font-size: 0.7rem;
+  margin: 0 0 1rem;
+}
+.discographyLoadingDot {
+  width: 0.35rem;
+  height: 0.35rem;
+  background: var(--acc);
+  border-radius: 50%;
+}
+.discographySkeletons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+.discographySkeletons > div {
+  border: 1px solid var(--line);
+  background: var(--bg1);
+  padding: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-height: 5.4rem;
+}
+.discographySkeletons i {
+  width: 2.1rem;
+  height: 2.1rem;
+  flex-shrink: 0;
+  background: var(--bg2);
+}
+.discographySkeletons span {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.discographySkeletons b {
+  display: block;
+  height: 0.4rem;
+  background: var(--bg2);
+  width: 75%;
+}
+.discographySkeletons b:last-child {
+  width: 45%;
+}
+.discographySkeletons.albums {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+.discographySkeletons.albums > div {
+  flex-direction: column;
+  align-items: stretch;
+  padding: 0.6rem;
+}
+.discographySkeletons.albums i {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+.discographyPage .exploreCatalogueHeader {
+  padding: 0.3rem 0;
+}
+.discographyPage .exploreAlbumGrid {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+@media (max-width: 1200px) {
+  .discographyMatchGrid,
+  .discographySkeletons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .discographySkeletons.albums {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .discographyMatchGrid,
+  .discographySkeletons {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .discographyMatchAction > span {
+    display: none;
+  }
+  .discographyProvider {
+    font-size: 0.55rem;
+  }
+  .discographyIdentityIcon {
+    width: 2.8rem;
+    height: 2.8rem;
+  }
+  .discographyIdentity {
+    gap: 0.75rem;
+  }
+  .discographyHeader .exploreTags {
+    margin-left: 0;
+  }
+  .discographySearchArea {
+    gap: 0.65rem;
+  }
+  .discographySkeletons.albums {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.discographyMatchAvatar {
+  position: relative;
+  overflow: hidden;
+}
+.discographyMatchAvatar > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--bg2);
+}
+
+/* Release browsing */
+.releaseLoadedCount {
+  color: var(--tx2);
+  font: 400 0.68rem var(--font-body);
+}
+.discographyPage .exploreFilters {
+  gap: 0.65rem;
+}
+.discographyPage .exploreFilters input,
+.discographyPage .exploreFilters select,
+.discographyPage .exploreFilters button {
+  font: 600 0.6875rem var(--font-body);
+  min-height: 2.15rem;
+}
+.discographyPage .releaseSort {
+  flex-shrink: 0;
+  width: 10.5rem;
+}
+.discographyPage .releaseSort .styledSelectButton {
+  justify-content: space-between;
+  height: 2.15rem;
+}
+.discographyReleases {
+  align-items: stretch;
+}
+.releaseTile {
+  display: flex;
+  flex-direction: column;
+}
+.releaseTile.selected {
+  border-color: var(--acc);
+  box-shadow: 0 2px 0 var(--acc);
+}
+.discographyReleases .releaseTile .exploreReleaseBody {
+  flex: none;
+  display: grid;
+  box-sizing: border-box;
+  padding: 0.85rem 0.85rem 0.65rem;
+  grid-template-rows: 1.1rem 2.85rem 1rem 1rem 2.15rem;
+  gap: 0.25rem;
+  align-items: center;
+  min-width: 0;
+}
+.releaseTile .exploreBadge {
+  justify-self: start;
+}
+.discographyReleases .releaseTile h3 {
+  margin: 0;
+  align-self: start;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.discographyReleases .releaseTileMeta,
+.discographyReleases .releaseTileOwned {
+  margin: 0;
+  padding: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.discographyReleases .releaseTile .exploreReleaseActions {
+  margin: 0;
+}
+.releaseTileFeedback {
+  min-width: 0;
+}
+.releaseTileFeedback > p {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  font-size: 0.68rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.releaseCoverButton {
+  flex-shrink: 0;
+}
+.releaseTile h3 {
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
+.releaseTileMeta {
+  color: var(--tx2);
+  font-size: 0.65rem;
+  line-height: 1.5;
+  margin: 0.15rem 0 0.5rem;
+}
+.releaseTileOwned {
+  color: var(--tx1);
+  font-size: 0.63rem;
+  margin: auto 0 0;
+  padding-top: 0.5rem;
+}
+.releaseTile .exploreReleaseActions {
+  width: 100%;
+  margin-top: 0.75rem;
+}
+.releaseTile .exploreReleaseActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+.releaseTile .rotated {
+  transform: rotate(180deg);
+}
+.releaseCoverButton {
+  position: relative;
+  width: 100%;
+  padding: 0 !important;
+  border: 0 !important;
+  display: block !important;
+  border-radius: 0 !important;
+  overflow: hidden;
+  background: var(--bg2) !important;
+}
+.releaseArtwork {
+  position: relative;
+  display: flex;
+  aspect-ratio: 1;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 0.65rem;
+  color: var(--tx2);
+  background: var(--bg2);
+}
+.releaseArtwork img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.releaseArtwork.ready img {
+  opacity: 1;
+}
+.releaseArtwork.loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 25%,
+    var(--line) 50%,
+    transparent 75%
+  );
+  background-size: 250% 100%;
+  animation: releaseShimmer 2s linear infinite;
+  opacity: 0.4;
+}
+.releaseArtwork small {
+  font: 400 0.65rem var(--font-body);
+}
+.releaseYear {
+  position: absolute;
+  left: 0.7rem;
+  bottom: 0.7rem;
+  padding: 0.25rem 0.4rem;
+  background: var(--bg0);
+  color: var(--tx1);
+  font-size: 0.6rem;
+}
+.releasePanel {
+  grid-column: 1 / -1;
+  min-width: 0;
+  background: var(--bg1);
+  border: 1px solid var(--acc-line);
+  border-top: 2px solid var(--acc);
+}
+.releasePanelHeading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.4rem 1.5rem 1.2rem;
+  border-bottom: 1px solid var(--line);
+}
+.releasePanelIdentity {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  min-width: 0;
+}
+.releasePanelTitle {
+  min-width: 0;
+}
+.releasePanelCover {
+  width: 5.5rem;
+  flex: 0 0 5.5rem;
+  border: 1px solid var(--line2);
+}
+.releasePanelCover .releaseArtwork small {
+  display: none;
+}
+.releasePanelHeading h3 {
+  font: 600 1.65rem/1.25 var(--font-head);
+  margin: 0.45rem 0;
+  overflow-wrap: anywhere;
+}
+.releasePanelHeading p {
+  margin: 0;
+  color: var(--tx2);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+.releasePanelClose {
+  flex-shrink: 0;
+  padding: 0.45rem !important;
+}
+.releasePanelLayout {
+  display: grid;
+  grid-template-columns: minmax(220px, 26%) minmax(0, 1fr);
+}
+.releaseOverview {
+  padding: 1.5rem;
+  border-right: 1px solid var(--line);
+  min-width: 0;
+}
+.releaseOwnership {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 1.25rem 0 0.8rem;
+}
+.releaseOwnership > strong {
+  font: 600 2.3rem/1.1 var(--font-head);
+  color: var(--tx0);
+}
+.releaseOwnership > strong span {
+  font-size: 1.4rem;
+  color: var(--tx2);
+}
+.releaseOwnership > span,
+.releaseOverview > p {
+  font-size: 0.72rem;
+  color: var(--tx2);
+  line-height: 1.7;
+}
+.releaseOverview progress {
+  width: 100%;
+  height: 5px;
+  accent-color: var(--acc);
+  display: block;
+  border: 0;
+  background: var(--line);
+}
+.releaseOverview progress::-webkit-progress-bar {
+  background: var(--line);
+}
+.releaseOverview progress::-webkit-progress-value {
+  background: var(--acc);
+}
+.releaseStats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1.4rem 0;
+  padding: 1.2rem 0;
+  border-block: 1px solid var(--line);
+}
+.releaseStats > div:last-child {
+  grid-column: 1 / -1;
+}
+.releaseStats dt {
+  font-size: 0.65rem;
+  color: var(--tx2);
+  margin-bottom: 0.35rem;
+}
+.releaseStats dd {
+  margin: 0;
+  color: var(--tx0);
+  font-size: 0.95rem;
+}
+.releaseStats dd span,
+.releaseStats small {
+  font-size: 0.65rem;
+  color: var(--tx2);
+}
+.releaseStats small {
+  display: block;
+  margin-top: 0.25rem;
+}
+.releaseAcquire {
+  width: 100%;
+  font-size: 0.7rem !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.65rem !important;
+}
+.releaseImportNote {
+  margin-top: 0.6rem;
+  overflow-wrap: anywhere;
+}
+.releaseEdition {
+  color: var(--cyan);
+  font-size: 0.65rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.7rem;
+}
+.releaseTrackArea {
+  min-width: 0;
+  padding: 1.4rem 1.5rem;
+}
+.releaseTrackHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+.releaseTrackHeading h4 {
+  font: 600 1.1rem var(--font-head);
+  margin: 0;
+}
+.releaseTrackHeading > span {
+  color: var(--tx2);
+  font-size: 0.7rem;
+}
+.releaseListingNotice {
+  padding: 0.8rem;
+  margin: 0 0 1rem;
+  border: 1px solid var(--line);
+  background: var(--panel-bg1);
+  color: var(--tx1);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.releaseListingNotice strong {
+  color: var(--tx0);
+  font-weight: 500;
+}
+.releaseListingNotice p {
+  margin: 0.35rem 0 0;
+}
+.releaseTracks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.releaseTracks li {
+  display: grid;
+  grid-template-columns: 2.6rem minmax(0, 1fr) 5.7rem 3.2rem;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.75rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.releaseTracks li:nth-child(odd) {
+  background: var(--panel-bg1);
+}
+.releaseTrackTitle {
+  overflow-wrap: anywhere;
+  color: var(--tx0);
+}
+.releaseTrackNumber,
+.releaseTracks time {
+  color: var(--tx2);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+.releaseTracks time {
+  text-align: right;
+}
+.releaseTrackStatus {
+  color: var(--tx2);
+  font-size: 0.62rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.releaseTrackStatus.owned {
+  color: var(--acc);
+}
+.releaseTrackLoading {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--tx2);
+  font-size: 0.75rem;
+  min-height: 12rem;
+  justify-content: center;
+}
+.releaseTrackLoading svg {
+  animation: releaseSpin 1.5s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes releaseSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes releaseShimmer {
+  to {
+    background-position: -250% 0;
+  }
+}
+@media (max-width: 750px) {
+  .releasePanelLayout {
+    grid-template-columns: 1fr;
+  }
+  .releaseOverview {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .releaseStats {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .releaseStats > div:last-child {
+    grid-column: auto;
+  }
+  .releasePanelHeading,
+  .releaseOverview,
+  .releaseTrackArea {
+    padding: 1rem;
+  }
+  .releaseTracks li {
+    grid-template-columns: 2rem minmax(0, 1fr) 3rem;
+    gap: 0.45rem;
+  }
+  .releaseTrackStatus {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .releaseTracks time {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .releaseArtwork.loading::after,
+  .releaseTrackLoading svg {
+    animation: none;
+  }
+  .releaseArtwork img {
+    transition: none;
+  }
+}
+
+@media (max-width: 750px) {
+  .releasePanelIdentity {
+    gap: 0.75rem;
+    align-items: flex-start;
+  }
+  .releasePanelCover {
+    width: 4rem;
+    flex-basis: 4rem;
+  }
+}
+
+.catalogueProviderControls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.catalogueProviderControls button { font-size: 11px; white-space: normal; text-align: left; }
+.catalogueProviderControls button.active { border-color: var(--acc); color: var(--tx0); }
+.catalogueSourceNote { color: var(--tx2); font-size: 12px; line-height: 1.6; margin: 0 0 16px; }
+.releaseAppleLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  width: fit-content;
+  min-height: 24px;
+  margin: 0 0 6px;
+  color: var(--tx2);
+  font-size: 11px;
+  line-height: 1.3;
+  text-decoration: none;
+}
+.releaseAppleLink:hover { color: var(--tx0); text-decoration: underline; text-underline-offset: 3px; }
+.releaseAppleLink:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; }
+.releaseAppleLink svg { flex-shrink: 0; }
+@media (max-width: 760px) {
+  .discographyNav, .artistLandingMasthead { flex-wrap: wrap; gap: 12px; }
+  .catalogueProviderControls { width: 100%; }
+}

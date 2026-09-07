@@ -879,6 +879,14 @@ export const incompleteAlbumSchema = z.object({
   expectedTracks: z.number().int().positive(),
   presentTracks: z.number().int().nonnegative(),
   missingTrackNumbers: z.array(z.number().int().positive()),
+  source: z.enum(["catalogue", "tags"]).optional(),
+  artistId: z.string().min(1).optional(),
+  releaseGroupId: z.string().min(1).optional(),
+  missingTracks: z.array(z.object({
+    title: z.string(), disc: z.number().int().positive(), number: z.number().int().positive(),
+    durationMs: z.number().nonnegative().nullable().optional()
+  })).optional(),
+  missingTrackPositions: z.array(z.object({ disc: z.number().int().positive(), number: z.number().int().positive() })).optional(),
   files: z.array(audioFileSchema.extend({ displayTags: z.record(z.string()) })).min(1)
 });
 

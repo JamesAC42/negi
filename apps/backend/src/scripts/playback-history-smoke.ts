@@ -32,7 +32,8 @@ try {
     scanStatus: "scanned",
     tags: [
       { key: "artist", value: "Playback History Artist", source: "embedded" },
-      { key: "title", value: "Played Song", source: "embedded" }
+      { key: "title", value: "Played Song", source: "embedded" },
+      { key: "album", value: "Playback History Album", source: "embedded" }
     ]
   });
 
@@ -61,6 +62,19 @@ try {
   assert(listed != null, "expected file to appear in library search");
   assert(listed.playCount === 1, `expected listed play count 1, got ${listed.playCount}`);
   assert(listed.skipCount === 1, `expected listed skip count 1, got ${listed.skipCount}`);
+
+  const albumFileBefore = app.library.listAlbumGroups()[0]?.files.find((item) => item.id === inserted.id);
+  assert(albumFileBefore?.playCount === 1, "expected album view to include the earlier play");
+  app.playbackHistory.recordStarted(inserted.id);
+  app.playbackHistory.recordEnded({
+    fileId: inserted.id,
+    reason: "completed",
+    positionMs: 180_000,
+    durationMs: 180_000
+  });
+  const albumFileAfter = app.library.listAlbumGroups()[0]?.files.find((item) => item.id === inserted.id);
+  assert(albumFileAfter?.playCount === 2, "expected refreshed album view to count completion immediately");
+  assert(albumFileAfter.skipCount === 1, "completion must not increment skips");
 
   app.close();
   console.log(JSON.stringify({ ok: true, playCount: file.playCount, skipCount: file.skipCount }, null, 2));

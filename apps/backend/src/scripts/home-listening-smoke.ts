@@ -1,0 +1,43 @@
+import assert from "node:assert/strict";
+import Database from "better-sqlite3";
+import { getHomeListening } from "../services/home-listening.js";
+
+const db = new Database(":memory:");
+try {
+  db.exec(`CREATE TABLE files (id TEXT PRIMARY KEY, staged INTEGER, missing INTEGER);
+    CREATE TABLE playback_events (id TEXT, file_id TEXT, event_type TEXT, listened_ms INTEGER, created_at TEXT);
+    INSERT INTO files VALUES ('a', 0, 0), ('missing', 0, 1), ('staged', 1, 0);`);
+  const insert = db.prepare("INSERT INTO playback_events VALUES (?, ?, ?, ?, ?)");
+  insert.run('old', 'a', 'played', 60000, '2026-01-01 12:00:00');
+  insert.run('start', 'a', 'started', 0, '2026-09-04 12:00:00');
+  insert.run('repeat1', 'a', 'played', 60000, '2026-09-04 12:01:00');
+  insert.run('repeat2', 'a', 'played', 60000, '2026-09-04 12:03:00');
+  insert.run('skip', 'a', 'skipped', 4000, '2026-09-04 12:04:00');
+  insert.run('future', 'a', 'played', 60000, '2026-09-06 12:00:00');
+  insert.run('missing', 'missing', 'played', 60000, '2026-09-04 12:00:00');
+  insert.run('staged', 'staged', 'played', 60000, '2026-09-04 12:00:00');
+  insert.run('boundary', 'a', 'played', 60000, '2026-08-29 00:00:00');
+  insert.run('before', 'a', 'played', 60000, '2026-08-28 23:59:59');
+  const now = new Date('2026-09-05T00:00:00Z');
+  const week = getHomeListening(db, '7d', now);
+  assert.equal(week.files.length, 1);
+  assert.equal(week.files[0]!.plays, 3, 'Only period plays, including exact boundary');
+  assert.equal(week.files[0]!.listenedMs, 184000, 'Skips contribute recorded listening, starts do not');
+  assert.equal(week.recent.length, 3, 'Repeated plays remain separate history entries');
+  assert.equal(week.days.find(day => day.day === '2026-09-04')!.plays, 2);
+  assert.equal(week.hours.find(hour => hour.hour === 12)!.plays, 2);
+  assert.equal(getHomeListening(db, '30d', now).files[0]!.plays, 4);
+  assert.equal(getHomeListening(db, '90d', now).files[0]!.plays, 4);
+  assert.equal(getHomeListening(db, 'all', now).files[0]!.plays, 5);
+  assert.equal(getHomeListening(db, '7d', new Date('2027-01-01T00:00:00Z')).files.length, 0, 'No all-time fallback');
+  assert.equal(week.files[0]!.skips, 1, 'Early skip count is separate from played events');
+  assert.equal(week.files[0]!.firstPlayedAt, '2026-01-01T12:00:00Z', 'First play uses lifetime history, not the period cutoff');
+  db.exec("INSERT INTO files VALUES ('new', 0, 0), ('skip-only', 0, 0)");
+  insert.run('new1', 'new', 'played', 60000, '2026-09-04 10:00:00');
+  insert.run('new2', 'new', 'played', 60000, '2026-09-04 11:00:00');
+  insert.run('skip-only', 'skip-only', 'skipped', 2000, '2026-09-04 11:00:00');
+  const expanded = getHomeListening(db, '7d', now);
+  assert.equal(expanded.files.find(row => row.fileId === 'new')!.firstPlayedAt, '2026-09-04T10:00:00Z');
+  assert.equal(expanded.files.find(row => row.fileId === 'skip-only')!.firstPlayedAt, null);
+  console.log('Home listening smoke passed: periods, boundaries, totals, repeats, UTC buckets, missing/staged files and empty history.');
+} finally { db.close(); }

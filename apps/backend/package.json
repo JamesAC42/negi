@@ -57,7 +57,22 @@
     "revert:smoke": "tsx src/scripts/revert-smoke.ts",
     "root-watch:smoke": "tsx src/scripts/library-root-watch-smoke.ts",
     "scan:smoke": "tsx src/scripts/library-scan-smoke.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "artist-profile:smoke": "tsx src/scripts/artist-profile-smoke.ts",
+    "similar-artists:smoke": "tsx src/scripts/similar-artists-smoke.ts",
+    "explore:smoke": "tsx src/scripts/explore-smoke.ts",
+    "album-acquisition:smoke": "tsx src/scripts/album-acquisition-matching-smoke.ts",
+    "catalogue-artwork:smoke": "tsx src/scripts/catalogue-artwork-smoke.ts",
+    "catalogue-pagination:smoke": "tsx src/scripts/catalogue-pagination-smoke.ts",
+    "catalogue-request:smoke": "tsx src/scripts/catalogue-request-smoke.ts",
+    "catalogue-cache:smoke": "tsx src/scripts/catalogue-response-cache-smoke.ts",
+    "apple-catalogue:smoke": "tsx src/scripts/apple-catalogue-smoke.ts",
+    "catalogue-provider:smoke": "tsx src/scripts/catalogue-provider-routing-smoke.ts",
+    "album-recovery:smoke": "tsx src/scripts/album-acquisition-recovery-smoke.ts",
+    "slskd-search-reliability:smoke": "tsx src/scripts/slskd-search-reliability-smoke.ts",
+    "artist-progressive:smoke": "tsx src/scripts/artist-progressive-smoke.ts",
+    "music-map:smoke": "tsx src/scripts/music-map-smoke.ts",
+    "album-highlights:smoke": "tsx src/scripts/album-highlights-smoke.ts"
   },
   "dependencies": {
     "@music-os/core": "0.1.0",

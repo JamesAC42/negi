@@ -29,7 +29,15 @@ export interface SlskdTransferSummary {
   paths: string[];
 }
 
+export interface SlskdSearchOptions {
+  /** Album acquisition needs late peer responses, unlike the quick manual preview. */
+  waitForComplete?: boolean;
+  attempts?: number;
+}
+
 export class SlskdService {
+  private searchTail: Promise<void> = Promise.resolve();
+
   constructor(private readonly config: BackendConfig) {}
 
   async health(): Promise<DiscoveryHealthResponse> {
@@ -63,16 +71,16 @@ export class SlskdService {
     }
   }
 
-  async search(query: string, responseLimit = 100): Promise<DiscoverySearchResponse> {
+  async search(query: string, responseLimit = 100, options: SlskdSearchOptions = {}): Promise<DiscoverySearchResponse> {
     const searchTimeout = slskdSearchTimeoutMs();
-    const attempts = slskdSearchAttempts();
+    const attempts = options.attempts ?? slskdSearchAttempts();
     const searchTexts = searchTextVariants(query);
     let results: DiscoveryResult[] = [];
     let lastResponse: unknown = {};
 
     for (let attempt = 0; attempt < attempts && results.length === 0; attempt += 1) {
       const searchText = searchTexts[Math.min(attempt, searchTexts.length - 1)] ?? query;
-      const response = await this.runSearchAttempt(searchText, searchTimeout, responseLimit);
+      const response = await this.runSearchAttempt(searchText, searchTimeout, responseLimit, options);
       lastResponse = response;
       results = extractResults(response);
       if (results.length === 0 && attempt < attempts - 1) {
@@ -120,6 +128,73 @@ export class SlskdService {
     return unlocked;
   }
 
+  async browseResultFolder(seed: DiscoveryResult): Promise<DiscoveryResult[]> {
+    if (!seed.username || seed.isLocked) return [];
+    const remotePath = stringValue(seed.raw.filename) ?? seed.path;
+    const separatorIndex = Math.max(remotePath.lastIndexOf("/"), remotePath.lastIndexOf("\\"));
+    if (separatorIndex <= 0) return [];
+    const directory = remotePath.slice(0, separatorIndex);
+    const separator = remotePath[separatorIndex]!;
+    const normalized = (path: string) => path.replace(/\\/g, "/").replace(/\/$/, "");
+    const response = await this.fetchJson(`/api/v0/users/${encodeURIComponent(seed.username)}/directory`, {
+      method: "POST",
+      body: JSON.stringify({ directory }),
+      signal: AbortSignal.timeout(readPositiveIntegerEnv("MUSIC_OS_SLSKD_BROWSE_TIMEOUT_MS", 15_000)),
+    });
+    const results: DiscoveryResult[] = [];
+    for (const value of arrayValue(response)) {
+      const folder = asRecord(value);
+      if (!folder || normalized(stringValue(folder.name) ?? "") !== normalized(directory)) continue;
+      for (const entry of arrayValue(folder.files)) {
+        const file = asRecord(entry);
+        const filename = file && stringValue(file.filename ?? file.fileName ?? file.name);
+        if (!file || !filename || filename.split(/[\\/]/).some((part) => part === "." || part === "..")) continue;
+        const path = /[\\/]/.test(filename) ? filename : directory + separator + filename;
+        // A peer can return extra directories or absolute paths. Only admit
+        // direct children of the exact album folder we requested.
+        if (normalized(path).slice(0, normalized(path).lastIndexOf("/")) !== normalized(directory)) continue;
+        const result = mapFileResult({ ...file, filename: path, path, username: seed.username }, seed.username, {
+          hasFreeUploadSlot: seed.hasFreeUploadSlot ?? null,
+          uploadSpeedBytesPerSecond: seed.uploadSpeedBytesPerSecond ?? null,
+          queueLength: seed.queueLength ?? null,
+        });
+        if (result && isAudioDiscoveryResult(result)) results.push(result);
+      }
+    }
+    return dedupeResults(results);
+  }
+
+  async cancelDownloadResults(results: DiscoveryResult[]): Promise<void> {
+    // Destructive transfer actions must use the full remote path and username,
+    // never the basename fallback used to locate completed local files.
+    const matching = (records: Record<string, unknown>[]) => records.filter((transfer) => results.some((result) => {
+      const username = stringValue(transfer.username ?? transfer.user ?? transfer.userName);
+      const path = stringValue(transfer.filename ?? transfer.fileName ?? transfer.path);
+      const size = numberValue(transfer.size ?? transfer.sizeBytes);
+      return Boolean(result.username && username === result.username && path === (stringValue(result.raw.filename) ?? result.path)
+        && (result.sizeBytes == null || size === result.sizeBytes));
+    }));
+    const unfinished = (records: Record<string, unknown>[]) => matching(records).filter((record) => {
+      const state = transferState(record);
+      return !isCompletedState(state) && !isFailedState(state);
+    });
+    const pending = unfinished(await this.listTransferRecords());
+    if (pending.some((record) => !isQueuedState(transferState(record)) || !stringValue(record.id))) {
+      throw new Error("Album source is no longer exclusively queued; keep monitoring before trying another source");
+    }
+    for (const record of pending) {
+      const username = stringValue(record.username ?? record.user ?? record.userName)!;
+      await this.fetchJson(`/api/v0/transfers/downloads/${encodeURIComponent(username)}/${encodeURIComponent(String(record.id))}?remove=false`, { method: "DELETE" });
+    }
+    // slskd acknowledges cancellation before its transfer worker necessarily
+    // settles. Failover is safe only after all exact old transfers have stopped.
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      if (unfinished(await this.listTransferRecords()).length === 0) return;
+      await delay(200);
+    }
+    throw new Error("Album source cancellation has not completed; keep monitoring before trying another source");
+  }
+
   async findCompletedDownloadPaths(results: DiscoveryResult[]): Promise<string[]> {
     if (!this.config.slskdDownloadDirectory) {
       throw new Error("MUSIC_OS_SLSKD_DOWNLOAD_DIR is required before downloads can be staged");
@@ -160,7 +235,21 @@ export class SlskdService {
     return collectTransferFiles(response);
   }
 
-  private async runSearchAttempt(searchText: string, timeoutMs: number, responseLimit: number): Promise<unknown> {
+  private async runSearchAttempt(searchText: string, timeoutMs: number, responseLimit: number, options: SlskdSearchOptions): Promise<unknown> {
+    // Soulseek throttles outgoing searches. Starting fallbacks before earlier
+    // searches finish builds a queue whose results arrive after our old deadline.
+    const previous = this.searchTail;
+    let release!: () => void;
+    this.searchTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await this.createAndWaitForSearch(searchText, timeoutMs, responseLimit, options);
+    } finally {
+      release();
+    }
+  }
+
+  private async createAndWaitForSearch(searchText: string, timeoutMs: number, responseLimit: number, options: SlskdSearchOptions): Promise<unknown> {
     const payload = {
       searchText,
       fileLimit: slskdSearchFileLimit(),
@@ -173,13 +262,16 @@ export class SlskdService {
       body: JSON.stringify(payload)
     });
     const searchId = searchIdFromResponse(created);
-    return searchId ? await this.waitForSearch(searchId, timeoutMs, responseLimit) : created;
+    return searchId ? await this.waitForSearch(searchId, timeoutMs, responseLimit, options) : created;
   }
 
-  private async waitForSearch(searchId: string, timeoutMs: number, responseLimit: number): Promise<unknown> {
+  private async waitForSearch(searchId: string, timeoutMs: number, responseLimit: number, options: SlskdSearchOptions): Promise<unknown> {
     let latest: unknown = {};
     const startedAt = Date.now();
-    const deadline = startedAt + timeoutMs + slskdSearchGraceMs();
+    // slskd starts its search timeout after the network dispatch is admitted.
+    // While queued it reports InProgress and counts, but may withhold responses
+    // until completion. A count with no response bodies is not an empty search.
+    const deadline = startedAt + timeoutMs + slskdSearchGraceMs() + slskdSearchQueueTimeoutMs();
     let completedEmptyAt: number | null = null;
     for (let attempt = 0; Date.now() < deadline; attempt += 1) {
       await delay(searchPollDelayMs(attempt));
@@ -205,12 +297,15 @@ export class SlskdService {
       } else {
         completedEmptyAt = null;
       }
-      if (results.length >= responseLimit || (results.length > 0 && Date.now() - startedAt >= slskdSearchPartialAfterMs())) {
+      // responseLimit counts peer responses in slskd, not individual files.
+      // Only manual browsing may return a preview before the search finishes.
+      if (!options.waitForComplete && (results.length >= responseLimit || (results.length > 0 && Date.now() - startedAt >= slskdSearchPartialAfterMs()))) {
         return latest;
       }
     }
 
-    return latest;
+    const state = asRecord(latest);
+    throw new Error(`Soulseek search did not finish within the allowed wait (${stringValue(state?.state) ?? "unknown state"}; ${state ? searchReportedResultCount(state) : 0} files reported). The search may still be queued; this does not mean the album is unavailable.`);
   }
 
   private async waitForDownloads(results: DiscoveryResult[]): Promise<void> {
@@ -303,7 +398,7 @@ export class SlskdService {
           ...authHeaders(this.config),
           ...init.headers
         },
-        signal: AbortSignal.timeout(slskdRequestTimeoutMs())
+        signal: init.signal ?? AbortSignal.timeout(slskdRequestTimeoutMs())
       });
       const text = await response.text();
       if (!response.ok) {
@@ -328,6 +423,10 @@ function delay(ms: number): Promise<void> {
 
 function slskdSearchTimeoutMs(): number {
   return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_TIMEOUT_MS", 30_000);
+}
+
+function slskdSearchQueueTimeoutMs(): number {
+  return readPositiveIntegerEnv("MUSIC_OS_SLSKD_SEARCH_QUEUE_TIMEOUT_MS", 300_000);
 }
 
 function slskdSearchGraceMs(): number {
@@ -802,7 +901,9 @@ function isCompletedState(state: string): boolean {
 }
 
 function isFailedState(state: string): boolean {
-  return /fail|failed|error|errored|cancel|cancelled|canceled|aborted|rejected/.test(state.toLowerCase());
+  // slskd marks every terminal transfer Completed, including TimedOut.
+  // A timeout must not become a successful download just because of that flag.
+  return /fail|failed|error|errored|cancel|cancelled|canceled|aborted|rejected|timed[\s_-]*out|timeout/.test(state.toLowerCase());
 }
 
 function isQueuedState(state: string): boolean {

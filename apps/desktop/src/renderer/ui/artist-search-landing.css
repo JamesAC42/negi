@@ -1,0 +1,174 @@
+.artistsModePane {
+  container-type: inline-size;
+}
+.artistSearchLanding {
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: clamp(1.25rem, 2.5vw, 2.5rem);
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+.artistLandingMasthead {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--tx2);
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+}
+.artistLandingMasthead a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--tx2);
+  text-decoration: none;
+}
+.artistLandingMasthead a:hover { color: var(--acc); }
+.artistLandingStage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 2.5rem;
+  padding-block: 3rem 5rem;
+  min-height: 26rem;
+}
+.artistLandingSearch {
+  width: min(100%, 58rem);
+  text-align: center;
+  min-width: 0;
+}
+.artistLandingEmblem {
+  color: var(--acc);
+  margin-bottom: 1.25rem;
+}
+.artistLandingSearch h2 {
+  font: 600 clamp(2.2rem, 3.5vw, 4rem)/1.1 var(--font-head);
+  letter-spacing: -0.035em;
+  margin: 0.75rem 0 1rem;
+}
+.artistLandingSearch > p {
+  color: var(--tx1);
+  font-size: 0.8rem;
+  line-height: 1.9;
+  margin: 0 0 2rem;
+}
+.artistLandingSearch form {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.55rem 0.55rem 0.55rem 1.15rem;
+  border: 1px solid var(--line2);
+  border-bottom: 2px solid var(--acc-line);
+  background: var(--bg1);
+  box-shadow: 0 12px 35px #0003;
+}
+.artistLandingSearch form:focus-within {
+  border-color: var(--acc);
+}
+.artistLandingSearch form > svg { color: var(--acc); flex-shrink: 0; }
+.artistLandingSearch input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0.8rem 0;
+  font: 400 0.95rem var(--font-body);
+}
+.artistLandingSearch button {
+  flex-shrink: 0;
+  padding: 0.85rem 1rem;
+  color: var(--bg0);
+  background: var(--acc);
+  border-color: var(--acc);
+  font-size: 0.75rem;
+}
+.artistLandingSearchHint {
+  display: block;
+  margin-top: 0.9rem;
+  color: var(--tx2);
+  font-size: 0.62rem;
+}
+.artistLandingLibrary {
+  min-width: 0;
+  width: min(100%, 58rem);
+  text-align: center;
+}
+.artistLandingLibrary > p {
+  font: 500 1.15rem var(--font-head);
+  margin: 0.5rem 0 1.15rem;
+}
+.artistLandingShortcuts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 1.5rem;
+}
+.artistLandingShortcuts button {
+  width: 100%;
+  display: flex;
+  justify-content: flex-start;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line2);
+  padding: 0.8rem 0;
+  gap: 0.65rem;
+  color: var(--tx1);
+  min-width: 0;
+}
+.artistLandingShortcuts button:hover {
+  color: var(--acc);
+  background: var(--acc-dim);
+}
+.artistLandingCover {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 2.5rem;
+  overflow: hidden;
+  border: 1px solid var(--line2);
+  background: var(--bg1);
+  font-family: var(--font-head);
+}
+.artistLandingCover img {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  inset: 0;
+  object-fit: cover;
+}
+.artistLandingShortcuts button > span:nth-child(2) { flex: 1; min-width: 0; }
+.artistLandingShortcuts strong,
+.artistLandingShortcuts small {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.68rem;
+  line-height: 1.7;
+}
+.artistLandingShortcuts small { font-size: 0.58rem; color: var(--tx2); font-weight: 400; }
+.artistLandingShortcuts button > svg { flex-shrink: 0; color: var(--tx2); }
+.artistLandingLibrary > .artistLandingLibraryEmpty {
+  color: var(--tx2);
+  font: 400 0.7rem/1.8 var(--font-body);
+  max-width: 28rem;
+  margin-inline: auto;
+}
+@container (max-width: 600px) {
+  .artistSearchLanding { padding: 1.2rem; }
+  .artistLandingMasthead { font-size: 0.5rem; }
+  .artistLandingSearch h2 { font-size: 2.5rem; }
+  .artistLandingSearch form { gap: 0.6rem; padding-left: 0.7rem; }
+  .artistLandingSearch input { font-size: 0.8rem; }
+  .artistLandingSearch button { padding-inline: 0.6rem; font-size: 0.65rem; }
+  .artistLandingSearch button svg { display: none; }
+  .artistLandingStage { padding-block: 2rem; }
+  .artistLandingShortcuts { gap: 0 1rem; }
+}

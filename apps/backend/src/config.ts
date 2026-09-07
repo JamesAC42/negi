@@ -15,6 +15,7 @@ export interface BackendConfig {
   port: number;
   databasePath: string;
   mpvPath: string;
+  ytDlpPath?: string;
   windowsNodePath?: string | null;
   musicBrainzEnabled?: boolean;
   musicBrainzUserAgent?: string;
@@ -40,6 +41,7 @@ export function getBackendConfig(): BackendConfig {
       process.env.MUSIC_OS_DATABASE_PATH ??
       join(process.cwd(), ".music-os", "music-os.sqlite"),
     mpvPath: process.env.MUSIC_OS_MPV_PATH ?? detectDefaultMpvPath(),
+    ytDlpPath: process.env.MUSIC_OS_YT_DLP_PATH ?? (existsSync(join(repoRoot, ".music-os/tools/youtube/bin/yt-dlp")) ? join(repoRoot, ".music-os/tools/youtube/bin/yt-dlp") : "yt-dlp"),
     windowsNodePath: process.env.MUSIC_OS_WINDOWS_NODE_PATH ?? null,
     musicBrainzEnabled: process.env.MUSIC_OS_MUSICBRAINZ_ENABLED !== "0",
     musicBrainzUserAgent: process.env.MUSIC_OS_MUSICBRAINZ_USER_AGENT ?? "MusicOS/0.1.0 (local-dev)",

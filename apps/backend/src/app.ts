@@ -1,3 +1,10 @@
+import { AlbumHighlightsService } from "./services/album-highlights-service.js";
+import { SimilarArtistsService } from "./services/similar-artists-service.js";
+import { ArtistProfileService } from "./services/artist-profile-service.js";
+import { AppleCatalogueService } from "./services/apple-catalogue-service.js";
+import { CatalogueService } from "./services/catalogue-service.js";
+import { AlbumAcquisitionService } from "./services/album-acquisition-service.js";
+import { YoutubeService } from "./services/youtube-service.js";
 import { healthResponseSchema, type HealthResponse } from "@music-os/core";
 import { openMusicDatabase } from "@music-os/db";
 import type Database from "better-sqlite3";
@@ -29,6 +36,13 @@ import { VisualizerService } from "./services/visualizer-service.js";
 import { LiveAnalyzerService } from "./services/live-analyzer-service.js";
 
 export interface BackendApp {
+  catalogue: CatalogueService;
+  appleCatalogue: AppleCatalogueService;
+  artistProfiles: ArtistProfileService;
+  similarArtists: SimilarArtistsService;
+  albumHighlights: AlbumHighlightsService;
+  albumAcquisitions: AlbumAcquisitionService;
+  youtube: YoutubeService;
   db: Database.Database;
   library: LibraryRepository;
   scanner: LibraryScanner;
@@ -65,6 +79,13 @@ export function createBackendApp(config: BackendConfig): BackendApp {
   const imports = new ImportService(db, library, config, metadata, fingerprints);
   const discovery = new SlskdService(config);
   const discoveryDownloads = new DiscoveryDownloadService(db, discovery, imports);
+  const catalogue = new CatalogueService(config, library, db);
+  const appleCatalogue = new AppleCatalogueService(config, library, db);
+  const artistProfiles = new ArtistProfileService(catalogue, appleCatalogue, config.musicBrainzUserAgent);
+  const albumHighlights = new AlbumHighlightsService(artistProfiles, catalogue, library);
+  const similarArtists = new SimilarArtistsService(artistProfiles, catalogue, library, config.musicBrainzUserAgent);
+  const albumAcquisitions = new AlbumAcquisitionService(db, library, imports, discoveryDownloads, discovery, catalogue, appleCatalogue);
+  const youtube = new YoutubeService(db, config, imports, library);
   const savedDiscoveryCandidates = new SavedDiscoveryCandidateService(db);
   const savedDiscoveryLists = new SavedDiscoveryListService(db);
   const operations = new OperationService(db, imports, library, discoveryDownloads);
@@ -91,6 +112,13 @@ export function createBackendApp(config: BackendConfig): BackendApp {
   let closed = false;
 
   return {
+    catalogue,
+    appleCatalogue,
+    artistProfiles,
+    similarArtists,
+    albumHighlights,
+    albumAcquisitions,
+    youtube,
     db,
     library,
     scanner,
@@ -135,6 +163,8 @@ export function createBackendApp(config: BackendConfig): BackendApp {
       visualizer.close();
       waveforms.close();
       playback.close();
+      albumAcquisitions.close();
+      youtube.close();
       db.close();
     }
   };

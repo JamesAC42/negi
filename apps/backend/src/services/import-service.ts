@@ -35,6 +35,10 @@ export class ImportService {
     return this.createFromSourcePaths(paths, libraryRootId, "slskd_download", context);
   }
 
+  async createFromYoutubeDownload(path: string, context: Record<string, unknown>): Promise<ImportBatch> {
+    return this.createFromSourcePaths([path], undefined, "youtube_download", context);
+  }
+
   private async createFromSourcePaths(
     paths: string[],
     libraryRootId: string | undefined,
@@ -97,7 +101,7 @@ export class ImportService {
     }
 
     const root = this.library.getRoot(libraryRootId);
-    const destination = item.proposedDestination ?? buildDestinationPath(root, item, item.stagingPath);
+    const destination = buildDestinationPath(root, item, item.stagingPath);
     await mkdir(dirname(destination), { recursive: true });
 
     const finalPath = await uniqueDestination(destination);
@@ -121,6 +125,13 @@ export class ImportService {
       )
       .run(importedFileId, finalPath, finalPath, importItemId);
 
+    if (importedFileId && item.selectedCandidate?.source === "manual") {
+      this.library.setFileMetadataOverrides(importedFileId, {
+        artist: item.detectedArtist, albumartist: item.detectedArtist,
+        album: item.detectedAlbum, title: item.detectedTitle,
+        year: item.detectedYear == null ? null : String(item.detectedYear)
+      });
+    }
     this.refreshImportStatus(item.importId);
     return this.getItem(importItemId);
   }

@@ -1,3 +1,4 @@
+import { albumCatalogueSnapshot, missingReleaseTracks, type AlbumCatalogueSnapshot } from "./album-completeness.js";
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
 import { statSync } from "node:fs";
@@ -571,12 +572,21 @@ export class LibraryRepository {
       tagsByFileId.set(row.file_id, tags);
     }
 
-    for (const row of readRows("file_metadata_overrides", uniqueFileIds)) {
+    const overrides = readRows("file_metadata_overrides", uniqueFileIds);
+    for (const row of overrides) {
       const tags = tagsByFileId.get(row.file_id) ?? {};
       tags[row.tag_key] = row.tag_value;
       tagsByFileId.set(row.file_id, tags);
     }
 
+    for (const row of overrides) {
+      const total = row.tag_key === "tracknumber" ? row.tag_value.match(/^\s*\d+\s*\/\s*([1-9]\d*)\s*$/)?.[1] : undefined;
+      if (total) {
+        const tags = tagsByFileId.get(row.file_id)!;
+        tags.tracktotal = total;
+        tags.totaltracks = total;
+      }
+    }
     return tagsByFileId;
   }
 
@@ -853,52 +863,59 @@ export class LibraryRepository {
       .slice(0, limit);
   }
 
+  private albumCataloguePayloads(): unknown[] {
+    return (this.db.prepare(`SELECT payload_json FROM jobs WHERE type = 'album_acquisition'
+      AND json_valid(payload_json) AND json_type(payload_json, '$.tracks') = 'array'
+      AND json_array_length(payload_json, '$.tracks') > 0
+      AND json_type(payload_json, '$.artistId') = 'text' AND json_type(payload_json, '$.releaseGroupId') = 'text'
+      ORDER BY coalesce(started_at, created_at) DESC, created_at DESC, rowid DESC`).all() as { payload_json: string }[])
+      .map((row) => JSON.parse(row.payload_json) as unknown);
+  }
+
+  getAlbumCatalogue(album: AlbumGroup): AlbumCatalogueSnapshot | null {
+    return this.albumCataloguePayloads().map((payload) => albumCatalogueSnapshot(payload, album)).find((snapshot) => snapshot != null) ?? null;
+  }
+
   listIncompleteAlbums(limit = 200): IncompleteAlbum[] {
-    return this.listAlbumGroups(Number.MAX_SAFE_INTEGER)
-      .map((album) => {
-        let expectedTracks = 0;
-        const presentTrackNumbers = new Set<number>();
-        for (const file of album.files) {
-          const track = readTrackNumber(file.displayTags, file.filename);
-          if (track !== Number.MAX_SAFE_INTEGER) {
-            presentTrackNumbers.add(track);
-          }
-          const total = readTotalTrackCount(file.displayTags);
-          if (total != null) {
-            expectedTracks = Math.max(expectedTracks, total);
-          }
-        }
-
-        if (expectedTracks <= 0 || presentTrackNumbers.size >= expectedTracks) {
-          return null;
-        }
-
-        const missingTrackNumbers: number[] = [];
-        for (let track = 1; track <= expectedTracks; track += 1) {
-          if (!presentTrackNumbers.has(track)) {
-            missingTrackNumbers.push(track);
-          }
-        }
-
-        return {
-          key: album.id,
-          artist: album.artist,
-          album: album.album,
-          year: album.year,
-          expectedTracks,
-          presentTracks: presentTrackNumbers.size,
-          missingTrackNumbers,
-          files: album.files
-        };
-      })
-      .filter((album): album is IncompleteAlbum => album != null)
-      .sort(
-        (left, right) =>
-          right.missingTrackNumbers.length - left.missingTrackNumbers.length ||
-          left.artist.localeCompare(right.artist) ||
-          left.album.localeCompare(right.album)
-      )
-      .slice(0, limit);
+    const payloads = this.albumCataloguePayloads();
+    const incomplete: IncompleteAlbum[] = [];
+    for (const album of this.listAlbumGroups(Number.MAX_SAFE_INTEGER)) {
+      const snapshot = payloads.map((payload) => albumCatalogueSnapshot(payload, album)).find((value) => value != null);
+      const base = { key: album.id, artist: album.artist, album: album.album, year: album.year, files: album.files };
+      if (snapshot) {
+        const missing = missingReleaseTracks(snapshot.tracks, album.files);
+        if (missing.length) incomplete.push({ ...base, source: "catalogue", artistId: snapshot.artistId,
+          releaseGroupId: snapshot.releaseGroupId, expectedTracks: snapshot.tracks.length,
+          presentTracks: snapshot.tracks.length - missing.length, missingTracks: missing,
+          missingTrackNumbers: new Set(snapshot.tracks.map((track) => track.disc)).size === 1 ? missing.map((track) => track.number) : [],
+          missingTrackPositions: missing.map(({ disc, number }) => ({ disc, number })) });
+        continue;
+      }
+      const discs = new Map<number, { present: Set<number>; totals: Set<number> }>();
+      for (const file of album.files) {
+        const disc = readDiscNumber(file.displayTags);
+        const state = discs.get(disc) ?? { present: new Set<number>(), totals: new Set<number>() };
+        const track = readTrackNumber(file.displayTags, file.filename);
+        if (track > 0 && track !== Number.MAX_SAFE_INTEGER) state.present.add(track);
+        const total = readTotalTrackCount(file.displayTags);
+        if (total != null && total > 0 && total <= 1000) state.totals.add(total);
+        discs.set(disc, state);
+      }
+      let expectedTracks = 0;
+      let presentTracks = 0;
+      const missingTrackPositions: { disc: number; number: number }[] = [];
+      for (const [disc, state] of discs) {
+        if (!state.totals.size) continue;
+        const total = Math.max(...state.totals);
+        expectedTracks += total;
+        presentTracks += [...state.present].filter((number) => number <= total).length;
+        for (let number = 1; number <= total; number++) if (!state.present.has(number)) missingTrackPositions.push({ disc, number });
+      }
+      if (missingTrackPositions.length) incomplete.push({ ...base, source: "tags", expectedTracks, presentTracks,
+        missingTrackPositions, missingTrackNumbers: discs.size === 1 ? missingTrackPositions.map((track) => track.number) : [] });
+    }
+    return incomplete.sort((a, b) => (b.expectedTracks - b.presentTracks) - (a.expectedTracks - a.presentTracks)
+      || a.artist.localeCompare(b.artist) || a.album.localeCompare(b.album)).slice(0, limit);
   }
 
   listAlbumMergeSuggestions(limit = 200): AlbumMergeSuggestion[] {
@@ -1153,15 +1170,10 @@ function readTrackNumber(tags: Record<string, string>, filename: string): number
 }
 
 function readTotalTrackCount(tags: Record<string, string>): number | null {
-  const explicit = readNumericTag(tags.tracktotal ?? tags.totaltracks);
-  if (explicit != null) {
-    return explicit;
-  }
-
   const compound = tags.tracknumber ?? tags.track;
   const match = compound?.match(/\/\s*(\d+)/);
   if (!match) {
-    return null;
+    return readNumericTag(tags.tracktotal ?? tags.totaltracks);
   }
 
   const parsed = Number.parseInt(match[1], 10);

@@ -21,6 +21,8 @@ class FakeSlskd {
 }
 
 class PartialFakeSlskd {
+  cancelCalls = 0;
+  async cancelDownloadResults() { this.cancelCalls += 1; }
   constructor(private readonly completedPath: string) {}
 
   async queueDownloadResults(results: DiscoveryResult[]): Promise<DiscoveryResult[]> {
@@ -49,6 +51,29 @@ class PartialFakeSlskd {
         samples: [],
         error: null
       }
+    };
+  }
+}
+
+class QueuedFakeSlskd {
+  active = false;
+  failed = 0;
+  cancelCalls = 0;
+  cancelFails = false;
+  onInspect?: () => void;
+  async queueDownloadResults(results: DiscoveryResult[]) { return results; }
+  async findCompletedDownloadPaths(): Promise<string[]> { return []; }
+  async cancelDownloadResults() {
+    this.cancelCalls += 1;
+    if (this.active) throw new Error("Transfer is active");
+    if (this.cancelFails) throw new Error("Remote cancellation unavailable");
+  }
+  async inspectDownloadResults() {
+    this.onInspect?.();
+    return {
+      downloadDirectory: "/fixture", directoryError: null, filesSeen: 0, completedPaths: [],
+      transfers: { total: 1 + this.failed, matched: 1 + this.failed, completed: 0, failed: this.failed,
+        active: this.active ? 1 : 0, queued: this.active ? 0 : 1, other: 0, samples: [], error: null }
     };
   }
 }
@@ -115,9 +140,10 @@ try {
   const operationCompleted = await waitForJob(downloads, createdJobId, "succeeded");
   assert(operationCompleted.imported?.items.length === 1, "operation-created download job should create one import item");
 
+  const partialFake = new PartialFakeSlskd(downloadPath);
   const partialDownloads = new DiscoveryDownloadService(
     app.db,
-    new PartialFakeSlskd(downloadPath) as unknown as SlskdService,
+    partialFake as unknown as SlskdService,
     app.imports
   );
   const pendingResult = {
@@ -127,11 +153,68 @@ try {
     filename: "Pending Artist - Pending Title.mp3",
     path: "Pending Folder\\Pending Artist - Pending Title.mp3"
   };
-  const partialJob = partialDownloads.createJob([result, pendingResult], root.id);
+  const partialJob = partialDownloads.createJob([result, pendingResult], root.id, { queuedTimeoutMs: 100 });
   const partialCompleted = await waitForJob(partialDownloads, partialJob.id, "succeeded");
+  assert(partialFake.cancelCalls === 1, "partial album must cancel remaining transfers before recovery");
   assert(partialCompleted.completedCount === 1, `expected one partial completed file, got ${partialCompleted.completedCount}`);
   assert(partialCompleted.selectedCount === 2, `expected two selected files, got ${partialCompleted.selectedCount}`);
   assert(partialCompleted.imported?.items.length === 1, "expected the completed subset to be staged without waiting for the queued transfer");
+
+  const queuedFake = new QueuedFakeSlskd();
+  const queuedDownloads = new DiscoveryDownloadService(app.db, queuedFake as unknown as SlskdService, app.imports);
+  const queuedJob = queuedDownloads.createJob([result], root.id, { queuedTimeoutMs: 100 });
+  const queuedFailed = await waitForJob(queuedDownloads, queuedJob.id, "failed");
+  assert(queuedFake.cancelCalls === 1, "expired remote queue must be cancelled before failover");
+  assert(queuedFailed.error?.includes("remained queued") === true, "expected queued timeout explanation");
+
+  queuedFake.failed = 1;
+  const mixedJob = queuedDownloads.createJob([result, pendingResult], root.id, { queuedTimeoutMs: 100 });
+  await waitForJob(queuedDownloads, mixedJob.id, "failed");
+  assert(Number(queuedFake.cancelCalls) === 2, "mixed failed and queued transfers must cancel remaining queue and allow failover");
+  queuedFake.failed = 0;
+
+  queuedFake.active = true;
+  const activeJob = queuedDownloads.createJob([result], root.id, { queuedTimeoutMs: 100 });
+  await delay(1550);
+  assert(queuedDownloads.getJob(activeJob.id).status === "running", "active transfers must not expire with queued timeout");
+  assert(Number(queuedFake.cancelCalls) === 2, "active transfers must not be cancelled by queue timeout");
+  queuedDownloads.cancelJob(activeJob.id);
+  await delay(100);
+
+  queuedFake.active = false;
+  queuedFake.cancelFails = true;
+  const uncancellableJob = queuedDownloads.createJob([result], root.id, { queuedTimeoutMs: 100 });
+  await delay(1550);
+  assert(queuedDownloads.getJob(uncancellableJob.id).status === "running", "unconfirmed remote cancellation must keep monitoring");
+  queuedDownloads.cancelJob(uncancellableJob.id);
+  await delay(100);
+
+  process.env.MUSIC_OS_DISCOVERY_DOWNLOAD_TIMEOUT_MS = "100";
+  queuedFake.active = true;
+  const deadlineActiveJob = queuedDownloads.createJob([result], root.id, { queuedTimeoutMs: 100 });
+  await delay(1550);
+  assert(queuedDownloads.getJob(deadlineActiveJob.id).status === "running", "overall deadline must preserve active album transfers");
+  queuedDownloads.cancelJob(deadlineActiveJob.id);
+  await delay(100);
+  queuedFake.active = false;
+  const deadlineUnknownJob = queuedDownloads.createJob([result], root.id, { queuedTimeoutMs: 100 });
+  await delay(1550);
+  assert(queuedDownloads.getJob(deadlineUnknownJob.id).status === "running", "overall deadline must not allow failover when cancellation fails");
+  queuedDownloads.cancelJob(deadlineUnknownJob.id);
+  await delay(100);
+  queuedFake.cancelFails = false;
+  const deadlineSafeJob = queuedDownloads.createJob([result], root.id, { queuedTimeoutMs: 10000 });
+  await waitForJob(queuedDownloads, deadlineSafeJob.id, "failed");
+  delete process.env.MUSIC_OS_DISCOVERY_DOWNLOAD_TIMEOUT_MS;
+
+  const racedJob = queuedDownloads.createJob([result], root.id);
+  queuedFake.onInspect = () => {
+    queuedDownloads.cancelJob(racedJob.id);
+    throw new Error("Inspection failed after cancellation");
+  };
+  await delay(1500);
+  assert(queuedDownloads.getJob(racedJob.id).status === "cancelled", "inspection error must not overwrite cancellation");
+  queuedFake.onInspect = undefined;
 
   app.close();
   console.log(JSON.stringify({ ok: true, completed, retriedCompleted, appliedDownload, operationCompleted, partialCompleted }, null, 2));
