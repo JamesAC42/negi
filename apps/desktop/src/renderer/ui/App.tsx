@@ -1,3 +1,8 @@
+import { SongQueueRow } from "./SongQueueRow";
+import { NowPlayingViews } from "./NowPlayingViews";
+import { createNowPlayingMotion, type NowPlayingMotion } from "../now-playing-motion";
+import { createVisualizerCanvas, type VisualizerCanvas } from "../visualizer-canvas";
+import { recordAlbumProgress } from "../record-player-state";
 import { mergePlaybackState, shouldRefreshPlaybackHistory } from "../playback-state.js";
 import { artworkObjectUrls, getArtworkObjectUrl } from "../artwork-requests";
 import { AppearanceStudio } from "./AppearanceStudio";
@@ -8,7 +13,7 @@ import "./home-journal.css";
 import { StyledSelect } from "./StyledSelect";
 import { LibraryArtistPage } from "./LibraryArtistPage";
 import { AlbumCompletion, ArtistExplorer, DiscoveryModes } from "./Explore";
-import { Fragment, memo, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowDownWideNarrow as LucideSort,
@@ -2093,12 +2098,24 @@ export function App(): ReactElement {
   }
 
   async function refreshPlayback(signal?: AbortSignal): Promise<void> {
+    const actionId = playbackActionIdRef.current;
     const next = await getPlaybackState(signal);
+    if (actionId !== playbackActionIdRef.current) return;
     const current = playbackRef.current;
     setPlayback((current) => mergePlaybackState(current, next));
     if (shouldRefreshPlaybackHistory(current, next)) {
       void refreshPlaybackHistoryViews();
     }
+  }
+
+  async function handleRecordPlayerAction(id: string, action: "begin" | "complete" | "skip"): Promise<void> {
+    const actionId = ++playbackActionIdRef.current;
+    const next = await postJson("/playback/record-player/action", { id, action }, playbackStateSchema);
+    if (actionId === playbackActionIdRef.current) setPlayback(next);
+  }
+
+  async function handleRecordPlayerPresence(clientId: string, active: boolean, reducedMotion: boolean): Promise<void> {
+    await postJson("/playback/record-player/presence", { clientId, active, reducedMotion }, playbackStateSchema);
   }
 
   async function handlePlayFile(fileId: string, queueFileIds?: string[]): Promise<void> {
@@ -3111,6 +3128,9 @@ export function App(): ReactElement {
       <div className="appBackground" aria-hidden="true" />
 
       <section className="centerPane">
+        {playback.status === "error" && playback.error ? (
+          <div className="inlineError" role="alert">{playback.error}</div>
+        ) : null}
         {activeView === "Home" ? (
           <HomeAnalyticsView
             onOpenSettings={() => navigateToView("Settings")}
@@ -3558,6 +3578,9 @@ export function App(): ReactElement {
       {nowPlayingOpen ? (
         <NowPlayingModal
           appearanceMode={appearance.mode}
+          onRecordPlayerAction={handleRecordPlayerAction}
+          onRecordPlayerPresence={handleRecordPlayerPresence}
+          onStop={handleStop}
           files={playbackFiles}
           playback={playback}
           playbackBusy={playbackBusy}
@@ -5506,7 +5529,11 @@ function LibraryWorkbenchView({
                 const isCurrent = playback.currentFileId === file.id;
                 const isSelected = selectedFile?.id === file.id;
                 return (
-                  <div
+                  <SongQueueRow
+                    fileId={file.id}
+                    songTitle={file.displayTags.title ?? file.filename}
+                    queueDisabled={playbackBusy}
+                    onEnqueue={onEnqueuePlayback}
                     className={`libraryTrackRow${isSelected ? " selected" : ""}${isCurrent ? " playing" : ""}`}
                     key={file.id}
                     onDoubleClick={() => void onPlayFile(file.id, albumQueue)}
@@ -5594,7 +5621,7 @@ function LibraryWorkbenchView({
                       ))}
                     </div>
                     <span>{formatFileFormat(file)}</span>
-                  </div>
+                  </SongQueueRow>
                 );
               })}
             </div>
@@ -6262,7 +6289,12 @@ function LibraryView({
                       const trackAlbum = tags.album ?? group.album;
                       const trackYear = tags.year ?? tags.date ?? group.year;
                       return (
-                        <div className={isCurrent ? "albumTrackRow active" : "albumTrackRow"} key={file.id}>
+                        <SongQueueRow
+                          fileId={file.id}
+                          songTitle={file.displayTags.title ?? file.filename}
+                          queueDisabled={playbackBusy}
+                          onEnqueue={onEnqueuePlayback}
+                          className={isCurrent ? "albumTrackRow active" : "albumTrackRow"} key={file.id}>
                           <label className="rowSelect" title="Select for bulk actions">
                             <input
                               checked={selectedFileIds.has(file.id)}
@@ -6366,7 +6398,7 @@ function LibraryView({
                               <ActionIcon shape="remove" />
                             </button>
                           </span>
-                        </div>
+                        </SongQueueRow>
                       );
                     })}
                   </div>
@@ -11356,7 +11388,10 @@ function SortSelect<T extends string>({
   );
 }
 
-function NowPlayingModal({
+export function NowPlayingModal({
+  onRecordPlayerAction,
+  onRecordPlayerPresence,
+  onStop,
   appearanceMode,
   files,
   playback,
@@ -11378,6 +11413,9 @@ function NowPlayingModal({
   visualizerFrameRef,
   waveformState
 }: {
+  onRecordPlayerAction(id: string, action: "begin" | "complete" | "skip"): Promise<void>;
+  onRecordPlayerPresence(clientId: string, active: boolean, reducedMotion: boolean): Promise<void>;
+  onStop(): Promise<void>;
   appearanceMode: AppearanceMode;
   files: LibraryFile[];
   playback: PlaybackStateResponse;
@@ -11400,10 +11438,12 @@ function NowPlayingModal({
   waveformState: WaveformState;
 }): ReactElement {
   const [closing, setClosing] = useState(false);
-  const closeTimerRef = useRef<number | null>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const motionRef = useRef<NowPlayingMotion | null>(null);
   const onCloseRef = useRef(onClose);
   const filesById = useMemo(() => new Map(files.map((file) => [file.id, file])), [files]);
   const currentFile = playback.currentFileId ? filesById.get(playback.currentFileId) ?? null : null;
+  const albumProgress = useMemo(() => recordAlbumProgress(files, currentFile, playback), [files, currentFile, playback]);
   const activeQueueIndex = playback.queueIndex ?? (
     playback.currentFileId ? playback.queue.indexOf(playback.currentFileId) : -1
   );
@@ -11459,32 +11499,35 @@ function NowPlayingModal({
     []
   );
 
+  useLayoutEffect(() => {
+    if (!backdropRef.current) return;
+    const motion = createNowPlayingMotion(backdropRef.current);
+    motionRef.current = motion;
+    return () => {
+      motion.dispose();
+      motionRef.current = null;
+    };
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !event.defaultPrevented) {
         requestClose();
       }
     };
     document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current);
-      }
-    };
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   function requestClose(): void {
-    if (closeTimerRef.current !== null) {
-      return;
-    }
     setClosing(true);
-    closeTimerRef.current = window.setTimeout(() => onCloseRef.current(), 130);
+    motionRef.current?.close(() => onCloseRef.current());
   }
 
   return (
     <div
       className={`modalBackdrop nowPlayingBackdrop${closing ? " closing" : ""}`}
+      ref={backdropRef}
       role="presentation"
       onMouseDown={requestClose}
     >
@@ -11523,47 +11566,60 @@ function NowPlayingModal({
               <BeatSyncedAlbumGlow frameRef={visualizerFrameRef} playing={playback.status === "playing"} />
             </div>
             <div className="nowPlayingRightColumn">
-              <div className="nowPlayingModalInfo">
-                <span>{playback.status}</span>
-                <h2>{displayTitle}</h2>
-                <button
-                  className="nowPlayingMetaLink artist"
-                  disabled={!currentFile?.displayTags.artist}
-                  type="button"
-                  onClick={() => {
-                    if (!currentFile?.displayTags.artist) {
-                      return;
-                    }
-                    onOpenArtistPage(currentFile.displayTags.artist);
-                    requestClose();
-                  }}
-                >
-                  {displayArtist}
-                </button>
-                <button
-                  className="nowPlayingMetaLink album"
-                  disabled={!albumTarget}
-                  type="button"
-                  onClick={() => {
-                    if (!albumTarget) {
-                      return;
-                    }
-                    requestClose();
-                    void onOpenAlbumPage(albumTarget);
-                  }}
-                >
-                  {displayAlbum}
-                </button>
-                {currentFile ? (
-                  <NowPlayingActions
-                    file={currentFile}
-                    variant="modal"
-                    onFavoriteStatus={onFavoriteStatus}
-                    onRating={onRating}
-                  />
-                ) : null}
+              <div className="nowPlayingModalInfo hasRecordPlayer">
+                <div className="nowPlayingSongIdentity">
+                  <span>{playback.albumTransition ? "Changing records" : playback.status}</span>
+                  <h2>{displayTitle}</h2>
+                  <button
+                    className="nowPlayingMetaLink artist"
+                    disabled={!currentFile?.displayTags.artist}
+                    type="button"
+                    onClick={() => {
+                      if (!currentFile?.displayTags.artist) {
+                        return;
+                      }
+                      onOpenArtistPage(currentFile.displayTags.artist);
+                      requestClose();
+                    }}
+                  >
+                    {displayArtist}
+                  </button>
+                  <button
+                    className="nowPlayingMetaLink album"
+                    disabled={!albumTarget}
+                    type="button"
+                    onClick={() => {
+                      if (!albumTarget) {
+                        return;
+                      }
+                      requestClose();
+                      void onOpenAlbumPage(albumTarget);
+                    }}
+                  >
+                    {displayAlbum}
+                  </button>
+
+                  {currentFile ? (
+                    <NowPlayingActions
+                      file={currentFile}
+                      variant="modal"
+                      onFavoriteStatus={onFavoriteStatus}
+                      onRating={onRating}
+                    />
+                  ) : null}
+                </div>
+                <NowPlayingViews currentFile={currentFile} files={files} playback={playback} artworkUrl={artworkFileUrl} albumProgress={albumProgress}
+                  onPresence={onRecordPlayerPresence} onAction={onRecordPlayerAction} onStop={onStop}
+                  frameRef={visualizerFrameRef} getFrameAgeMs={getVisualizerFrameAgeMs} onSeek={onSeek} playbackBusy={playbackBusy} />
+
                 {currentFile ? (
                   <dl className="nowPlayingSongDetails" aria-label="Song details">
+                    <div>
+                      <dt>Track</dt>
+                      <dd title={albumProgress.approximate ? "Album position estimated where track lengths are unavailable" : "Position through this album"}>
+                        {String(albumProgress.track).padStart(2, "0")} / {String(albumProgress.tracks).padStart(2, "0")}
+                      </dd>
+                    </div>
                     <div>
                       <dt>Plays</dt>
                       <dd title="Recorded plays, including completed listens">{currentFile.playCount.toLocaleString()}</dd>
@@ -12403,7 +12459,11 @@ function AlbumDetailView({
             const isCurrent = playback.currentFileId === file.id;
             const isSelected = selectedFile?.id === file.id;
             return (
-              <div
+              <SongQueueRow
+                fileId={file.id}
+                songTitle={file.displayTags.title ?? file.filename}
+                queueDisabled={playbackBusy}
+                onEnqueue={onEnqueuePlayback}
                 className={[
                   "albumDetailTrack",
                   isSelected ? "active" : "",
@@ -12449,7 +12509,7 @@ function AlbumDetailView({
                 <span>{file.rating == null ? "-" : `${file.rating}/5`}</span>
                 <span>{formatListenStats(file)}</span>
                 <span>{formatFileFormat(file) || file.extension.toUpperCase()}</span>
-              </div>
+              </SongQueueRow>
             );
           })}
         </div>
@@ -12598,7 +12658,12 @@ function ArtistDetailView({
           </div>
           <div className="artistSongList">
             {topSongs.map((file) => (
-              <div className="artistSongItem" key={file.id}>
+              <SongQueueRow
+                fileId={file.id}
+                songTitle={file.displayTags.title ?? file.filename}
+                queueDisabled={playbackBusy}
+                onEnqueue={onEnqueuePlayback}
+                className="artistSongItem" key={file.id}>
                 <button
                   aria-label={`Play ${file.displayTags.title ?? file.filename}`}
                   className="rowPlay"
@@ -12622,7 +12687,7 @@ function ArtistDetailView({
                   label={file.displayTags.title ?? file.filename}
                   onEnqueue={onEnqueuePlayback}
                 />
-              </div>
+              </SongQueueRow>
             ))}
           </div>
         </section>
@@ -12828,7 +12893,12 @@ function PlaylistsView({
                 const tags = item.file.displayTags;
                 const isCurrent = playback.currentFileId === item.file.id;
                 return (
-                  <div className={isCurrent ? "playlistWorkspaceTrack playing" : "playlistWorkspaceTrack"} key={item.id}>
+                  <SongQueueRow
+                    fileId={item.file.id}
+                    songTitle={item.file.displayTags.title ?? item.file.filename}
+                    queueDisabled={playbackBusy}
+                    onEnqueue={onEnqueuePlayback}
+                    className={isCurrent ? "playlistWorkspaceTrack playing" : "playlistWorkspaceTrack"} key={item.id}>
                     <button
                       aria-label={`Play ${tags.title ?? item.file.filename}`}
                       className="rowPlay"
@@ -12847,7 +12917,7 @@ function PlaylistsView({
                     <span>{item.file.durationMs == null ? "-" : formatTime(item.file.durationMs)}</span>
                     <span>{formatFileFormat(item.file)}</span>
                     <button className="secondary" type="button" onClick={() => void onProposeRemoveItem(activePlaylist.id, item.id)}>Remove</button>
-                  </div>
+                  </SongQueueRow>
                 );
               })}
               {activePlaylist.items.length === 0 ? <div className="emptyState">This list has no tracks.</div> : null}
@@ -13089,7 +13159,12 @@ function PlaylistDetailView({
             const trackAlbum = tags.album ?? null;
             const trackYear = tags.year ?? tags.date ?? null;
             return (
-              <div className={isCurrent ? "playlistTrackRow active" : "playlistTrackRow"} key={item.id} role="listitem">
+              <SongQueueRow
+                fileId={item.file.id}
+                songTitle={item.file.displayTags.title ?? item.file.filename}
+                queueDisabled={playbackBusy}
+                onEnqueue={onEnqueuePlayback}
+                className={isCurrent ? "playlistTrackRow active" : "playlistTrackRow"} key={item.id} role="listitem">
                 <span className="rowPlayActions">
                   <button
                     aria-label={`Play ${tags.title ?? item.file.filename}`}
@@ -13133,7 +13208,7 @@ function PlaylistDetailView({
                 <button className="secondary" type="button" onClick={() => void onProposeRemoveItem(playlist.id, item.id)}>
                   Remove
                 </button>
-              </div>
+              </SongQueueRow>
             );
           })}
           </div>
@@ -15328,6 +15403,7 @@ function WaveformCanvas({
     if (!canvas) {
       return;
     }
+    const surface = createVisualizerCanvas(canvas, () => draw(performance.now(), true));
     const observedAt = performance.now();
     let animationFrame = 0;
     let lastDrawAt = 0;
@@ -15351,11 +15427,11 @@ function WaveformCanvas({
     };
     const draw = (now: number, force = false) => {
       const progress = getProgress(now);
-      const width = canvas.getBoundingClientRect().width;
+      const width = surface.width;
       if (!force && now - lastDrawAt < 34 && Math.abs(progress - lastProgress) * width < 0.25) {
         return;
       }
-      drawWaveform(canvas, waveform?.peaks ?? null, progress, variant);
+      drawWaveform(surface, waveform?.peaks ?? null, progress, variant);
       lastDrawAt = now;
       lastProgress = progress;
     };
@@ -15367,10 +15443,8 @@ function WaveformCanvas({
     if (playback.status === "playing") {
       animationFrame = window.requestAnimationFrame(tick);
     }
-    const observer = new ResizeObserver(() => draw(performance.now(), true));
-    observer.observe(canvas);
     return () => {
-      observer.disconnect();
+      surface.dispose();
       window.cancelAnimationFrame(animationFrame);
     };
   }, [playback.currentFileId, playback.positionMs, playback.durationMs, playback.status, positionFrameRef, variant, waveform]);
@@ -15396,9 +15470,10 @@ function SpectrumCanvas({
     if (!canvas) {
       return;
     }
+    const surface = createVisualizerCanvas(canvas);
     if (!playing && !frameRef.current) {
-      drawSpectrum(canvas, new Array(mode === "meter" ? 8 : 32).fill(0), mode);
-      return;
+      drawSpectrum(surface, new Array(mode === "meter" ? 8 : 32).fill(0), mode);
+      return () => surface.dispose();
     }
     let animationFrame = 0;
     let previousDrawAt = performance.now();
@@ -15416,11 +15491,11 @@ function SpectrumCanvas({
         const blend = 1 - Math.exp(-elapsedMs / responseMs);
         levels[index] += (next - levels[index]) * blend;
       }
-      drawSpectrum(canvas, levels, mode);
+      drawSpectrum(surface, levels, mode);
       animationFrame = window.requestAnimationFrame(draw);
     };
     animationFrame = window.requestAnimationFrame(draw);
-    return () => window.cancelAnimationFrame(animationFrame);
+    return () => { surface.dispose(); window.cancelAnimationFrame(animationFrame); };
   }, [frameRef, mode, playing]);
 
   return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
@@ -15445,6 +15520,7 @@ function LevelMeterCanvas({
       return;
     }
     let animationFrame = 0;
+    const surface = createVisualizerCanvas(canvas);
     let level = 0;
     let peak = 0;
     let previousDrawAt = performance.now();
@@ -15461,11 +15537,11 @@ function LevelMeterCanvas({
       const responseMs = incoming > level ? 7 : 78;
       level += (incoming - level) * (1 - Math.exp(-elapsedMs / responseMs));
       peak = Math.max(level, peak * Math.exp(-elapsedMs / 310));
-      drawLevelMeter(canvas, level, peak);
+      drawLevelMeter(surface, level, peak);
       animationFrame = window.requestAnimationFrame(draw);
     };
     animationFrame = window.requestAnimationFrame(draw);
-    return () => window.cancelAnimationFrame(animationFrame);
+    return () => { surface.dispose(); window.cancelAnimationFrame(animationFrame); };
   }, [channel, frameRef, playing]);
 
   return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
@@ -15493,8 +15569,10 @@ function SpectrogramCanvas({
     }
     let animationFrame = 0;
     let lastFrameId = -1;
-    const context = prepareCanvas(canvas);
-    const { width, height } = canvas.getBoundingClientRect();
+    const surface = createVisualizerCanvas(canvas);
+    const { context } = surface;
+    const width = surface.width;
+    const height = surface.height;
     context.clearRect(0, 0, width, height);
     const draw = () => {
       const frame = frameRef.current;
@@ -15507,12 +15585,12 @@ function SpectrogramCanvas({
         : null;
       if (frame && bins && frame.frameId !== lastFrameId && frame.status === "playing" && isVisualizerFrameFresh(frame)) {
         lastFrameId = frame.frameId;
-        drawSpectrogramColumn(canvas, bins);
+        drawSpectrogramColumn(surface, bins);
       }
       animationFrame = window.requestAnimationFrame(draw);
     };
     draw();
-    return () => window.cancelAnimationFrame(animationFrame);
+    return () => { surface.dispose(); window.cancelAnimationFrame(animationFrame); };
   }, [frameRef, fileId]);
 
   return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
@@ -15586,9 +15664,9 @@ function VisualizerPanel({
   );
 }
 
-function drawWaveform(canvas: HTMLCanvasElement, peaks: number[] | null, progress: number, variant: "rail" | "hero"): void {
-  const context = prepareCanvas(canvas);
-  const { width, height } = canvas.getBoundingClientRect();
+function drawWaveform(surface: VisualizerCanvas, peaks: number[] | null, progress: number, variant: "rail" | "hero"): void {
+  surface.prepare();
+  const { canvas, context, width, height } = surface;
   if (width <= 0 || height <= 0) {
     return;
   }
@@ -15651,9 +15729,9 @@ function downsampleWaveformPeaks(values: number[], maximumBars: number): number[
   return sampled;
 }
 
-function drawSpectrum(canvas: HTMLCanvasElement, levels: number[], mode: "meter" | "spectrum"): void {
-  const context = prepareCanvas(canvas);
-  const { width, height } = canvas.getBoundingClientRect();
+function drawSpectrum(surface: VisualizerCanvas, levels: number[], mode: "meter" | "spectrum"): void {
+  surface.prepare();
+  const { canvas, context, width, height } = surface;
   if (width <= 0 || height <= 0) {
     return;
   }
@@ -15671,9 +15749,9 @@ function drawSpectrum(canvas: HTMLCanvasElement, levels: number[], mode: "meter"
   }
 }
 
-function drawLevelMeter(canvas: HTMLCanvasElement, level: number, peak: number): void {
-  const context = prepareCanvas(canvas);
-  const { width, height } = canvas.getBoundingClientRect();
+function drawLevelMeter(surface: VisualizerCanvas, level: number, peak: number): void {
+  surface.prepare();
+  const { canvas, context, width, height } = surface;
   if (width <= 0 || height <= 0) {
     return;
   }
@@ -15708,9 +15786,9 @@ function drawLevelMeter(canvas: HTMLCanvasElement, level: number, peak: number):
   }
 }
 
-function drawSpectrogramColumn(canvas: HTMLCanvasElement, bins: number[]): void {
-  const context = prepareCanvas(canvas);
-  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+function drawSpectrogramColumn(surface: VisualizerCanvas, bins: number[]): void {
+  surface.prepare();
+  const { canvas, context, ratio } = surface;
   const displayWidth = canvas.width / ratio;
   const displayHeight = canvas.height / ratio;
   if (displayWidth <= 1 || displayHeight <= 0 || bins.length === 0) {
@@ -15762,20 +15840,6 @@ function isVisualizerFrameFresh(frame: VisualizerFrameResponse | null, maximumAg
   }
   const ageMs = getVisualizerFrameAgeMs(frame);
   return ageMs >= 0 && ageMs <= maximumAgeMs;
-}
-
-function prepareCanvas(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
-  const rect = canvas.getBoundingClientRect();
-  const ratio = Math.min(window.devicePixelRatio || 1, 2);
-  const width = Math.max(1, Math.floor(rect.width));
-  const height = Math.max(1, Math.floor(rect.height));
-  if (canvas.width !== Math.floor(width * ratio) || canvas.height !== Math.floor(height * ratio)) {
-    canvas.width = Math.floor(width * ratio);
-    canvas.height = Math.floor(height * ratio);
-  }
-  const context = canvas.getContext("2d")!;
-  context.setTransform(ratio, 0, 0, ratio, 0, 0);
-  return context;
 }
 
 function fallbackPeaks(count: number): number[] {

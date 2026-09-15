@@ -19,3 +19,6 @@ Thumbs.db
 
 # The UI mockup is a separate local repository used as a visual reference.
 prototypes/negi-workbench/
+
+# Local visual targets and animation QA
+.dream-loop/

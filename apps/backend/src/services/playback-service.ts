@@ -1,8 +1,10 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { basename } from "node:path";
 import { nanoid } from "nanoid";
-import type { LibraryFilesResponse, PlaybackState } from "@music-os/core";
+import { recordAlbumKey, RECORD_PLAYBACK_START_MS, type AlbumTransition, type LibraryFilesResponse, type PlaybackState } from "@music-os/core";
 import type { BackendConfig } from "../config.js";
+import { preparePlaybackPath, type PreparedPlaybackPath } from "./playback-path.js";
+export { translatePathForPlayer } from "./playback-path.js";
 import { MpvIpcClient, type MpvIpcEvent } from "./mpv-ipc.js";
 import type { PlaybackEndReason, PlaybackHistoryRecorder } from "./playback-history-service.js";
 
@@ -26,6 +28,100 @@ export class PlaybackService {
   private interruptGeneration = 0;
   private pendingEndFileLoadToken: number | null = null;
   private acceptObservedState = false;
+  private observedPositionMs: number | null = null;
+  private preparedPath: PreparedPlaybackPath | null = null;
+
+  private recordPlayerClients = new Map<string, { expiresAt: number; reducedMotion: boolean }>();
+  private albumTransitionTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Visibility lease: an absent or crashed renderer must never stall the queue. */
+  async setRecordPlayerPresence(clientId: string, active: boolean, reducedMotion: boolean): Promise<PlaybackState> {
+    return this.runPlaybackOperation(() => {
+      if (active) this.recordPlayerClients.set(clientId, { expiresAt: Date.now() + 12_000, reducedMotion });
+      else this.recordPlayerClients.delete(clientId);
+      if (!this.activeRecordPlayerClients().length && this.state.albumTransition && !this.state.albumTransition.paused) {
+        return this.finishAlbumTransition(this.state.albumTransition.id);
+      }
+      return this.state;
+    });
+  }
+
+  async recordPlayerAction(id: string, action: "begin" | "complete" | "skip"): Promise<PlaybackState> {
+    return this.runPlaybackOperation(() => {
+      const transition = this.state.albumTransition;
+      if (!transition || transition.id !== id) return this.state;
+      if (action === "begin") {
+        if (transition.startedAt == null && !transition.paused) {
+          this.state = { ...this.state, albumTransition: { ...transition, startedAt: Date.now() } };
+          this.scheduleAlbumTransitionFallback(id, transition.reducedMotion ? 2_500 : 12_000);
+        }
+        return this.state;
+      }
+      // Duplicate/early animation callbacks cannot bypass the needle drop and brief lead-in.
+      if (action === "complete" && (transition.paused || transition.startedAt == null ||
+        Date.now() - transition.startedAt < (transition.reducedMotion ? 250 : RECORD_PLAYBACK_START_MS))) return this.state;
+      return this.finishAlbumTransition(id);
+    });
+  }
+
+  private activeRecordPlayerClients() {
+    for (const [id, client] of this.recordPlayerClients) {
+      if (client.expiresAt <= Date.now()) this.recordPlayerClients.delete(id);
+    }
+    return [...this.recordPlayerClients.values()];
+  }
+
+  private clearAlbumTransition(): void {
+    if (this.albumTransitionTimer) clearTimeout(this.albumTransitionTimer);
+    this.albumTransitionTimer = null;
+    if (this.state.albumTransition) this.state = { ...this.state, albumTransition: null };
+  }
+
+  private scheduleAlbumTransitionFallback(id: string, delayMs: number): void {
+    if (this.albumTransitionTimer) clearTimeout(this.albumTransitionTimer);
+    this.albumTransitionTimer = setTimeout(() => {
+      void this.runPlaybackOperation(() => {
+        if (this.state.albumTransition?.id !== id || this.state.albumTransition.paused) return this.state;
+        return this.finishAlbumTransition(id);
+      }).catch(() => undefined);
+    }, delayMs);
+    this.albumTransitionTimer.unref();
+  }
+
+  private async finishAlbumTransition(id: string): Promise<PlaybackState> {
+    if (this.state.albumTransition?.id !== id || this.queueIndex == null) return this.state;
+    this.clearAlbumTransition();
+    const nextIndex = this.queueIndex + 1 < this.queue.length ? this.queueIndex + 1 : this.repeatMode === "queue" ? 0 : -1;
+    if (nextIndex < 0) return this.stopUnlocked();
+    this.queueIndex = nextIndex;
+    return this.playQueuedFile(this.queue[nextIndex]);
+  }
+
+  private reconcileAlbumTransition(): PlaybackState | Promise<PlaybackState> {
+    const transition = this.state.albumTransition;
+    if (!transition || this.queueIndex == null) return this.state;
+    const next = this.queue[this.queueIndex + 1] ?? (this.repeatMode === "queue" ? this.queue[0] : null);
+    if (next?.id === transition.to.fileId) return this.state;
+    const paused = transition.paused;
+    this.clearAlbumTransition();
+    if (!next) return this.stopUnlocked();
+    // Invalidate the old sleeve/acknowledgement before presenting the new target.
+    this.beginAlbumTransition(this.queue[this.queueIndex], next, paused);
+    return this.state;
+  }
+
+  private beginAlbumTransition(from: LibraryFile, to: LibraryFile, paused = false): void {
+    const describe = (file: LibraryFile) => ({ fileId: file.id, album: file.displayTags.album || "Untitled record",
+      artist: file.displayTags.albumartist || file.displayTags.artist || "Unknown artist" });
+    const transition: AlbumTransition = { id: nanoid(), from: describe(from), to: describe(to), startedAt: null,
+      paused, reducedMotion: this.activeRecordPlayerClients().some((client) => client.reducedMotion) };
+    this.loadGeneration += 1;
+    this.pendingEndFileLoadToken = null;
+    this.acceptObservedState = false;
+    this.positionUpdatedAt = null;
+    this.state = { ...this.state, status: "paused", albumTransition: transition };
+    if (!paused) this.scheduleAlbumTransitionFallback(transition.id, 4_000);
+  }
 
   constructor(
     private readonly config: BackendConfig,
@@ -67,7 +163,7 @@ export class PlaybackService {
         queue: this.queue.map((item) => item.id),
         queueIndex: this.queueIndex
       };
-      return this.state;
+      return this.reconcileAlbumTransition();
     });
   }
 
@@ -83,7 +179,7 @@ export class PlaybackService {
         queue: this.queue.map((item) => item.id),
         queueIndex: this.queueIndex
       };
-      return this.state;
+      return this.reconcileAlbumTransition();
     });
   }
 
@@ -91,7 +187,7 @@ export class PlaybackService {
     return this.runPlaybackOperation(async () => {
       this.repeatMode = repeatMode;
       this.state = { ...this.state, repeatMode };
-      return this.state;
+      return this.reconcileAlbumTransition();
     });
   }
 
@@ -130,9 +226,11 @@ export class PlaybackService {
   }
 
   private async playQueuedFile(file: LibraryFile): Promise<PlaybackState> {
+    this.clearAlbumTransition();
     this.recordCurrentListen("replaced");
     const loadToken = ++this.loadGeneration;
-    const translatedPath = translatePathForPlayer(file.path, this.config.mpvPath);
+    this.observedPositionMs = null;
+    let preparedPath: PreparedPlaybackPath | null = null;
     this.acceptObservedState = false;
     this.state = {
       status: "playing",
@@ -154,14 +252,19 @@ export class PlaybackService {
       if (!this.isActiveLoad(loadToken)) {
         return this.state;
       }
+      preparedPath = await preparePlaybackPath(file.path, this.config.mpvPath, this.config.windowsNodePath);
+      if (!this.isActiveLoad(loadToken)) return this.state;
       await this.sendMpvCommand(["set_property", "volume", this.volumePercent]).catch(() => undefined);
       if (!this.isActiveLoad(loadToken)) {
         return this.state;
       }
-      await this.sendMpvCommand(["loadfile", translatedPath, "replace"]);
+      await this.sendMpvCommand(["loadfile", preparedPath.path, "replace"]);
       if (!this.isActiveLoad(loadToken)) {
         return this.state;
       }
+      this.releasePreparedPath();
+      this.preparedPath = preparedPath;
+      preparedPath = null;
       await this.sendMpvCommand(["set_property", "pause", false]).catch(() => undefined);
       if (!this.isActiveLoad(loadToken)) {
         return this.state;
@@ -178,11 +281,19 @@ export class PlaybackService {
         this.state = { ...this.state, status: "error", error: error instanceof Error ? error.message : String(error) };
       }
       throw error;
+    } finally {
+      await preparedPath?.cleanup().catch(() => undefined);
     }
   }
 
   async pause(): Promise<PlaybackState> {
     return this.runInterruptOperation(async () => {
+      if (this.state.albumTransition) {
+        if (this.albumTransitionTimer) clearTimeout(this.albumTransitionTimer);
+        this.albumTransitionTimer = null;
+        this.state = { ...this.state, albumTransition: { ...this.state.albumTransition, paused: true } };
+        return this.state;
+      }
       const currentFile = this.getCurrentFile();
       const shouldPause = this.process != null || this.state.status === "playing";
       if (!shouldPause) {
@@ -229,6 +340,7 @@ export class PlaybackService {
 
   async resume(): Promise<PlaybackState> {
     return this.runPlaybackOperation(async () => {
+      if (this.state.albumTransition) return this.finishAlbumTransition(this.state.albumTransition.id);
       if (this.process && this.state.status === "paused") {
         await this.sendMpvCommand(["set_property", "pause", false]);
         this.state = { ...this.state, status: "playing" };
@@ -240,6 +352,7 @@ export class PlaybackService {
 
   async seek(positionMs: number): Promise<PlaybackState> {
     return this.runPlaybackOperation(async () => {
+      if (this.state.albumTransition) return this.state;
       if (this.process && this.state.status !== "stopped") {
         await this.sendMpvCommand(["seek", Math.max(0, positionMs / 1000), "absolute"]);
         this.state = { ...this.state, positionMs: Math.max(0, positionMs) };
@@ -265,6 +378,7 @@ export class PlaybackService {
   }
 
   private stopUnlocked(): PlaybackState {
+    this.clearAlbumTransition();
     this.loadGeneration += 1;
     this.recordCurrentListen("stop");
     this.killProcessFallback();
@@ -281,6 +395,7 @@ export class PlaybackService {
       return this.state;
     }
 
+    const loadToken = this.loadGeneration;
     try {
       const [positionSample, durationSeconds, paused, volume] = await Promise.all([
         this.getMpvProperty("time-pos")
@@ -290,12 +405,16 @@ export class PlaybackService {
         this.getMpvProperty("pause").catch(() => null),
         this.getMpvProperty("volume").catch(() => null)
       ]);
+      if (loadToken !== this.loadGeneration || !this.acceptObservedState) {
+        return this.state;
+      }
       const volumePercent = normalizeVolumePercent(volume) ?? this.volumePercent;
       this.volumePercent = volumePercent;
 
       const nextStatus = paused == null ? this.state.status : paused === true ? "paused" : "playing";
       const durationMs = numberToMilliseconds(durationSeconds) ?? this.state.durationMs;
       const sampledPositionMs = numberToMilliseconds(positionSample.value);
+      if (sampledPositionMs != null) this.observedPositionMs = sampledPositionMs;
       const positionMs = sampledPositionMs == null
         ? this.getEstimatedPositionMs()
         : sampledPositionMs + (nextStatus === "playing" ? Math.max(0, Date.now() - positionSample.receivedAt) : 0);
@@ -334,6 +453,8 @@ export class PlaybackService {
   }
 
   close(): void {
+    this.clearAlbumTransition();
+    this.recordPlayerClients.clear();
     this.interruptGeneration += 1;
     this.loadGeneration += 1;
     this.recordCurrentListen("close");
@@ -398,6 +519,7 @@ export class PlaybackService {
         this.positionUpdatedAt = null;
         this.acceptObservedState = false;
         this.state = createStoppedState(this.volumePercent, this.repeatMode);
+        this.releasePreparedPath();
       }
     });
 
@@ -424,15 +546,19 @@ export class PlaybackService {
       return;
     }
 
-    // Newer mpv builds tag end-file with reason "eof". mpv 0.29 omits the
-    // reason and follows end-file with "idle". Keep idle associated with the
-    // load that emitted end-file: it can arrive after the next file starts,
-    // and treating it as a signal for that new load would skip a second song.
+    // Only EOF means completion. In particular, error followed by idle must
+    // not award a full listen or run through the remaining queue.
     if (event.event === "end-file") {
       const loadToken = this.loadGeneration;
-      this.pendingEndFileLoadToken = loadToken;
+      this.pendingEndFileLoadToken = null;
       if (isEofReason(event.reason)) {
         this.queueTrackEndAdvance(loadToken);
+      } else if (event.reason === "error" || event.reason === 4 || event.error != null) {
+        this.failCurrentPlayback(event.error);
+      } else if (event.reason == null) {
+        // Older mpv omits reason. Require actual player progress near the end,
+        // rather than our wall-clock estimate, before accepting its idle event.
+        this.pendingEndFileLoadToken = loadToken;
       }
       return;
     }
@@ -440,8 +566,32 @@ export class PlaybackService {
     if (event.event === "idle" && this.pendingEndFileLoadToken != null) {
       const loadToken = this.pendingEndFileLoadToken;
       this.pendingEndFileLoadToken = null;
-      this.queueTrackEndAdvance(loadToken);
+      if (loadToken !== this.loadGeneration) return;
+      const durationMs = this.state.durationMs;
+      if (durationMs != null && durationMs > 0 && this.observedPositionMs != null
+        && this.observedPositionMs >= durationMs - Math.min(1_000, durationMs * 0.1)) {
+        this.queueTrackEndAdvance(loadToken);
+      } else {
+        this.failCurrentPlayback("The player stopped before the track finished");
+      }
     }
+  }
+
+  private failCurrentPlayback(detail: unknown): void {
+    this.clearAlbumTransition();
+    this.releasePreparedPath();
+    this.loadGeneration += 1;
+    this.pendingEndFileLoadToken = null;
+    this.acceptObservedState = false;
+    this.positionUpdatedAt = null;
+    // A player failure is neither a completed listen nor a user skip.
+    this.trackedFileId = null;
+    const message = typeof detail === "string" && detail ? detail : "The file could not be opened or decoded";
+    this.state = {
+      ...this.state,
+      status: "error",
+      error: `Unable to play ${this.state.currentDisplayName ?? "this track"}: ${message}`
+    };
   }
 
   private applyObservedProperty(name: unknown, value: unknown): void {
@@ -451,6 +601,7 @@ export class PlaybackService {
     if (name === "time-pos") {
       const positionMs = numberToMilliseconds(value);
       if (positionMs != null && this.state.status !== "stopped") {
+        this.observedPositionMs = positionMs;
         this.state = {
           ...this.state,
           positionMs: this.state.durationMs == null ? positionMs : Math.min(positionMs, this.state.durationMs)
@@ -490,7 +641,7 @@ export class PlaybackService {
   }
 
   private async advanceAfterTrackEnd(): Promise<PlaybackState> {
-    if (this.queueIndex == null || this.queue.length === 0 || this.state.status === "stopped") {
+    if (this.state.albumTransition || this.queueIndex == null || this.queue.length === 0 || this.state.status === "stopped" || this.state.status === "error") {
       return this.state;
     }
 
@@ -504,6 +655,13 @@ export class PlaybackService {
     }
 
     const nextIndex = this.queueIndex + 1;
+    const nextFile = this.queue[nextIndex] ?? (this.repeatMode === "queue" ? this.queue[0] : null);
+    const currentFile = this.queue[this.queueIndex];
+    if (nextFile && recordAlbumKey(currentFile) && recordAlbumKey(nextFile) &&
+      recordAlbumKey(currentFile) !== recordAlbumKey(nextFile) && this.activeRecordPlayerClients().length) {
+      this.beginAlbumTransition(currentFile, nextFile);
+      return this.state;
+    }
     if (nextIndex >= this.queue.length) {
       if (this.repeatMode === "queue") {
         this.queueIndex = 0;
@@ -514,6 +672,7 @@ export class PlaybackService {
       this.positionUpdatedAt = null;
       this.acceptObservedState = false;
       this.state = createStoppedState(this.volumePercent, this.repeatMode);
+      this.releasePreparedPath();
       return this.state;
     }
 
@@ -580,6 +739,13 @@ export class PlaybackService {
     this.acceptObservedState = false;
     this.process?.kill();
     this.killWindowsMpv();
+    this.releasePreparedPath();
+  }
+
+  private releasePreparedPath(): void {
+    const prepared = this.preparedPath;
+    this.preparedPath = null;
+    void prepared?.cleanup().catch(() => undefined);
   }
 
   private getEstimatedPositionMs(): number {
@@ -672,21 +838,6 @@ function numberToMilliseconds(value: unknown): number | null {
     return null;
   }
   return Math.max(0, Math.round(value * 1000));
-}
-
-export function translatePathForPlayer(path: string, playerPath: string): string {
-  if (!isWindowsPlayer(playerPath)) {
-    return path;
-  }
-
-  const match = path.match(/^\/mnt\/([a-z])\/(.*)$/i);
-  if (!match) {
-    return path;
-  }
-
-  const drive = match[1].toUpperCase();
-  const rest = match[2].replaceAll("/", "\\");
-  return `${drive}:\\${rest}`;
 }
 
 function getDisplayName(file: LibraryFile): string {

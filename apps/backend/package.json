@@ -72,7 +72,12 @@
     "slskd-search-reliability:smoke": "tsx src/scripts/slskd-search-reliability-smoke.ts",
     "artist-progressive:smoke": "tsx src/scripts/artist-progressive-smoke.ts",
     "music-map:smoke": "tsx src/scripts/music-map-smoke.ts",
-    "album-highlights:smoke": "tsx src/scripts/album-highlights-smoke.ts"
+    "album-highlights:smoke": "tsx src/scripts/album-highlights-smoke.ts",
+    "playback-path:smoke": "tsx src/scripts/playback-path-smoke.ts",
+    "playback-failure:smoke": "tsx src/scripts/playback-failure-smoke.ts",
+    "record-player:smoke": "tsx src/scripts/record-player-smoke.ts",
+    "lyrics:smoke": "tsx src/scripts/lyrics-smoke.ts",
+    "record-player-live:smoke": "tsx src/scripts/record-player-live-smoke.ts"
   },
   "dependencies": {
     "@music-os/core": "0.1.0",

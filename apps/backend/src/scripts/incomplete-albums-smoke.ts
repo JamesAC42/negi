@@ -74,6 +74,24 @@ try {
   const album = library.listAlbumGroups().find((album) => album.album === "Latest")!;
   assert.equal(library.getAlbumCatalogue(album)?.tracks.length, 2);
 
+  const symbols: CatalogueTrack[] = [
+    { ...tracks(1)[0]!, title: "&", number: 2 },
+    { ...tracks(1)[0]!, title: "+ +", number: 7 },
+  ];
+  assert.deepEqual(missingReleaseTracks(symbols, [{ displayTags: { title: "&" } }, { displayTags: { title: "++" } }]), [],
+    "Distinct symbol titles count as owned even without disc metadata");
+  for (const title of ["", " ", "-", "+ +"]) {
+    assert.equal(missingReleaseTracks([symbols[0]], [{ displayTags: { title, discnumber: "1" } }]).length, 1,
+      "Blank or unrelated symbolic titles cannot fill a missing symbolic track: " + title);
+  }
+  assert.equal(missingReleaseTracks([symbols[0]], [{ displayTags: { discnumber: "1" } }]).length, 1,
+    "Missing title tags cannot fill a symbolic track");
+  assert.deepEqual(missingReleaseTracks([symbols[1]], [{ displayTags: { title: "\uFF0B \uFF0B" } }], symbols), [],
+    "Source matching and recovered file completeness use the same symbol normalization");
+  const symbolDiscs = [symbols[0], { ...symbols[0], disc: 2 }];
+  assert.equal(missingReleaseTracks(symbolDiscs, [{ displayTags: { title: "&" } }]).length, 2,
+    "Repeated symbolic titles still require explicit disc identity");
+
   const repeated = [{ ...tracks(1)[0]!, title: "Same", number: 1 }, { ...tracks(1)[0]!, title: "Same", number: 2 }];
   assert.equal(missingReleaseTracks(repeated, [{ displayTags: { title: "Same", tracknumber: "1", discnumber: "1" } }, { displayTags: { title: "Same", tracknumber: "1", discnumber: "1" } }]).length, 1);
   const discTwo = [{ ...tracks(1)[0]!, disc: 2 }];
@@ -83,7 +101,7 @@ try {
     "Unknown-disc duplicate titles cannot be assigned to both discs");
   assert.equal(missingReleaseTracks(discTwo, [{ displayTags: { title: "Song 1" } }], repeatedDiscs).length, 1,
     "A subset can retain full-release title ambiguity");
-  console.log("PASS: catalogue completeness, deletion/restoration, stale and compound totals, unique disc positions, snapshot identity/year/latest validation");
+  console.log("PASS: catalogue completeness, deletion/restoration, stale and compound totals, unique disc positions, symbolic title identity, snapshot identity/year/latest validation");
 } finally {
   db.close();
   await rm(fixture, { recursive: true, force: true });

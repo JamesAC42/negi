@@ -139,7 +139,20 @@ export const metadataDiagnosticsResponseSchema = z.object({
     .nullable()
 });
 
+const recordAlbumSchema = z.object({ fileId: z.string(), album: z.string(), artist: z.string() });
+export const albumTransitionSchema = z.object({
+  id: z.string(), from: recordAlbumSchema, to: recordAlbumSchema,
+  startedAt: z.number().nullable(), paused: z.boolean(), reducedMotion: z.boolean()
+});
+export const recordPlayerPresenceSchema = z.object({
+  clientId: z.string().min(1).max(100), active: z.boolean(), reducedMotion: z.boolean().default(false)
+});
+export const recordPlayerActionSchema = z.object({
+  id: z.string().min(1).max(100), action: z.enum(["begin", "complete", "skip"])
+});
+
 export const playbackStateSchema = z.object({
+  albumTransition: albumTransitionSchema.nullable().optional(),
   status: z.enum(["stopped", "playing", "paused", "error"]),
   currentFileId: z.string().nullable(),
   currentPath: z.string().nullable(),

@@ -5,16 +5,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CatalogueTrack, DiscoveryResult } from "@music-os/core";
 import { AlbumAcquisitionService } from "../services/album-acquisition-service.js";
+import { DiscoveryDownloadService } from "../services/discovery-download-service.js";
 
 const tracks: CatalogueTrack[] = [
   { title: "First", disc: 1, number: 1, durationMs: 180000 },
   { title: "Second", disc: 1, number: 2, durationMs: 210000 },
 ];
 const base = { artist: "Artist", album: "Album", artistId: "apple:1", releaseGroupId: "apple:2", libraryRootId: "root", tracks };
-function source(track: CatalogueTrack, peer: string): DiscoveryResult {
+function source(track: CatalogueTrack, peer: string, edition = ""): DiscoveryResult {
   const filename = `${track.number} ${track.title}.flac`;
-  return { id: peer + filename, source: "slskd", username: peer, filename, path: `Artist/Album/${filename}`,
-    folder: "Artist/Album", extension: "flac", sizeBytes: 4, lengthSeconds: track.durationMs! / 1000,
+  return { id: peer + edition + filename, source: "slskd", username: peer, filename, path: `Artist/Album${edition}/${filename}`,
+    folder: `Artist/Album${edition}`, extension: "flac", sizeBytes: 4, lengthSeconds: track.durationMs! / 1000,
     bitrate: null, sampleRate: 44100, isLocked: false, raw: {} };
 }
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
@@ -43,12 +44,22 @@ function fixture() {
       events.push("import:" + id);
     } };
   const downloads = { getJob: (id: string) => children.get(id), cancelJob(id: string) { children.get(id).status = "cancelled"; },
-    retryJob() { throw new Error("Recovery must find a different source instead of restarting the failed peer"); },
+    hasSourceFailure(id: string) {
+      const child = children.get(id);
+      return child ? child.sourceFailure === true : DiscoveryDownloadService.prototype.hasSourceFailure.call({ db } as any, id);
+    },
+    retryJob(id: string) {
+      const child = children.get(id);
+      if (child.sourceFailure) throw new Error("Recovery must find a different source instead of restarting the failed peer");
+      child.status = "running";
+      events.push("retry:" + id);
+      return child;
+    },
     createJob(results: DiscoveryResult[]) {
       events.push("download");
       created.push(results);
       const child = { id: "child-" + created.length, status: "running", progress: 0,
-        selectedCount: results.length, completedCount: 0 };
+        selectedCount: results.length, completedCount: 0, sourceFailure: true };
       children.set(child.id, child);
       return child;
     } };
@@ -56,7 +67,7 @@ function fixture() {
     async resolve(): Promise<{ artistId: string; groupId: string }> { throw new Error("Unexpected ambiguous identity resolution"); },
     async release(id: string) { return { id, title: "Album", artistIds: ["apple:1"], tracks }; },
   };
-  const discovery = { async browseResultFolder(_result: DiscoveryResult): Promise<DiscoveryResult[]> { return []; }, async search() { events.push("search"); return { results: ["peer-a", "peer-b", "peer-c", "peer-d"].flatMap((peer) => tracks.map((t) => source(t, peer))) }; } };
+  const discovery = { async browseResultFolder(_result: DiscoveryResult): Promise<DiscoveryResult[]> { return []; }, async search() { events.push("search"); return { results: ["peer-a", "peer-b", "peer-c", "peer-d"].flatMap((peer) => ["", " (Deluxe)"].flatMap((edition) => tracks.map((t) => source(t, peer, edition)))) }; } };
   const appleCatalogue = {
     resolve: (...args: Parameters<typeof catalogue.resolve>) => catalogue.resolve(...args),
     release: (...args: Parameters<typeof catalogue.release>) => catalogue.release(...args),
@@ -159,8 +170,80 @@ for (const scenario of ["apple", "fallback", "both-fail", "pinned", "partial", "
       await f.tick(3);
     }
     assert.equal(f.created.length, 3, "Initial attempt plus at most two automatic source retries");
-    assert.equal(peers.size, 3, "Failed peer/path pairs must not be selected again");
+    assert.equal(peers.size, 3, "Other editions from a failed peer must not consume the next source retry");
     assert.equal(f.row("recover").status, "failed", "Exhausted recovery remains reviewable");
+    assert.deepEqual(f.payload("recover").avoidedPeers, [...peers].slice(0, 2));
+    f.seed("independent", base);
+    await f.tick();
+    assert.equal(f.created[3][0].username, f.created[0][0].username, "Peer avoidance belongs only to the failed album request");
+  } finally { f.close(); }
+}
+
+// Manual retry upgrades legacy exact-path history without blaming completed or cancelled downloads.
+{
+  const f = fixture();
+  try {
+    for (const [id, status, progress, peer] of [
+      ["old-failed", "failed", 0, "peer-a"],
+      ["old-imported", "succeeded", 1, "peer-c"],
+      ["old-cancelled", "cancelled", 0, "peer-d"],
+      ["old-staging-error", "failed", 1, "peer-c"],
+    ] as const) {
+      f.db.prepare("INSERT INTO jobs(id,type,status,progress,payload_json,error_json) VALUES(?,'discovery_download',?,?,?,?)")
+        .run(id, status, progress, JSON.stringify({ results: tracks.map((track) => source(track, peer)) }),
+          JSON.stringify({ message: id === "old-failed" ? "No completed files were found in /fixture; slskd reports 2 matching transfers failed." : "Local staging error" }));
+    }
+    f.children.set("latest-failed", { id: "latest-failed", status: "failed", completedCount: 0, sourceFailure: true });
+    f.seed("legacy-peer-history", { ...base, sourceRetries: 2, downloadJobId: "latest-failed",
+      picks: tracks.map((track) => ({ track, result: source(track, "peer-b") })),
+      previousDownloadJobIds: ["old-failed", "old-imported", "old-cancelled", "old-staging-error", "removed-old-child"],
+      avoidedSources: ["peer-c\0Artist/Album/1 First.flac"],
+    }, "failed");
+    f.service.retry("legacy-peer-history");
+    await f.tick(3);
+    assert.deepEqual(f.payload("legacy-peer-history").avoidedPeers, ["peer-a", "peer-b"]);
+    assert.equal(f.payload("legacy-peer-history").sourceRetries, 0, "Manual retry refreshes the bounded source budget");
+    assert.ok(f.created[0].every((result) => result.username === "peer-c"), "Legacy failed peers stay excluded across editions; successful peers remain eligible");
+    assert.ok(f.payload("legacy-peer-history").previousDownloadJobIds.includes("latest-failed"), "Old download links remain reviewable");
+  } finally { f.close(); }
+}
+
+// Connector/configuration and local scan failures must retain healthy sources.
+for (const error of ["slskd is not configured", "fetch failed: ECONNREFUSED", "HTTP 401 Unauthorized", "EACCES reading download directory"]) {
+  const f = fixture();
+  try {
+    f.seed("connector-error", base);
+    await f.tick();
+    const childId = f.payload("connector-error").downloadJobId;
+    Object.assign(f.children.get(childId), { status: "failed", sourceFailure: false, error });
+    await f.tick(3);
+    assert.equal(f.row("connector-error").status, "failed");
+    assert.equal(f.created.length, 1, "Local failures must not consume alternate peer attempts");
+    assert.equal(f.payload("connector-error").avoidedPeers, undefined);
+    assert.equal(f.payload("connector-error").avoidedSources, undefined);
+    f.service.retry("connector-error");
+    await f.tick();
+    assert.equal(f.created.length, 1, "Retry resumes the same source after a connector repair");
+    assert.equal(f.payload("connector-error").downloadJobId, childId);
+    assert.ok(f.events.includes("retry:" + childId));
+    assert.deepEqual(f.payload("connector-error").avoidedPeers, []);
+  } finally { f.close(); }
+}
+
+// Both search hits and folder expansion must respect persisted peer failures.
+{
+  const f = fixture();
+  const browsed: string[] = [];
+  f.discovery.search = async () => ({ results: [source(tracks[0], "blocked", " (Deluxe)"), source(tracks[0], "available")] });
+  f.discovery.browseResultFolder = async (anchor) => {
+    browsed.push(anchor.username!);
+    return [source(tracks[1], "blocked", " (Deluxe)"), source(tracks[1], "available")];
+  };
+  try {
+    f.seed("filtered-expansion", { ...base, avoidedPeers: ["blocked"] });
+    await f.tick();
+    assert.deepEqual(browsed, ["available"], "Failed peers cannot use the bounded folder-browse allowance");
+    assert.ok(f.created[0].every((result) => result.username === "available"), "Expanded files cannot reintroduce an avoided peer");
   } finally { f.close(); }
 }
 
@@ -312,24 +395,34 @@ const temp = await mkdtemp(join(tmpdir(), "music-os-acquisition-recovery-"));
 try {
   const staged = join(temp, "staged-1 First.flac");
   await writeFile(staged, "data");
-  for (const failMetadata of [false, true]) {
+  for (const scenario of ["normal", "metadata-failure", "retry-exhausted"] as const) {
+    const failMetadata = scenario === "metadata-failure";
     const f = fixture();
     try {
-      const picks = tracks.map((track) => ({ track, result: source(track, "failed-peer") }));
-      f.seed("partial", { ...base, picks, downloadJobId: "partial-child" });
-      f.children.set("partial-child", { id: "partial-child", status: "succeeded", imported: { id: "partial-batch" }, selectedCount: 2, completedCount: 1 });
+      const picks = tracks.map((track, index) => ({ track, result: source(track, index === 0 ? "successful-peer" : "failed-peer") }));
+      f.seed("partial", { ...base, picks, downloadJobId: "partial-child", sourceRetries: scenario === "retry-exhausted" ? 2 : 0 });
+      f.children.set("partial-child", { id: "partial-child", status: "succeeded", imported: { id: "partial-batch" }, selectedCount: 2, completedCount: 1, sourceFailure: true });
       f.batches.set("partial-batch", { items: [{ id: "first", stagingPath: staged, status: "pending" }] });
       if (failMetadata) f.imports.updateItemMetadata = () => { throw new Error("Metadata update failed"); };
       await f.tick(3);
+      if (scenario === "retry-exhausted") {
+        assert.equal(f.row("partial").status, "failed");
+        assert.equal(f.owned.length, 1, "Partial completion is imported even when automatic retries are exhausted");
+        assert.equal(f.created.length, 0);
+        f.service.retry("partial");
+        await f.tick(3);
+      }
       if (failMetadata) {
         assert.equal(f.row("partial").status, "failed");
         assert.equal(f.payload("partial").downloadJobId, "partial-child", "Import failures retain the successful child and staged files");
         assert.equal(f.created.length, 0, "Import failures must not redownload successful transfers");
+        assert.equal(f.payload("partial").avoidedPeers, undefined, "Metadata failures do not blacklist download peers");
         f.imports.updateItemMetadata = (id, metadata) => { f.batches.get("partial-batch").items[0].metadata = metadata; };
         f.service.retry("partial");
         await f.tick(3);
       }
       assert.equal(f.owned.length, 1, "Completed partial files are imported before recovery");
+      assert.deepEqual(f.payload("partial").avoidedPeers, ["failed-peer"], "Only peers responsible for unfinished tracks are excluded");
       assert.equal(f.created.length, 1);
       assert.deepEqual(f.created[0].map((r) => r.filename), ["2 Second.flac"], "Only missing tracks are searched again");
       assert.ok(f.events.indexOf("import:first") < f.events.indexOf("search"));

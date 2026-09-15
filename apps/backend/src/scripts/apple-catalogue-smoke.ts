@@ -67,6 +67,44 @@ for (const rows of [[first, song(1)], [first, song(2)], [first], [{ ...first, tr
     assert.deepEqual((await service.release("apple:10", "Fixture")).tracks, release.tracks, "Partial listings remain browsable from cache");
   });
 }
+// iTunes lists 12 collection items for The Division Bell but returns its 11
+// audio tracks, each declaring a complete 11-track disc. Non-song extras must
+// not prevent acquisition when the provider's song metadata proves coverage.
+const audioSongs = Array.from({ length: 11 }, (_, index) => ({ ...song(1), trackNumber: index + 1,
+  trackName: `Song ${index + 1}`, discCount: 1, trackCount: 11 }));
+const collectionWithExtra = { ...first, trackCount: 12 };
+await fixture(result([collectionWithExtra, ...audioSongs]), async (service) => {
+  const release = await service.release("apple:10", "Fixture");
+  assert.equal(release.trackListingComplete, true, "Complete audio listing excludes non-song collection items");
+  assert.equal(release.expectedTrackCount, 11);
+  assert.equal(release.tracks.length, 11);
+});
+const multidiscSongs = [1, 2].flatMap((discNumber) => [1, 2].map((trackNumber) => ({ ...song(discNumber),
+  discCount: 2, trackCount: 2, trackNumber })));
+await fixture(result([{ ...first, trackCount: 5 }, ...multidiscSongs]), async (service) => {
+  const release = await service.release("apple:10", "Fixture");
+  assert.equal(release.trackListingComplete, true, "Complete audio coverage is validated across every disc");
+  assert.equal(release.expectedTrackCount, 4);
+});
+for (const rows of [
+  audioSongs.slice(1),
+  audioSongs.slice(0, -1),
+  audioSongs.filter((row) => row.trackNumber !== 6),
+  audioSongs.map((row, index) => index ? row : { ...row, trackCount: 12 }),
+  audioSongs.map((row, index) => index ? row : { ...row, discCount: 2 }),
+  audioSongs.map((row, index) => index ? row : { ...row, trackCount: undefined }),
+  audioSongs.map((row, index) => index ? row : { ...row, discCount: undefined }),
+  multidiscSongs.filter((row) => row.discNumber === 1),
+  multidiscSongs.filter((row) => row.discNumber === 2),
+  multidiscSongs.filter((row) => row.discNumber !== 2 || row.trackNumber !== 2),
+]) {
+  await fixture(result([collectionWithExtra, ...rows]), async (service) => {
+    const release = await service.release("apple:10", "Fixture");
+    assert.equal(release.trackListingComplete, false, "Missing or inconsistent song metadata cannot override collection count");
+    assert.equal(release.expectedTrackCount, 12);
+    assert.equal(release.libraryStatus, "unverified");
+  });
+}
 await fixture(result([first, song(1), song(1)]), async (service) => {
   await assert.rejects(service.release("apple:10", "Fixture"), /duplicate track positions/);
 });

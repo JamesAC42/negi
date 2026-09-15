@@ -32,6 +32,7 @@ type Payload = AcquireAlbumRequest & {
   message?: string;
   sourceRetries?: number;
   avoidedSources?: string[];
+  avoidedPeers?: string[];
   previousDownloadJobIds?: string[];
 };
 type Row = {
@@ -148,12 +149,13 @@ export class AlbumAcquisitionService {
       throw new Error("Only stopped requests can be retried.");
     const p = JSON.parse(row.payload_json) as Payload;
     // Keep the old download/import links so retry cannot duplicate already imported files.
+    this.restoreFailedPeers(p);
+    p.sourceRetries = 0;
     if (p.downloadJobId) {
       const job = this.downloads.getJob(p.downloadJobId);
-      if (job.status === "failed") {
-        this.retireSources(p);
-        p.sourceRetries = 0;
-      } else if (job.status === "cancelled") {
+      if (job.status === "failed" && this.downloads.hasSourceFailure(job.id)) {
+        this.retireSources(p, job.completedCount === 0 ? p.picks : []);
+      } else if (job.status === "failed" || job.status === "cancelled") {
         this.downloads.retryJob(job.id);
       }
     }
@@ -344,9 +346,10 @@ export class AlbumAcquisitionService {
         const search = await this.discovery.search(query, 500, { waitForComplete: true, attempts: 1 });
         if (!this.alive(id)) return;
         const avoided = new Set(p.avoidedSources ?? []);
+        const avoidedPeers = new Set(p.avoidedPeers ?? []);
         for (const result of search.results) {
           const key = result.username + "\0" + result.path;
-          if (!avoided.has(key)) results.set(key, result);
+          if (!avoided.has(key) && !avoidedPeers.has(result.username ?? "")) results.set(key, result);
         }
         report = inspectReleaseFiles([...results.values()], missing, p.artist, p.album, releaseTracks);
         if (!report.missing.length) break;
@@ -375,7 +378,7 @@ export class AlbumAcquisitionService {
           if (!this.alive(id)) return;
           for (const result of expanded) {
             const source = result.username + "\0" + result.path;
-            if (!avoided.has(source)) results.set(source, result);
+            if (!avoided.has(source) && !avoidedPeers.has(result.username ?? "")) results.set(source, result);
           }
           report = inspectReleaseFiles([...results.values()], missing, p.artist, p.album, releaseTracks);
         }
@@ -408,7 +411,8 @@ export class AlbumAcquisitionService {
     }
     const download = this.downloads.getJob(p.downloadJobId);
     if (download.status === "failed") {
-      if (this.researchAnotherSource(id, p, "The selected peer failed")) return;
+      if (this.downloads.hasSourceFailure(download.id) && this.researchAnotherSource(id, p, "The selected peer failed",
+        download.completedCount === 0 ? p.picks : [])) return;
       throw new Error(download.error ?? "Available download sources failed after alternate-source retries.");
     }
     if (download.status === "cancelled")
@@ -478,25 +482,48 @@ export class AlbumAcquisitionService {
     }
     if (!this.alive(id)) return;
     if (download.completedCount < download.selectedCount) {
-      if (this.researchAnotherSource(id, p, "Completed tracks were imported; finding the remaining tracks")) return;
+      const owned = this.library.listAlbumGroups()
+        .filter((album) => musicKey(album.artist) === musicKey(p.artist) && musicKey(album.album) === musicKey(p.album))
+        .flatMap((album) => album.files);
+      const failedPicks = this.downloads.hasSourceFailure(download.id)
+        ? p.picks?.filter((pick) => missingReleaseTracks([pick.track], owned, p.tracks).length > 0) : [];
+      if (this.researchAnotherSource(id, p, "Completed tracks were imported; finding the remaining tracks", failedPicks)) return;
       throw new Error(
         "Completed tracks were imported, but alternate sources could not complete the album. Retry to search again.",
       );
     }
     this.finish(id, p, "Album imported under " + p.artist);
   }
-  private retireSources(p: Payload) {
+  private restoreFailedPeers(p: Payload) {
+    // Older requests recorded only exact paths. Recover peer failures from their
+    // linked downloads so another edition from the same peer is not tried again.
+    // Do not infer peer failures from retired paths: those include imported files.
+    const failedDownload = this.db.prepare(
+      "SELECT payload_json FROM jobs WHERE id=? AND type='discovery_download' AND status='failed' AND progress=0",
+    );
+    const peers = new Set(p.avoidedPeers ?? []);
+    for (const id of p.previousDownloadJobIds ?? []) {
+      const row = failedDownload.get(id) as { payload_json: string } | undefined;
+      if (!row || !this.downloads.hasSourceFailure(id)) continue;
+      const download = JSON.parse(row.payload_json) as { results?: AlbumFilePick["result"][] };
+      for (const result of download.results ?? []) if (result.username) peers.add(result.username);
+    }
+    p.avoidedPeers = [...peers];
+  }
+  private retireSources(p: Payload, failedPicks: AlbumFilePick[] = []) {
     p.avoidedSources = [...new Set([...(p.avoidedSources ?? []),
       ...(p.picks ?? []).map((pick) => pick.result.username + "\0" + pick.result.path)])];
+    p.avoidedPeers = [...new Set([...(p.avoidedPeers ?? []),
+      ...failedPicks.flatMap((pick) => pick.result.username ? [pick.result.username] : [])])];
     if (p.downloadJobId)
       p.previousDownloadJobIds = [...new Set([...(p.previousDownloadJobIds ?? []), p.downloadJobId])];
     delete p.downloadJobId;
     delete p.picks;
   }
-  private researchAnotherSource(id: string, p: Payload, reason: string): boolean {
+  private researchAnotherSource(id: string, p: Payload, reason: string, failedPicks: AlbumFilePick[] = []): boolean {
     if (!this.alive(id) || (p.sourceRetries ?? 0) >= 2) return false;
     p.sourceRetries = (p.sourceRetries ?? 0) + 1;
-    this.retireSources(p);
+    this.retireSources(p, failedPicks);
     this.save(id, p, reason + "; trying alternate sources (" + p.sourceRetries + "/2)", 0.1);
     return true;
   }

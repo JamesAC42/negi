@@ -1,3 +1,4 @@
+import { recordPlayerPresenceSchema, recordPlayerActionSchema } from "@music-os/core";
 import { getHomeListening } from "./services/home-listening.js";
 import { handleExplore } from "./explore-routes.js";
 import { createServer } from "node:http";
@@ -63,6 +64,7 @@ import {
   importsInboxResponseSchema,
   jobResponseSchema,
   jobsResponseSchema,
+  lyricsResponseSchema,
   libraryFilesResponseSchema,
   libraryRootResponseSchema,
   libraryRootsResponseSchema,
@@ -379,6 +381,18 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    const fileLyricsMatch = url.pathname.match(/^\/library\/files\/([^/]+)\/lyrics$/);
+    if (request.method === "GET" && fileLyricsMatch) {
+      const fileId = decodeURIComponent(fileLyricsMatch[1]);
+      if (!app.db.prepare("SELECT id FROM files WHERE id = ?").get(fileId)) {
+        writeJson(response, 404, { error: "File not found" });
+        return;
+      }
+      // Durable caching belongs to LyricsService, keyed by the current song metadata.
+      response.setHeader("cache-control", "no-store");
+      writeJson(response, 200, lyricsResponseSchema.parse(await app.lyrics.getLyrics(fileId)));
+      return;
+    }
     const fileDiagnosticsMatch = url.pathname.match(/^\/library\/files\/([^/]+)\/diagnostics$/);
     if (request.method === "GET" && fileDiagnosticsMatch) {
       const diagnostics = await inspectLibraryFile(app.library, decodeURIComponent(fileDiagnosticsMatch[1]));
@@ -767,6 +781,17 @@ const server = createServer(async (request, response) => {
       const body = operationBatchIdRequestSchema.parse(await readJson(request));
       const batch = await app.operations.revertBatch(body.batchId);
       writeJson(response, 200, operationBatchResponseSchema.parse({ batch }));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/playback/record-player/presence") {
+      const body = recordPlayerPresenceSchema.parse(await readJson(request));
+      writeJson(response, 200, playbackStateSchema.parse(await app.playback.setRecordPlayerPresence(body.clientId, body.active, body.reducedMotion)));
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/playback/record-player/action") {
+      const body = recordPlayerActionSchema.parse(await readJson(request));
+      writeJson(response, 200, playbackStateSchema.parse(await app.playback.recordPlayerAction(body.id, body.action)));
       return;
     }
 

@@ -31,6 +31,7 @@ import { JobService } from "./services/job-service.js";
 import { TasteProfileService } from "./services/taste-profile-service.js";
 import { PlaybackHistoryService } from "./services/playback-history-service.js";
 import { ArtworkService } from "./services/artwork-service.js";
+import { LyricsService } from "./services/lyrics-service.js";
 import { WaveformService } from "./services/waveform-service.js";
 import { VisualizerService } from "./services/visualizer-service.js";
 import { LiveAnalyzerService } from "./services/live-analyzer-service.js";
@@ -62,6 +63,7 @@ export interface BackendApp {
   tasteProfile: TasteProfileService;
   playbackHistory: PlaybackHistoryService;
   artwork: ArtworkService;
+  lyrics: LyricsService;
   waveforms: WaveformService;
   visualizer: VisualizerService;
   health(): HealthResponse;
@@ -105,6 +107,7 @@ export function createBackendApp(config: BackendConfig): BackendApp {
   );
   const jobs = new JobService(db);
   const artwork = new ArtworkService(db, library, config);
+  const lyrics = new LyricsService(db, library);
   const waveforms = new WaveformService(config);
   const liveAnalyzer = new LiveAnalyzerService(config);
   const visualizer = new VisualizerService(playback, waveforms, liveAnalyzer);
@@ -138,6 +141,7 @@ export function createBackendApp(config: BackendConfig): BackendApp {
     tasteProfile,
     playbackHistory,
     artwork,
+    lyrics,
     waveforms,
     visualizer,
     health() {
@@ -161,6 +165,7 @@ export function createBackendApp(config: BackendConfig): BackendApp {
       closed = true;
       clearInterval(workflowAdvanceTimer);
       visualizer.close();
+      lyrics.close();
       waveforms.close();
       playback.close();
       albumAcquisitions.close();

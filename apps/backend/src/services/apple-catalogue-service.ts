@@ -56,6 +56,23 @@ function validAlbum(row: Row): void {
   if (!positive(row.collectionId) || !positive(row.artistId) || !nonempty(row.collectionName))
     throw new Error("Apple returned an invalid album.");
 }
+function completeSongCount(rows: Row[]): number | null {
+  const discCount = rows[0]?.discCount;
+  if (!positive(discCount)) return null;
+  const discs = new Map<number, { trackCount: number; positions: Set<number> }>();
+  for (const row of rows) {
+    if (row.discCount !== discCount || !positive(row.discNumber) || row.discNumber > discCount ||
+      !positive(row.trackCount) || !positive(row.trackNumber) || row.trackNumber > row.trackCount) return null;
+    const disc = discs.get(row.discNumber) ?? { trackCount: row.trackCount, positions: new Set<number>() };
+    if (disc.trackCount !== row.trackCount || disc.positions.has(row.trackNumber)) return null;
+    disc.positions.add(row.trackNumber);
+    discs.set(row.discNumber, disc);
+  }
+  // All numbered discs and every position on each must be present. Merely
+  // trusting one returned song's count would hide missing songs or whole discs.
+  return discs.size === discCount && [...discs.values()].every((disc) => disc.positions.size === disc.trackCount)
+    ? rows.length : null;
+}
 function releaseRows(data: Response, album: number): { collection: Row; tracks: CatalogueTrack[]; trackListingComplete: boolean; expectedTrackCount: number | null } {
   const collection = data.results.find((row) => row.wrapperType === "collection" && row.collectionId === album);
   if (!collection) throw new Error("This album is unavailable in Apple's US catalogue. Try the expanded MusicBrainz catalogue.");
@@ -71,7 +88,13 @@ function releaseRows(data: Response, album: number): { collection: Row; tracks: 
     return { title: row.trackName, disc: row.discNumber, number: row.trackNumber,
       durationMs: typeof row.trackTimeMillis === "number" && Number.isFinite(row.trackTimeMillis) && row.trackTimeMillis >= 0 ? row.trackTimeMillis : null };
   }).sort((a, b) => a.disc - b.disc || a.number - b.number);
-  const expectedTrackCount = positive(collection.trackCount) ? collection.trackCount : null;
+  const collectionTrackCount = positive(collection.trackCount) ? collection.trackCount : null;
+  const songTrackCount = completeSongCount(rows);
+  // The collection count can include non-song extras (e.g. digital booklets).
+  // Only use the smaller audio count when the song metadata proves every disc
+  // and track is present, without substituting another provider or edition.
+  const expectedTrackCount = collectionTrackCount !== null && songTrackCount !== null && songTrackCount < collectionTrackCount
+    ? songTrackCount : collectionTrackCount;
   return { collection, tracks, expectedTrackCount,
     trackListingComplete: expectedTrackCount !== null && tracks.length === expectedTrackCount };
 }

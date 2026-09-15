@@ -7,7 +7,7 @@ export function shouldRefreshPlaybackHistory(
   if (!current?.currentFileId) {
     return false;
   }
-  return current.currentFileId !== next.currentFileId ||
+  return (!current.albumTransition && !!next.albumTransition) || current.currentFileId !== next.currentFileId ||
     (current.status !== "stopped" && next.status === "stopped") ||
     (current.status === "playing" && next.status === "playing" &&
       mergePlaybackState(current, next).positionMs < current.positionMs);

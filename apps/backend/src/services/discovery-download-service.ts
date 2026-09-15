@@ -15,6 +15,7 @@ type DownloadJobResult = {
   importId?: string;
   completedPaths: string[];
   completedCount: number;
+  sourceFailure?: boolean;
 };
 
 export class DiscoveryDownloadService {
@@ -52,6 +53,23 @@ export class DiscoveryDownloadService {
       throw new Error(`Discovery download job not found: ${jobId}`);
     }
     return this.mapJob(row);
+  }
+
+  hasSourceFailure(jobId: string): boolean {
+    const row = this.db.prepare("SELECT * FROM jobs WHERE id=? AND type='discovery_download'").get(jobId) as JobRow | undefined;
+    if (!row) return false;
+    if (row.status === "succeeded")
+      return safeParse<{ sourceFailure?: boolean }>(row.result_json ?? "{}", {}).sourceFailure === true;
+    if (row.status !== "failed") return false;
+    const error = safeParse<{ message?: string; sourceFailure?: boolean }>(row.error_json ?? "{}", {});
+    if (typeof error.sourceFailure === "boolean") return error.sourceFailure;
+    // Before explicit evidence was persisted, these exact internal diagnostics
+    // identify confirmed remote failures. Zero progress alone also occurs when
+    // local configuration, authentication, scanning, or connector calls fail.
+    if (error.message === "Remaining transfers remained queued without starting; trying another source.") return true;
+    const failure = /^No completed files were found in [\s\S]+; slskd reports (\d+) matching transfers? failed(?: \([\s\S]*\))?\.$/.exec(error.message ?? "");
+    const payload = safeParse<DownloadJobPayload>(row.payload_json, { results: [] });
+    return payload.results.length > 0 && Number(failure?.[1] ?? 0) >= payload.results.length;
   }
 
   createJob(results: DiscoveryResult[], libraryRootId?: string, options?: { queuedTimeoutMs?: number }): DiscoveryDownloadJob {
@@ -154,6 +172,7 @@ export class DiscoveryDownloadService {
       );
 
       let completedPaths: string[] = [];
+      let partialSourceFailure = false;
       let lastCompletedCount = 0;
       let queuedSince: number | null = null;
       let lastDownloadProgressAt = Date.now();
@@ -231,10 +250,13 @@ export class DiscoveryDownloadService {
               this.addEvent(jobId, "warning", "Could not confirm cancellation of queued transfers; continuing to monitor this source");
               queuedSince = Date.now();
             }
-            if (cancelled) throw new Error("Remaining transfers remained queued without starting; trying another source.");
+            if (cancelled) throw sourceFailureError(
+              "Remaining transfers remained queued without starting; trying another source.",
+              confirmedIncompleteSources(lastInspection, queued.length, 0),
+            );
           }
           if (allKnownTransfersFailed(lastInspection, queued.length)) {
-            throw new Error(formatNoCompletedDownloadsError(lastInspection));
+            throw sourceFailureError(formatNoCompletedDownloadsError(lastInspection), confirmedIncompleteSources(lastInspection, queued.length, 0));
           }
           if (shouldSettlePartialDownload(lastInspection, queued.length, completedPaths.length, lastDownloadProgressAt)) {
             if (payload.queuedTimeoutMs) {
@@ -247,6 +269,7 @@ export class DiscoveryDownloadService {
                 continue;
               }
             }
+            partialSourceFailure = confirmedIncompleteSources(lastInspection, queued.length, completedPaths.length);
             this.addEvent(
               jobId,
               "warning",
@@ -266,7 +289,7 @@ export class DiscoveryDownloadService {
       if (completedPaths.length === 0) {
         const inspection = lastInspection ?? (await this.discovery.inspectDownloadResults(queued));
         this.addEvent(jobId, "warning", formatDownloadInspectionEvent(inspection));
-        throw new Error(formatNoCompletedDownloadsError(inspection));
+        throw sourceFailureError(formatNoCompletedDownloadsError(inspection), confirmedIncompleteSources(inspection, queued.length, 0));
       }
 
       const imported = await this.imports.createFromSlskdDownloads(completedPaths, payload.libraryRootId, {
@@ -282,7 +305,8 @@ export class DiscoveryDownloadService {
       const result: DownloadJobResult = {
         importId: imported.id,
         completedPaths,
-        completedCount: completedPaths.length
+        completedCount: completedPaths.length,
+        sourceFailure: partialSourceFailure
       };
       this.db
         .prepare(
@@ -308,7 +332,7 @@ export class DiscoveryDownloadService {
                completed_at = datetime('now')
            WHERE id = ? AND status IN ('queued', 'running') AND cancel_requested = 0`
         )
-        .run(JSON.stringify({ message: getErrorMessage(error) }), jobId);
+        .run(JSON.stringify({ message: getErrorMessage(error), sourceFailure: error instanceof DownloadSourceFailure }), jobId);
       this.addEvent(jobId, "error", getErrorMessage(error));
     }
   }
@@ -460,6 +484,19 @@ function readPositiveIntegerEnv(name: string, fallback: number): number {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+class DownloadSourceFailure extends Error {}
+
+function sourceFailureError(message: string, confirmed: boolean): Error {
+  return confirmed ? new DownloadSourceFailure(message) : new Error(message);
+}
+
+function confirmedIncompleteSources(inspection: SlskdDownloadInspection, selectedCount: number, completedCount: number): boolean {
+  return selectedCount > completedCount && inspection.directoryError == null && inspection.transfers.error == null
+    && inspection.transfers.matched >= selectedCount && inspection.transfers.active === 0
+    && inspection.transfers.other === 0 && inspection.transfers.completed === completedCount
+    && inspection.transfers.failed + inspection.transfers.queued >= selectedCount - completedCount;
 }
 
 function allKnownTransfersFailed(inspection: SlskdDownloadInspection, selectedCount: number): boolean {

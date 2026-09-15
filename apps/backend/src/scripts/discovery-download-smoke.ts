@@ -156,9 +156,63 @@ try {
   const partialJob = partialDownloads.createJob([result, pendingResult], root.id, { queuedTimeoutMs: 100 });
   const partialCompleted = await waitForJob(partialDownloads, partialJob.id, "succeeded");
   assert(partialFake.cancelCalls === 1, "partial album must cancel remaining transfers before recovery");
+  assert(partialDownloads.hasSourceFailure(partialJob.id), "confirmed remaining remote queue is recorded for partial recovery");
   assert(partialCompleted.completedCount === 1, `expected one partial completed file, got ${partialCompleted.completedCount}`);
   assert(partialCompleted.selectedCount === 2, `expected two selected files, got ${partialCompleted.selectedCount}`);
   assert(partialCompleted.imported?.items.length === 1, "expected the completed subset to be staged without waiting for the queued transfer");
+
+  const missingLocalFake = new PartialFakeSlskd(downloadPath);
+  const partialInspection = missingLocalFake.inspectDownloadResults.bind(missingLocalFake);
+  missingLocalFake.inspectDownloadResults = async () => {
+    const inspection = await partialInspection();
+    return { ...inspection, transfers: { ...inspection.transfers, completed: 2, queued: 0 } };
+  };
+  const missingLocalDownloads = new DiscoveryDownloadService(app.db, missingLocalFake as unknown as SlskdService, app.imports);
+  const missingLocalJob = missingLocalDownloads.createJob([result, pendingResult], root.id, { queuedTimeoutMs: 100 });
+  await waitForJob(missingLocalDownloads, missingLocalJob.id, "succeeded");
+  assert(!missingLocalDownloads.hasSourceFailure(missingLocalJob.id), "a remotely completed file missing locally is not a failed peer");
+
+  for (const scenario of ["not-configured", "connection", "auth", "scan", "directory-inspection", "transfer-inspection", "remote-rejected"] as const) {
+    const connectorError = scenario === "not-configured" ? "slskd is not configured"
+      : scenario === "connection" ? "fetch failed: ECONNREFUSED"
+      : scenario === "auth" ? "HTTP 401 Unauthorized" : null;
+    const fake = {
+      async queueDownloadResults(results: DiscoveryResult[]) {
+        if (connectorError) throw new Error(connectorError);
+        return results;
+      },
+      async findCompletedDownloadPaths(): Promise<string[]> {
+        if (scenario === "scan") throw new Error("EACCES reading download directory");
+        return [];
+      },
+      async inspectDownloadResults() {
+        return { downloadDirectory: "/fixture", directoryError: scenario === "directory-inspection" ? "EACCES" : null,
+          filesSeen: 0, completedPaths: [], transfers: { total: 1, matched: 1, completed: 0, failed: 1,
+            active: 0, queued: 0, other: 0, samples: [], error: scenario === "transfer-inspection" ? "HTTP 401" : null } };
+      },
+    };
+    const failedDownloads = new DiscoveryDownloadService(app.db, fake as unknown as SlskdService, app.imports);
+    const failedJob = failedDownloads.createJob([result], root.id, { queuedTimeoutMs: 100 });
+    await waitForJob(failedDownloads, failedJob.id, "failed");
+    const expected = scenario === "remote-rejected";
+    assert(failedDownloads.hasSourceFailure(failedJob.id) === expected, `${scenario} source attribution must be ${expected}`);
+    const stored = app.db.prepare("SELECT error_json FROM jobs WHERE id=?").get(failedJob.id) as { error_json: string };
+    assert(JSON.parse(stored.error_json).sourceFailure === expected, `${scenario} must persist explicit source-failure evidence`);
+  }
+
+  for (const [index, scenario] of [
+    { message: "No completed files were found in /fixture; slskd reports 1 matching transfer failed.", expected: true },
+    { message: "Remaining transfers remained queued without starting; trying another source.", expected: true },
+    { message: "No completed files were found in /fixture; Music OS could not scan that folder: EACCES", expected: false },
+    { message: "Could not connect to slskd; slskd reports 1 matching transfer failed.", expected: false },
+    { message: "HTTP 401 Unauthorized", expected: false },
+    { message: "No completed files were found in /fixture; slskd reports 1 matching transfer failed.", sourceFailure: false, expected: false },
+  ].entries()) {
+    const id = "legacy-failure-" + index;
+    app.db.prepare("INSERT INTO jobs(id,type,status,progress,payload_json,error_json) VALUES(?,'discovery_download','failed',0,?,?)")
+      .run(id, JSON.stringify({ results: [result] }), JSON.stringify(scenario));
+    assert(downloads.hasSourceFailure(id) === scenario.expected, `legacy diagnostic ${index} must be classified conservatively`);
+  }
 
   const queuedFake = new QueuedFakeSlskd();
   const queuedDownloads = new DiscoveryDownloadService(app.db, queuedFake as unknown as SlskdService, app.imports);
@@ -166,6 +220,7 @@ try {
   const queuedFailed = await waitForJob(queuedDownloads, queuedJob.id, "failed");
   assert(queuedFake.cancelCalls === 1, "expired remote queue must be cancelled before failover");
   assert(queuedFailed.error?.includes("remained queued") === true, "expected queued timeout explanation");
+  assert(queuedDownloads.hasSourceFailure(queuedJob.id), "confirmed queue exhaustion is a source failure");
 
   queuedFake.failed = 1;
   const mixedJob = queuedDownloads.createJob([result, pendingResult], root.id, { queuedTimeoutMs: 100 });

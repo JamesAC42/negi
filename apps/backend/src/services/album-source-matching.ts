@@ -1,5 +1,5 @@
 import type { CatalogueTrack, DiscoveryResult } from "@music-os/core";
-import { musicKey } from "./catalogue-service.js";
+import { musicKey, musicTitleKey } from "./album-completeness.js";
 import { compareDiscoveryResultAvailability } from "./discovery-availability.js";
 
 export type AlbumFilePick = { result: DiscoveryResult; track: CatalogueTrack };
@@ -69,7 +69,7 @@ function albumNames(value: string) {
 }
 function titleForms(value: string, artist: string, album: string, filename = true) {
   const forms = new Set<string>();
-  const add = (v: string) => { forms.add(musicKey(v)); if (filename) forms.add(musicKey(unnumbered(v))); };
+  const add = (v: string) => { forms.add(musicTitleKey(v)); if (filename) forms.add(musicTitleKey(unnumbered(v))); };
   // Only remove release/encoding annotations. Live, remix, instrumental and
   // alternate-version labels remain part of the identity.
   const cleaned = value.replace(/[\[(](?:(?:\d{4}\s+)?(?:re)?master(?:ed)?(?:\s+\d{4})?|(?:FLAC|MP3|AAC|ALAC|WAV|OGG|OPUS)(?:\s+\d+)?|\d+\s*(?:kbps|bit))[\])]/gi, "").trim();
@@ -123,13 +123,13 @@ export function inspectReleaseFiles(
     groups.set(key, group);
   }
   const titleCounts = new Map<string, number>();
-  for (const t of allTracks) titleCounts.set(musicKey(t.title), (titleCounts.get(musicKey(t.title)) ?? 0) + 1);
+  for (const t of allTracks) titleCounts.set(musicTitleKey(t.title), (titleCounts.get(musicTitleKey(t.title)) ?? 0) + 1);
   const eligibleFiles = [...groups.values()].flat();
   const forms = new Map(eligibleFiles.map((r) => [r, titleForms(r.filename.replace(/\.[^.]+$/, ""), artist, album)]));
   const samePositionAndDuration = (r: DiscoveryResult, track: CatalogueTrack) => {
     const disc = discNumber(r);
     return !(disc !== null && disc !== track.disc)
-      && !(disc === null && (titleCounts.get(musicKey(track.title)) ?? 0) > 1)
+      && !(disc === null && (titleCounts.get(musicTitleKey(track.title)) ?? 0) > 1)
       && !(track.durationMs && r.lengthSeconds && Math.abs(r.lengthSeconds * 1000 - track.durationMs) >= 12000);
   };
   const exactTracks = new Set(tracks.filter((track) => {
@@ -178,12 +178,20 @@ export function inspectReleaseFiles(
         let creditMatch = false;
         if (credited) {
           const filename = r.filename.replace(/\.[^.]+$/, "");
-          const cleaned = filename.replace(/\s*[\[(](?:feat(?:uring)?\.?|ft\.?)\s+[^()[\]]+[\])]/gi,
-            (credit) => /\b(?:live|remix|instrumental|karaoke|acoustic|demo|version|ver\.|sped|slowed)\b/i.test(credit) ? credit : "");
-          if (cleaned !== filename) {
-            const creditForms = titleForms(cleaned, artist, album);
-            creditMatch = [...wanted].some((w) => !!w && creditForms.has(w));
+          const version = /\b(?:live|remix|instrumental|karaoke|acoustic|demo|version|ver\.|sped|slowed)\b/i;
+          const creditedNames = [filename.replace(/\s*[\[(](?:feat(?:uring)?\.?|ft\.?)\s+[^()[\]]+[\])]/gi,
+            (credit) => version.test(credit) ? credit : "")];
+          // Some peers append " - Selected Artist, Collaborator" to the title.
+          // Remove only that terminal credit list, retaining every title/version
+          // segment, even when the song has the same name as its album.
+          const parts = filename.split(/\s+[-\u2013\u2014]\s+/);
+          const artists = parts.at(-1)!.split(/\s*,\s*/);
+          if (parts.length > 1 && artists.length > 1 && musicKey(artists[0]) === musicKey(artist)
+            && artists.every((name) => !!musicKey(name) && !version.test(name))) {
+            creditedNames.push(parts.slice(0, -1).join(" - "));
           }
+          creditMatch = creditedNames.some((cleaned) => cleaned !== filename
+            && [...wanted].some((w) => !!w && titleForms(cleaned, artist, album).has(w)));
         }
         return exact || creditMatch || (ordinalSafe && ordered.get(trackKey(track)) === r);
       }).sort(compareSources);

@@ -1,0 +1,193 @@
+/* A tactile instrument inside the existing Now Playing surface. */
+.nowPlayingModalInfo.hasRecordPlayer {
+  grid-template-columns: minmax(0, 1fr) minmax(14rem, 46%);
+  grid-template-rows: auto auto;
+  align-items: center;
+  align-content: stretch;
+  min-height: 0;
+  column-gap: clamp(.75rem, 2vw, 1.75rem);
+  background: linear-gradient(125deg, var(--bg1), color-mix(in srgb, var(--bg1) 94%, #46473c));
+  container-type: inline-size;
+}
+.nowPlayingSongIdentity { grid-column: 1; grid-row: 1; display: grid; align-content: center; gap: .42rem; min-width: 0; }
+.nowPlayingSongIdentity > span { color: var(--acc); font-size: .6875rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.hasRecordPlayer .nowPlayingSongDetails { grid-column: 1; grid-row: 2; align-self: end; margin-top: .35rem; }
+.recordPlayer { position: relative; top: 6px; grid-column: 2; grid-row: 1; width: 100%; max-width: 22rem; justify-self: center; margin-left: .6rem; min-width: 0; align-self: center; user-select: none; }
+.recordPlayerObject { width: 100%; transition: opacity 120ms; }
+.recordPlayerObject.is-away { opacity: 0; }
+.turntableScene { width: 100%; height: 100%; position: relative; display: block; }
+.turntableScene canvas { display: block; width: 100%; height: 100%; outline: none; }
+.recordPlayerOptions { grid-column: 2; grid-row: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .3rem .65rem; align-self: stretch; min-width: 0; margin-top: .35rem; padding-top: .7rem; border-top: .0625rem solid var(--np-line); }
+.recordPlayerOptions button { display: inline-flex; align-items: center; white-space: nowrap; min-height: 1.75rem; padding: .2rem .3rem; border: 0; background: transparent; box-shadow: none; color: var(--tx2); font-size: .61rem; font-weight: 450; }
+.recordPlayerOptions button span { color: var(--tx1); margin-left: .3rem; }
+.recordPlayerOptions button:hover:not(:disabled) { color: var(--tx0); background: var(--acc-dim); }
+.recordPlayerOptions button:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; }
+.recordCeremony { position: fixed; z-index: 1100; inset: 0; isolation: isolate; outline: none; color: #f0eee6; font-family: inherit; }
+.recordCeremonyDim { position: absolute; inset: 0; background: rgba(5, 10, 20, .91); backdrop-filter: blur(12px); }
+.recordCeremonyLight { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 48% 40%, #647da727, transparent 55%), radial-gradient(ellipse at 62% 58%, #c7935b12, transparent 43%); }
+.recordCeremonyStage { position: absolute; transform-origin: center; pointer-events: none; will-change: transform; }
+.recordCeremonyStage .turntableScene { filter: drop-shadow(0 30px 28px #0003); }
+.recordCeremonyCopy { position: absolute; left: 50%; transform: translateX(-50%); width: min(90vw, 40rem); text-align: center; }
+.recordCeremonyEyebrow { display: block; color: #c8b58c; font-size: .61rem; font-weight: 600; letter-spacing: .24em; }
+.recordCeremonyCopy h2 { color: #f1eee5; margin: .7rem 0 .25rem; font-size: clamp(1.15rem, 2.2vw, 1.85rem); font-weight: 500; letter-spacing: -.025em; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recordCeremonyCopy p { color: #a5ada7; font-size: .8rem; margin: 0; }
+.recordCeremonyStatus { display: block; min-height: 1rem; margin-top: 1rem; color: #898f89; font-size: .7rem; letter-spacing: .02em; }
+.recordCeremonyControls { display: flex; align-items: center; justify-content: center; gap: 1rem; margin-top: .85rem; }
+.recordCeremonyControls button { display: inline-flex; align-items: center; gap: .5rem; background: #171c1a; border: 1px solid #62675355; border-radius: 4px; color: #cecdbf; padding: .4rem .7rem; min-height: 2rem; font: inherit; font-size: .7rem; cursor: pointer; }
+.recordCeremonyControls button:hover { background: #272e24; border-color: #b6bb9477; }
+.recordCeremonyControls button:focus-visible { outline: 2px solid #c7ce9a; outline-offset: 4px; }
+.recordCeremonyControls kbd { color: #8d9689; font: inherit; font-size: .6rem; border: 1px solid #c5cfa22b; border-radius: 2px; padding: .1rem .25rem; }
+@container (max-width: 28rem) {
+  .nowPlayingSongIdentity h2 { font-size: clamp(1.55rem, 6.6cqw, 2.4rem); }
+}
+@media (min-width: 981px) {
+  .nowPlayingOverlay .nowPlayingFocus { grid-template-columns: minmax(10rem, .6fr) minmax(0, 1.4fr); width: min(100%, 78rem); }
+}
+@media (max-width: 1250px) and (min-width: 981px) {
+  .nowPlayingOverlay .nowPlayingFocus { grid-template-columns: minmax(7rem, .5fr) minmax(0, 1.5fr); gap: 1rem; }
+  .nowPlayingModalInfo.hasRecordPlayer { grid-template-columns: minmax(0, 1fr) minmax(11rem, 47%); padding: .8rem; }
+}
+@media (max-width: 600px) {
+  .nowPlayingModalInfo.hasRecordPlayer { grid-template-columns: minmax(0, 1fr) minmax(9rem, 46%); min-height: 0; padding: .8rem; gap: .4rem; }
+  .hasRecordPlayer .nowPlayingSongDetails { grid-column: 1 / -1; }
+  .recordPlayer { margin-left: 0; }
+  .recordPlayerOptions { grid-column: 1 / -1; grid-row: 3; justify-content: flex-end; margin-top: 0; padding-top: 0; border-top: 0; }
+  .recordPlayerOptions button { display: inline-flex; align-items: center; white-space: nowrap; font-size: .58rem; }
+  .recordCeremonyCopy { width: 90vw; }
+  .recordCeremonyControls button { min-height: 2.5rem; }
+}
+@media (max-height: 720px) {
+  .recordCeremonyCopy h2 { margin-top: .45rem; }
+  .recordCeremonyStatus { margin-top: .6rem; }
+  .recordCeremonyControls { margin-top: .55rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .recordPlayerObject, .recordLayoutChoice { transition: none; }
+  .recordLayoutPanel { animation: none; }
+}
+
+.nowPlayingSongIdentity .nowPlayingActions { flex-wrap: nowrap; gap: .6rem; width: min(100%, 15rem); max-width: 100%; }
+.nowPlayingSongIdentity .favoriteControls { flex: 0 0 auto; }
+.nowPlayingSongIdentity .starControls { flex: 1 1 auto; max-width: 100%; }
+.nowPlayingSongIdentity .starControls button { flex: 1 1 0; min-width: 0; width: auto; }
+/* Reserve the floor's two nested gutters; long content scrolls above it. */
+@media (min-height: 851px) and (min-width: 981px) {
+  .nowPlayingOverlay .nowPlayingCockpit {
+    --spectrogram-clearance: calc(var(--spectrogram-height) + 2 * clamp(1rem, 2vw, 1.625rem) + 1rem);
+    grid-template-rows: 0 clamp(4.75rem, 8vh, 5.75rem) minmax(0, 1fr);
+  }
+  .nowPlayingOverlay .nowPlayingFocus { height: 100%; max-height: 100%; grid-template-rows: minmax(min-content, 1fr) auto; overflow-y: auto; scrollbar-width: thin; }
+  .nowPlayingOverlay .nowPlayingFocus::before { inset: 0; }
+}
+@media (max-height: 850px) and (min-width: 981px) {
+  .nowPlayingOverlay .spectrogramFloor { display: none; }
+  .nowPlayingOverlay .nowPlayingCockpit { --spectrogram-clearance: 1.5rem; overflow-y: auto; }
+}
+@media (max-width: 980px) {
+  .nowPlayingBackdrop .nowPlayingOverlay { display: block; overflow-y: auto; overflow-x: hidden; }
+  .nowPlayingOverlay .nowPlayingCockpit { height: auto; min-height: 0; grid-template-rows: 0 5rem auto; padding-bottom: 13rem; }
+  .nowPlayingOverlay .nowPlayingFocus { padding-bottom: 1.5rem; }
+  .nowPlayingOverlay .nowPlayingQueue { height: 32rem; }
+}
+
+@media (max-width: 600px) {
+  .nowPlayingOverlay .overlayControls { flex-wrap: wrap; gap: .65rem; }
+  .nowPlayingOverlay .volumeControl.modal { flex-basis: 100%; width: 100%; grid-template-columns: 1rem minmax(0, 1fr) 2rem; border-left: 0; padding-left: 0; }
+}
+
+@media (max-width: 600px) {
+  .nowPlayingSongIdentity .nowPlayingActions { gap: .25rem; }
+  .nowPlayingSongIdentity .favoriteControls, .nowPlayingSongIdentity .starControls { gap: .125rem; }
+  .nowPlayingSongIdentity .nowPlayingActions button { width: 1rem; height: 1.75rem; }
+  .nowPlayingSongIdentity .nowPlayingActions button svg { width: .75rem; height: .75rem; }
+}
+
+/* Layout selection stays compact in the title-card footer. */
+.recordPlayerOptions .recordLayoutTrigger { gap: .28rem; }
+.recordPlayerOptions .recordLayoutTrigger > svg { stroke: currentColor; stroke-width: 1.2; opacity: .75; }
+.recordPlayerOptions .recordLayoutTrigger > span { margin-left: .05rem; }
+.recordPlayerOptions .recordLayoutTrigger[aria-expanded="true"] { color: var(--tx0); background: var(--acc-dim); }
+.recordLayoutPanel {
+  box-sizing: border-box;
+  position: fixed;
+  z-index: 1110;
+  width: min(21.5rem, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  padding: .85rem;
+  border: 1px solid #7b91b02e;
+  border-radius: .8rem;
+  background: linear-gradient(145deg, #192336, #101928 78%);
+  box-shadow: 0 18px 60px #0007, 0 2px 8px #0004, inset 0 1px #ffffff08;
+  color: #e0e7ee;
+  font-family: inherit;
+  animation: recordLayoutReveal 140ms ease-out;
+}
+.recordLayoutHeading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin: -.15rem 0 .5rem; }
+.recordLayoutHeading > span { color: #9eacbe; font-size: .55rem; font-weight: 600; letter-spacing: .16em; }
+.recordLayoutHeading > button {
+  display: grid; place-items: center; width: 1.65rem; height: 1.65rem; min-height: 0; padding: 0;
+  border: 0; border-radius: .3rem; background: transparent; box-shadow: none; color: #9aa8bd; font: inherit; font-size: 1.1rem; cursor: pointer;
+}
+.recordLayoutHeading > button:hover { color: #f1f4f8; background: #a4b3ca14; }
+.recordLayoutGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .45rem; }
+.recordLayoutChoice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: .15rem;
+  min-width: 0;
+  min-height: 0;
+  padding: .35rem .35rem .55rem;
+  border: 1px solid #8291aa22;
+  border-radius: .48rem;
+  background: #0b14217a;
+  box-shadow: none;
+  color: #aab7c8;
+  font: inherit;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.recordLayoutChoice:hover { background: #23324a; border-color: #9fb2ce66; color: #edf1f6; }
+.recordLayoutChoice[aria-pressed="true"] { border-color: #c9a67acc; background: linear-gradient(160deg, #344152, #202c3d); color: #f1d4ae; box-shadow: inset 0 0 0 1px #d0b18b0d; }
+.recordLayoutChoice > span { font-size: .64rem; line-height: 1.25; font-weight: 500; text-align: center; white-space: nowrap; }
+.recordLayoutThumbnail { display: block; width: 100%; height: auto; }
+.recordLayoutCheck { position: absolute; top: .35rem; right: .35rem; stroke: #eac69b; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.recordLayoutPanel > p { margin: .7rem 0 .05rem; color: #7e8ea4; font-size: .6rem; text-align: center; line-height: 1.4; }
+.recordLayoutPanel button:focus-visible { outline: 2px solid #e7c597; outline-offset: 2px; }
+@keyframes recordLayoutReveal { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .recordLayoutChoice { transition: none; }
+  .recordLayoutPanel { animation: none; }
+}
+
+/* Static material study remains usable when WebGL is unavailable or loses its context. */
+.turntableScene.is-fallback > canvas { visibility: hidden; }
+.turntableFallback { position: absolute; inset: 0; isolation: isolate; pointer-events: none; }
+.turntableFallbackSleeve {
+  position: absolute; width: 37%; aspect-ratio: 1; right: 10%; top: 2%; overflow: hidden;
+  transform: perspective(500px) rotateY(-14deg) rotateZ(-4deg);
+  border: 1px solid #c2c3c447; background: linear-gradient(145deg, #233c50, #121b2a);
+  box-shadow: 4px 7px 9px #0005, inset 0 0 0 4px #c8b28b12;
+}
+.turntableFallbackSleeve img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.turntableFallbackSleeve span { position: absolute; inset: 15%; display: grid; place-items: center; text-align: center; color: #c9bd9f; font-size: clamp(.45rem, 1vw, .9rem); line-height: 1.5; }
+.turntableFallbackDeck {
+  position: absolute; width: 72%; height: 52%; bottom: 9%; left: 9%;
+  transform: perspective(650px) rotateX(27deg) rotateZ(3deg);
+  border: 6px solid #6d4830; border-bottom-width: 10px; border-radius: 3px;
+  background: linear-gradient(135deg, #2b3033, #0b1117 60%);
+  box-shadow: 0 2px 0 #b38a5e, 0 13px 12px #0005, inset 0 0 0 1px #aeb3b93b;
+}
+.turntableFallbackDisc {
+  position: absolute; width: 63%; aspect-ratio: 1; left: 7%; top: 50%; transform: translateY(-50%);
+  border-radius: 50%; border: 3px solid #a6abad;
+  background: conic-gradient(from 20deg, #fff0, #a8b4bf21 9%, #0000 20%, #0000 47%, #d2dbe52a 61%, #0000 76%), repeating-radial-gradient(circle, #0c1014 0 1px, #2d333b 1.5px, #0c1014 2px);
+  box-shadow: 0 3px 4px #0009, 0 0 0 2px #232b30;
+}
+.turntableFallbackDisc::after { content: ''; position: absolute; left: 48%; top: 48%; width: 4%; aspect-ratio: 1; background: #d4d7cf; border: 1px solid #141d23; border-radius: 50%; }
+.turntableFallbackDisc img { position: absolute; inset: 34%; width: 32%; height: 32%; border-radius: 50%; object-fit: cover; }
+.turntableFallbackDeck > i { position: absolute; width: 6%; height: 64%; right: 15%; top: 11%; transform: rotate(28deg); border-left: 4px solid #bcc2c5; border-bottom: 4px solid #c5c4ba; border-radius: 0 0 0 10px; filter: drop-shadow(3px 3px 2px #000b); }
+.turntableFallbackDeck > i::before { content: ''; position: absolute; width: 12px; height: 12px; top: -4px; left: -8px; border-radius: 50%; background: radial-gradient(circle, #dfe5e5, #5b676f 55%, #141e25 60%); }
+.turntableFallbackDeck > i::after { content: ''; position: absolute; width: 10px; height: 15px; bottom: -10px; left: -4px; background: linear-gradient(#263744 65%, #c6a269 65%); border-radius: 1px; }

@@ -15,7 +15,13 @@
     "appearance:smoke": "tsx src/scripts/appearance-smoke.ts",
     "typecheck": "tsc --noEmit",
     "artwork-requests:smoke": "tsx src/scripts/artwork-requests-smoke.ts",
-    "artist-resource:smoke": "tsx src/scripts/artist-resource-smoke.ts"
+    "artist-resource:smoke": "tsx src/scripts/artist-resource-smoke.ts",
+    "record-player:smoke": "tsx src/scripts/record-player-smoke.ts",
+    "record-player-sleeve:smoke": "node src/scripts/record-player-sleeve-smoke.mjs",
+    "now-playing-motion:smoke": "node src/scripts/now-playing-motion-smoke.mjs",
+    "visualizer-canvas:smoke": "node src/scripts/visualizer-canvas-smoke.mjs",
+    "turntable-cache:smoke": "node src/scripts/turntable-cache-smoke.mjs",
+    "lyrics:smoke": "tsx src/scripts/lyrics-smoke.ts"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",
@@ -33,11 +39,13 @@
     "lucide-react": "^1.31.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "three": "^0.186.0",
     "zod": "^3.25.46"
   },
   "devDependencies": {
     "@types/react": "^19.2.16",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^4.5.0",
     "typescript": "^5.8.3",
     "vite": "^5.4.19"

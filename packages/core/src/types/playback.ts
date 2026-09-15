@@ -1,4 +1,21 @@
+export interface RecordAlbum {
+  fileId: string;
+  album: string;
+  artist: string;
+}
+
+export interface AlbumTransition {
+  id: string;
+  from: RecordAlbum;
+  to: RecordAlbum;
+  /** Null until a visible renderer is ready to perform the change. */
+  startedAt: number | null;
+  paused: boolean;
+  reducedMotion: boolean;
+}
+
 export interface PlaybackState {
+  albumTransition?: AlbumTransition | null;
   status: "stopped" | "playing" | "paused" | "error";
   currentFileId: string | null;
   currentPath: string | null;

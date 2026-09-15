@@ -1,0 +1,75 @@
+/* The record and lyrics share the existing instrument space. */
+.nowPlayingViews { display: contents; --panel-translate-y: 8px; --view-content-width: 22rem; }
+.nowPlayingViewStage { grid-column: 2; grid-row: 1 / span 2; align-self: stretch; position: relative; min-width: 0; min-height: 13rem; }
+.nowPlayingRecordPane, .nowPlayingLyricsPane { position: absolute; inset: 0; min-width: 0; }
+.nowPlayingViewStage > [aria-hidden="true"] { visibility: hidden; }
+/* Visibility waits for the outgoing fade; inert removes hidden controls immediately. */
+.nowPlayingViewStage > .t-panel-slide[aria-hidden="true"] { transition: transform var(--panel-close-dur) var(--panel-ease), opacity var(--panel-close-dur) var(--panel-ease), filter var(--panel-close-dur) var(--panel-ease), visibility 0s var(--panel-close-dur); }
+.nowPlayingRecordPane { display: flex; flex-direction: column; justify-content: center; }
+/* Bound the 3D scene by both available dimensions, leaving the footer its own row. */
+.nowPlayingRecordPane .recordPlayer { top: 0; flex: none; width: min(100%, var(--record-fit-width, 100%)); max-width: var(--view-content-width); margin-left: 0; align-self: center; }
+.nowPlayingViewControls { grid-column: 1 / -1; grid-row: 3; display: flex; justify-content: flex-end; align-items: center; gap: .4rem; min-width: 0; margin-top: .35rem; padding-top: .25rem; border-top: 1px solid var(--np-line); }
+/* Both modes occupy the same footprint, keeping the toggle and baseline fixed. */
+.nowPlayingModeControls { display: grid; flex: 0 1 auto; min-width: 0; }
+.nowPlayingRecordControls, .nowPlayingLyricsControls { grid-area: 1 / 1; min-width: 0; }
+.nowPlayingModeControls > [hidden] { display: block; visibility: hidden; pointer-events: none; }
+.nowPlayingViewControls .recordPlayerOptions { justify-content: flex-end; border: 0; padding: 0; margin: 0; gap: .1rem .35rem; }
+.nowPlayingViewControls .recordPlayerOptions button, .nowPlayingViewToggle { font-size: .58rem; }
+.nowPlayingViewToggle { display: inline-flex; align-items: center; justify-content: center; gap: .3rem; flex-shrink: 0; min-height: 1.75rem; padding: .2rem .3rem; border: 0; background: transparent; box-shadow: none; color: var(--tx2); font-weight: 450; }
+.nowPlayingViewToggle svg { width: .8rem; height: .8rem; stroke-width: 1.7; }
+.nowPlayingViewToggle[aria-pressed="true"] { color: var(--acc); }
+.nowPlayingViewToggle:hover { color: var(--tx0); background: var(--acc-dim); }
+.lyricsPanel { display: flex; flex-direction: column; width: min(100%, var(--view-content-width)); margin-inline: auto; height: 100%; min-height: 0; position: relative; font-family: "DM Sans Variable", "Segoe UI", sans-serif; }
+.lyricsEyebrow { display: flex; align-items: center; gap: .45rem; flex-shrink: 0; min-height: 1rem; padding-inline: .45rem; color: var(--acc); font-size: .53rem; font-weight: 650; letter-spacing: .15em; text-transform: uppercase; }
+.lyricsSyncDot, .lyricsPlainDot { --app-corner-radius: 50%; width: .3rem; height: .3rem; border-radius: 50%; background: var(--acc); flex-shrink: 0; }
+.lyricsSyncDot { box-shadow: 0 0 9px color-mix(in srgb, var(--acc) 48%, transparent); }
+.lyricsPlainDot { opacity: .4; }
+.lyricsScroll { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; position: relative; outline-offset: -2px; mask-image: linear-gradient(to bottom, transparent, #000 8%, #000 82%, transparent); }
+.lyricsScroll:hover { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--tx2) 28%, transparent) transparent; }
+.lyricsScroll.is-plain { mask-image: linear-gradient(to bottom, transparent, #000 8%, #000 90%, transparent); }
+.lyricsLines { padding-block: var(--lyrics-focus-space, 5rem); }
+.lyricsLine {
+  display: block; width: 100%; min-height: 0; margin: 0; padding: .16rem .45rem;
+  border: 0; border-radius: .3rem; background: transparent; box-shadow: none;
+  color: var(--tx1); text-align: left; white-space: normal; overflow-wrap: anywhere;
+  font-family: inherit; font-size: clamp(.88rem, 1.2vw, 1.1rem); font-weight: 600; line-height: 1.35;
+  transform-origin: left center; opacity: .82;
+  transition: color var(--duration-fast) var(--ease-in-out), opacity var(--duration-fast) var(--ease-in-out), text-shadow var(--duration-slow) var(--ease-smooth-out);
+}
+.lyricsLine.is-past { opacity: .68; }
+.lyricsLine.is-current { color: color-mix(in srgb, var(--acc) 28%, var(--tx0)); opacity: 1; text-shadow: 0 0 18px color-mix(in srgb, var(--acc) 28%, transparent); }
+.lyricsLine:hover:not(:disabled) { color: var(--tx0); opacity: 1; background: color-mix(in srgb, var(--acc) 5%, transparent); }
+.lyricsLine:disabled { cursor: default; }
+.lyricsBreak { display: inline-flex; align-items: center; gap: .4rem; font-size: .8em; font-weight: 450; }
+.lyricsBreak svg { width: 1em; height: 1em; }
+.lyricsPlainText { margin: 0; padding: 1rem .45rem; white-space: pre-line; overflow-wrap: anywhere; font-size: .9rem; line-height: 1.8; color: var(--tx1); }
+.lyricsFooter { display: flex; justify-content: flex-end; align-items: center; flex-shrink: 0; min-height: 1.75rem; padding: 0 .15rem; font-size: .55rem; color: var(--tx2); }
+.lyricsFooter i { padding-inline: .35rem; font-style: normal; opacity: .6; }
+.lyricsFollow, .lyricsRetry { display: inline-flex; align-items: center; justify-content: center; gap: .35rem; min-height: 1.6rem; border: 1px solid var(--np-line); background: var(--acc-dim); box-shadow: none; color: var(--acc); font: inherit; font-size: .63rem; padding: .2rem .5rem; border-radius: 2rem; }
+.lyricsFollow svg, .lyricsRetry svg { width: .75rem; height: .75rem; }
+.lyricsEmpty { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; gap: .5rem; padding: .6rem; text-align: center; }
+.lyricsEmptyIcon { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; margin-bottom: .15rem; border: 1px solid var(--np-line); border-radius: 50%; color: var(--acc); background: radial-gradient(circle at 45% 20%, var(--acc-dim), transparent); }
+.lyricsEmptyIcon svg { width: 1rem; height: 1rem; stroke-width: 1.5; }
+.lyricsEmptyIcon.is-loading { animation: lyricsBreathe 1.5s ease-in-out infinite; }
+.lyricsEmpty strong { font-size: .9rem; font-weight: 600; color: var(--tx0); }
+.lyricsEmpty p { margin: 0; max-width: 14rem; font-size: .7rem; color: var(--tx2); line-height: 1.6; text-wrap: balance; }
+.lyricsRetry { margin-top: .35rem; }
+.lyricsSeekError { position: absolute; bottom: 0; left: 0; background: var(--bg1); color: var(--tx1); padding: .25rem; font-size: .6rem; }
+.nowPlayingViews button:focus-visible, .lyricsScroll:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+@keyframes lyricsBreathe { 0%, 100% { opacity: .45; transform: scale(.96); } 50% { opacity: 1; transform: scale(1); } }
+@media (max-width: 600px) {
+  .nowPlayingViewStage { grid-row: 1; min-height: 11.5rem; }
+  .nowPlayingViewControls { gap: .15rem; }
+  .nowPlayingViewControls .recordPlayerOptions { gap: .1rem .15rem; }
+  .nowPlayingViewControls .recordPlayerOptions button, .nowPlayingViewToggle { font-size: .53rem; }
+  .lyricsLine { font-size: .86rem; line-height: 1.4; padding-block: .25rem; }
+  .lyricsEmpty { padding-inline: .1rem; }
+  .lyricsEmpty p { font-size: .65rem; }
+  .lyricsEyebrow { font-size: .48rem; letter-spacing: .1em; }
+  .lyricsFooter { padding-inline: .15rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nowPlayingViewStage .t-panel-slide[aria-hidden="true"] { transition: none; }
+  .lyricsLine { transition: none; }
+  .lyricsEmptyIcon.is-loading { animation: none; }
+}

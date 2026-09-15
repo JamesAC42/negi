@@ -83,9 +83,57 @@ assert.equal(matchReleaseFiles([{ ...credited, username: "fast-credit", hasFreeU
   file(tracks[0], { username: "exact", hasFreeUploadSlot: false })], [tracks[0]], "Artist", "Album")[0].result.username,
   "exact", "Existing exact matches are preferred over inferred feature-credit variants");
 
+const artistCreditTracks: CatalogueTrack[] = [
+  { title: "Happy Place", number: 1, disc: 1, durationMs: 146006 },
+  { title: "Happy Place (Instrumental)", number: 2, disc: 1, durationMs: 146006 },
+];
+const artistCreditFiles = artistCreditTracks.map((t, i) => {
+  const filename = (i + 1) + ". Happy Place" + (i ? " - Instrumental" : "") + " - ZAMination, Zachary Preciado.flac";
+  return file(t, { filename, folder: "Music/ZAMination/Happy Place", path: "Music/ZAMination/Happy Place/" + filename, lengthSeconds: 146 });
+});
+assert.equal(matchReleaseFiles(artistCreditFiles, artistCreditTracks, "ZAMination", "Happy Place").length, 2,
+  "Trailing selected-artist credits retain the original and instrumental identities of a self-titled release");
+for (const patch of [
+  { filename: "01. Happy Place - Other Artist, ZAMination.flac" },
+  { filename: "01. Happy Place - ZAMination Covers, Zachary Preciado.flac" },
+  { filename: "01. Happy Place - ZAMination, Guest Remix.flac" },
+  { filename: "01. Happy Place - Instrumental - ZAMination, Zachary Preciado.flac" },
+  { filename: "01. Happy Place (Live) - ZAMination, Zachary Preciado.flac" },
+  { filename: "02. Happy Place - ZAMination, Zachary Preciado.flac" },
+  { filename: "Happy Place - ZAMination, Zachary Preciado.flac" },
+  { lengthSeconds: null },
+  { lengthSeconds: 150 },
+  { path: "Music/ZAMination/Happy Place/CD2/01. Happy Place.flac" },
+]) assert.equal(matchReleaseFiles([{ ...artistCreditFiles[0], ...patch }], [artistCreditTracks[0]], "ZAMination", "Happy Place").length, 0,
+  "Trailing artist credits require exact selected artist, title/version, position and close verified duration: " + JSON.stringify(patch));
+
 const numeric = { ...tracks[0], title: "8/31" };
 assert.equal(matchReleaseFiles([file(numeric, { filename: "01. 8_31.flac" })], [numeric], "Artist", "Album").length, 1);
 assert.equal(matchReleaseFiles([file(numeric, { filename: "01. 31.flac" })], [numeric], "Artist", "Album").length, 0);
+const symbols: CatalogueTrack[] = [
+  { title: "&", number: 2, disc: 1, durationMs: 194000 },
+  { title: "+ +", number: 7, disc: 1, durationMs: 58000 },
+];
+assert.equal(matchReleaseFiles(symbols.map((t) => file(t)), symbols, "Artist", "Album").length, 2,
+  "Symbol-only tracks retain distinct exact identities");
+for (const filename of ["07 - ++.flac", "07 - \uFF0B \uFF0B.flac", "07 - Artist - + + [FLAC].flac"]) {
+  assert.equal(matchReleaseFiles([file(symbols[1], { filename })], [symbols[1]], "Artist", "Album").length, 1,
+    "Symbol titles support ordinary spacing, Unicode and filename annotations: " + filename);
+}
+for (const patch of [
+  { filename: "02 - + +.flac" },
+  { filename: "02 - .flac" },
+  { filename: "02 - _.flac" },
+  { filename: "02 - & (Live).flac" },
+  { filename: "02 - & (Remix).flac" },
+  { isLocked: true },
+  { extension: "mp3", bitrate: 128 },
+  { lengthSeconds: 240 },
+  { path: "Artist/Album/CD2/02 - &.flac" },
+]) assert.equal(matchReleaseFiles([file(symbols[0], patch)], [symbols[0]], "Artist", "Album").length, 0,
+  "Symbol matches require exact identity and existing source safeguards: " + JSON.stringify(patch));
+assert.equal(inspectReleaseFiles([file(symbols[1])], [symbols[1]], "Artist", "Album", symbols).picks.length, 1,
+  "Different symbol titles do not become an ambiguous duplicate when repairing only missing tracks");
 const repeated = [{ ...tracks[0], title: "Intro" }, { ...tracks[0], title: "Intro", disc: 2 }];
 const discs = repeated.map((t) => file(t, { id: "disc" + t.disc, path: "Artist/Album/CD" + t.disc + "/01 Intro.flac", folder: "Artist/Album/CD" + t.disc, filename: "01 Intro.flac" }));
 assert.equal(matchReleaseFiles(discs, repeated, "Artist", "Album").length, 2);
@@ -184,4 +232,4 @@ try {
   envKeys.forEach((key, i) => { if (previous[i] === undefined) delete process.env[key]; else process.env[key] = previous[i]; });
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
-console.log("PASS: late peers, manual previews, split sources, source quality, filename variants, numeric titles, disc identity, diagnostic errors and video-only bonus media.");
+console.log("PASS: late peers, manual previews, split sources, source quality, filename variants, numeric and symbol titles, disc identity, diagnostic errors and video-only bonus media.");
