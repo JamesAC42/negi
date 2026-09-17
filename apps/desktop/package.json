@@ -12,6 +12,7 @@
     "discovery-candidates:smoke": "tsx src/scripts/discovery-candidates-smoke.ts",
     "electron-health:smoke": "tsx src/scripts/electron-health-smoke.tsx",
     "playback-progress:smoke": "tsx src/scripts/playback-progress-smoke.ts",
+    "color-picker:smoke": "node src/scripts/color-picker-smoke.mjs",
     "appearance:smoke": "tsx src/scripts/appearance-smoke.ts",
     "typecheck": "tsc --noEmit",
     "agent-workspace:smoke": "node src/scripts/agent-workspace-smoke.mjs",

@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
+import { useState, type CSSProperties, type ReactElement } from "react";
 import { Check, ImagePlus, Moon, Palette, Sun, Trash2, Type } from "lucide-react";
 import {
   accentPalettes, appearanceModes, applyAppearanceLook, applyThemePreset, backgroundName,
@@ -6,6 +6,7 @@ import {
   type AccentColorId, type AppearanceMode, type AppearanceProfile, type AppearanceSettings, type DisplayFontId
 } from "../appearance";
 import { StyledSelect } from "./StyledSelect";
+import { useColorDraft } from "../use-color-draft";
 import "./appearance-studio.css";
 
 type Props = {
@@ -106,7 +107,7 @@ export function AppearanceStudio({ appearance, setAppearance, onSelectBackground
               style={{ "--swatch": palette[mode].acc } as CSSProperties} aria-label={`Use ${palette.label} highlight`} aria-pressed={profile.accentOverride && !profile.customAccent && profile.accent === id}
               onClick={() => patch({ accent: id, accentOverride: true, customAccent: null })}><i /><span>{palette.label}</span></button>)}
         </div>
-        <ColorControl value={style["--acc"]} onChange={(customAccent) => patch({ customAccent, accentOverride: true })} />
+        <ColorControl key={mode} value={style["--acc"]} onChange={(customAccent) => patch({ customAccent, accentOverride: true })} />
       </section>
 
       <section className="studioSection" aria-labelledby="studio-background">
@@ -180,11 +181,9 @@ function ImagePreview({ url, name }: { url: string; name: string }): ReactElemen
 }
 
 function ColorControl({ value, onChange }: { value: string; onChange(value: string): void }): ReactElement {
-  const [hex, setHex] = useState(value);
-  useEffect(() => setHex(value), [value]);
-  const valid = /^#[0-9a-f]{6}$/i.test(hex);
-  return <div className="studioCustomColor"><label><span>Custom highlight</span><input type="color" aria-label="Custom highlight color" value={value} onChange={(e) => onChange(e.target.value)} /></label>
-    <label><span>Hex color</span><input type="text" aria-label="Custom highlight hex" value={hex} maxLength={7} spellCheck={false} aria-invalid={!valid} onChange={(e) => { setHex(e.target.value); if (/^#[0-9a-f]{6}$/i.test(e.target.value)) onChange(e.target.value); }} /></label>
+  const { hex, color, valid, edit, flush } = useColorDraft(value, onChange);
+  return <div className="studioCustomColor"><label><span>Custom highlight</span><input type="color" aria-label="Custom highlight color" value={color} onChange={(e) => edit(e.target.value)} onBlur={flush} /></label>
+    <label><span>Hex color</span><input type="text" aria-label="Custom highlight hex" value={hex} maxLength={7} spellCheck={false} aria-invalid={!valid} onChange={(e) => edit(e.target.value)} onBlur={flush} onKeyDown={(e) => { if (e.key === "Enter") flush(); }} /></label>
     {!valid ? <small>Use a six-digit color, such as #62d7f4.</small> : <small>Applies to {" "}<span className="studioAccentExample">buttons, signals & your onion icon</span>.</small>}
   </div>;
 }

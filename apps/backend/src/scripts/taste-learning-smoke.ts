@@ -6,6 +6,7 @@ import { openMusicDatabase } from "@music-os/db";
 import { tasteProfileResponseSchema } from "@music-os/core";
 import { TasteProfileService } from "../services/taste-profile-service.js";
 import { PlaybackHistoryService } from "../services/playback-history-service.js";
+import { LibraryRepository } from "../services/library-repository.js";
 
 const fixture = await mkdtemp(join(tmpdir(), "music-os-taste-learning-"));
 const path = join(fixture, "fixture.sqlite");
@@ -21,6 +22,26 @@ try {
     }
   }
   assert.equal(taste.getProfile().learned?.stats.qualifiedPlays, 0);
+
+  // Library upserts must tolerate several edits before taste refreshes dirty tracks.
+  const library = new LibraryRepository(db);
+  library.setFileFavoriteStatus("two", { liked: true, disliked: false });
+  assert.equal(library.setFileFavoriteStatus("two", { liked: false }).liked, false);
+  library.setFileRating("two", 5);
+  library.setFileRating("two", null);
+  library.setFileFavoriteStatus("two", { disliked: true });
+  library.setFileFavoriteStatus("two", { liked: true, disliked: false });
+  library.setFileMetadataOverrides("two", { genre: "Ambient", artist: "Listening Artist" });
+  library.setFileMetadataOverrides("two", { genre: "Electronic" });
+  assert.equal((db.prepare("SELECT COUNT(*) AS count FROM taste_learning_dirty WHERE file_id = 'two'").get() as { count: number }).count, 1);
+  assert.equal(taste.getProfile().learned?.stats.likedTracks, 1);
+  assert(taste.getProfile().learned?.profile.preferredGenres.includes("Electronic"));
+  library.setFileFavoriteStatus("two", { liked: false });
+  assert.equal(taste.getProfile().learned?.stats.likedTracks, 0, "unliking must invalidate cached taste");
+  db.prepare("DELETE FROM file_preferences WHERE file_id = 'two'").run();
+  db.prepare("DELETE FROM file_metadata_overrides WHERE file_id = 'two'").run();
+  assert.equal(taste.getProfile().learned?.stats.trackedFiles, 0);
+
   // A started event and a failed/zero-position load cannot create positive taste.
   history.recordStarted("failed");
   history.recordEnded({ fileId: "failed", reason: "stop", positionMs: 0, durationMs: 180000 });
@@ -84,7 +105,7 @@ try {
   assert.equal(taste.getProfile().learned?.signals.length, 0, "removed plays must not leave stale positive taste");
   db.prepare("DELETE FROM file_preferences WHERE file_id = 'two'").run();
   assert.equal(taste.getProfile().learned?.stats.trackedFiles, 0, "removing preferences should clear obsolete evidence");
-  console.log(JSON.stringify({ ok: true, checks: ["qualified listening", "failed playback exclusion", "metadata dimensions", "cached reads", "explicit precedence", "likes and dislikes", "metadata invalidation", "cautious skips", "persistence", "history repair"] }, null, 2));
+  console.log(JSON.stringify({ ok: true, checks: ["repeated Library preference and metadata upserts", "unlike cache invalidation", "qualified listening", "failed playback exclusion", "metadata dimensions", "cached reads", "explicit precedence", "likes and dislikes", "metadata invalidation", "cautious skips", "persistence", "history repair"] }, null, 2));
 } finally {
   db.close();
   await rm(fixture, { recursive: true, force: true });

@@ -1,7 +1,8 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { type Dispatch, type SetStateAction } from "react";
 import { Check, SlidersHorizontal } from "lucide-react";
 import type { NowPlayingColorMode, NowPlayingSettings as Preferences } from "../now-playing-settings";
 import { StyledSelect } from "./StyledSelect";
+import { useColorDraft } from "../use-color-draft";
 import "./now-playing-settings.css";
 
 const visualizers = [
@@ -17,9 +18,6 @@ export function NowPlayingSettings({ settings, setSettings, saveError }: {
   setSettings: Dispatch<SetStateAction<Preferences>>;
   saveError: string | null;
 }) {
-  const [colorText, setColorText] = useState(settings.customColor);
-  useEffect(() => setColorText(settings.customColor), [settings.customColor]);
-  const invalidColor = !/^#[0-9a-f]{6}$/i.test(colorText);
   const patch = (change: Partial<Preferences>) => setSettings(current => ({ ...current, ...change }));
   return <section className="nowPlayingSettings" id="settings-now-playing" aria-labelledby="now-playing-settings-title">
     <header className="studioHeading">
@@ -52,14 +50,20 @@ export function NowPlayingSettings({ settings, setSettings, saveError }: {
           options={[{ value: "artwork", label: "Album art · dynamic" }, { value: "theme", label: "Theme color" }, { value: "custom", label: "Custom color" }]}
           onChange={colorMode => patch({ colorMode })} />
       </div>
-      {settings.colorMode === "custom" ? <div className="nowPlayingCustomColor">
-        <label><span>Custom color</span><input aria-label="Choose Now Playing custom color" type="color" value={settings.customColor}
-          onChange={event => patch({ customColor: event.target.value })} /></label>
-        <label><span>Hex color</span><input aria-label="Now Playing hex color" type="text" value={colorText} maxLength={7}
-          spellCheck={false} aria-invalid={invalidColor} aria-describedby={invalidColor ? "now-playing-color-error" : undefined}
-          onChange={event => { const value = event.target.value; setColorText(value); if (/^#[0-9a-f]{6}$/i.test(value)) patch({ customColor: value.toLowerCase() }); }} /></label>
-        {invalidColor ? <small id="now-playing-color-error" role="status">Use a six-digit hex color, such as #c3f53c.</small> : null}
-      </div> : null}
+      {settings.colorMode === "custom" ? <CustomColorControl value={settings.customColor}
+        onChange={customColor => patch({ customColor })} /> : null}
     </fieldset>
   </section>;
+}
+
+function CustomColorControl({ value, onChange }: { value: string; onChange(color: string): void }) {
+  const { hex, color, valid, edit, flush } = useColorDraft(value, onChange);
+  return <div className="nowPlayingCustomColor">
+    <label><span>Custom color</span><input aria-label="Choose Now Playing custom color" type="color" value={color}
+      onChange={event => edit(event.target.value)} onBlur={flush} /></label>
+    <label><span>Hex color</span><input aria-label="Now Playing hex color" type="text" value={hex} maxLength={7}
+      spellCheck={false} aria-invalid={!valid} aria-describedby={!valid ? "now-playing-color-error" : undefined}
+      onChange={event => edit(event.target.value)} onBlur={flush} onKeyDown={event => { if (event.key === "Enter") flush(); }} /></label>
+    {!valid ? <small id="now-playing-color-error" role="status">Use a six-digit hex color, such as #c3f53c.</small> : null}
+  </div>;
 }
