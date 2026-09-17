@@ -7727,7 +7727,7 @@ img.playerArt {
   pointer-events: none;
   transform: scale(var(--beat-glow-scale));
   transform-origin: center;
-  will-change: filter, opacity, transform;
+  will-change: opacity, transform;
 }
 
 .nowPlayingModalArt.placeholder {

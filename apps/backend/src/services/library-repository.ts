@@ -435,6 +435,14 @@ export class LibraryRepository {
     return { ...file, displayTags: this.getDisplayTags(file.id) };
   }
 
+  /** Artwork only needs the source location/version, never the playback history. */
+  getArtworkFile(fileId: string): { path: string; mtime: string } {
+    const file = this.db.prepare("SELECT path, mtime FROM files WHERE id = ?").get(fileId) as
+      { path: string; mtime: string } | undefined;
+    if (!file) throw new Error(`File not found: ${fileId}`);
+    return file;
+  }
+
   countFiles(query = ""): number {
     const trimmed = query.trim().toLowerCase();
     if (!trimmed) {
@@ -475,6 +483,18 @@ export class LibraryRepository {
       )
       .all() as FileRow[];
 
+    return this.groupAlbumRows(rows, limit, offset);
+  }
+
+  /** Avoid aggregating playback history for artwork lookup/index refreshes. */
+  listArtworkAlbumGroups(): AlbumGroup[] {
+    const rows = this.db.prepare(
+      "SELECT files.* FROM files WHERE staged = 0 AND missing = 0 ORDER BY date_updated DESC"
+    ).all() as FileRow[];
+    return this.groupAlbumRows(rows, Number.POSITIVE_INFINITY, 0);
+  }
+
+  private groupAlbumRows(rows: FileRow[], limit: number, offset: number): AlbumGroup[] {
     const files = this.mapRowsWithDisplayTags(rows);
     const groups = new Map<string, AlbumGroup>();
     for (const fileWithTags of files) {

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { recordAlbumKey, RECORD_NEEDLE_DROP_MS, RECORD_PLAYBACK_START_MS, RECORD_RETURN_MS, type AlbumTransition, type LibraryFilesResponse,
   type PlaybackStateResponse, type RecordAlbum } from "@music-os/core";
 import { getArtworkObjectUrl } from "../artwork-requests";
-import { arc, clamp, createRecordAnimationClock, ease, easeIn, mix, phase, recordAlbumProgress, recordChangeLabel, recordChangeTiming as timing } from "../record-player-state";
+import { arc, clamp, createRecordAnimationClock, ease, easeIn, mix, phase, recordAlbumProgress, recordChangeTiming as timing } from "../record-player-state";
 import { TurntableScene } from "./turntable/TurntableScene";
 import type { TurntableLayout } from "./turntable/choreography";
 import "./record-player.css";
@@ -251,10 +251,8 @@ function RecordCeremony({ ceremony, anchorRef, artworkUrl, progress, layout, onA
         progress={incoming ? 0 : progress} elapsed={reduced ? RECORD_NEEDLE_DROP_MS : Math.min(elapsed, RECORD_NEEDLE_DROP_MS)} />
     </div>
     <div className="recordCeremonyCopy" style={{ top: centerY + height / 2 + 4, opacity: (reduced ? 1 : clamp(enter)) * (1 - exit) }}>
-      <span className="recordCeremonyEyebrow">{preview ? "A LITTLE LISTENING RITUAL · PREVIEW" : "BETWEEN RECORDS"}</span>
+      <span className="recordCeremonyEyebrow">BETWEEN RECORDS</span>
       <h2>{transition.to.album}</h2><p>{transition.to.artist}</p>
-      <span className="recordCeremonyStatus" role="status">{error || (transition.paused ? "Ready when you are" :
-        returnAt ? "Enjoy the record" : reduced ? "Preparing your next album" : recordChangeLabel(elapsed))}</span>
       <div className="recordCeremonyControls">
         <button type="button" onClick={() => void skip()}>{preview ? "Close preview" : "Play now"}<kbd>Esc</kbd></button>
         {!preview ? <button type="button" onClick={() => void callbacks.current.onStop().catch(() => setError("Could not stop playback. Try again."))}>Stop</button> : null}

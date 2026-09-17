@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   Disc3,
+  ChevronRight,
   Bird,
   History,
   Sparkles,
@@ -362,36 +363,40 @@ export function AlbumCompletion({
   return (
     <>
       {incomplete && (
-        <div className={"exploreCompletion" + (compact ? " compact" : "")}>
-          <span className="exploreEyebrow">{incomplete.source === "catalogue" ? "FINISH THE RECORD" : "CHECK THE RECORD"}</span>
-          <strong>
-            {incomplete.source !== "catalogue" && "Track tags suggest "}
-            {incomplete.presentTracks} / {incomplete.expectedTracks} tracks
-          </strong>
-          {incomplete.source === "catalogue" && incomplete.missingTracks ? (
-            <ul className="exploreMissingTracks" aria-label="Missing tracks">
-              {incomplete.missingTracks.map((track) => (
-                <li key={track.disc + ":" + track.number}>
-                  Disc {track.disc}, track {track.number}: {track.title}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <>
-              {incomplete.missingTrackPositions?.length ? (
-                <ul className="exploreMissingTracks" aria-label="Track positions suggested by tags">
-                  {incomplete.missingTrackPositions.map((track) => (
-                    <li key={track.disc + ":" + track.number}>Disc {track.disc}, track {track.number}</li>
+        <div className={"albumCompletionNotice" + (compact ? " compact" : "")}>
+          <details key={album.id} className="albumCompletionDetails">
+            <summary>
+              <ChevronRight size={13} aria-hidden="true" />
+              <span>{incomplete.expectedTracks - incomplete.presentTracks} {incomplete.source === "catalogue" ? "missing tracks" : "possible missing tracks"}</span>
+              <span className="albumCompletionCount">{incomplete.presentTracks} / {incomplete.expectedTracks}</span>
+            </summary>
+            <div className="albumCompletionBody">
+              {incomplete.source === "catalogue" && incomplete.missingTracks ? (
+                <ul className="exploreMissingTracks" aria-label="Missing tracks">
+                  {incomplete.missingTracks.map((track) => (
+                    <li key={track.disc + ":" + track.number}>
+                      Disc {track.disc}, track {track.number}: {track.title}
+                    </li>
                   ))}
                 </ul>
-              ) : null}
-              <p>Track tags suggest {incomplete.expectedTracks - incomplete.presentTracks} missing tracks. Check the official track list before finding sources.</p>
-            </>
-          )}
-          {incomplete.source === "catalogue" && (
-            <p>{incomplete.expectedTracks - incomplete.presentTracks} tracks missing from this edition. Find a high-quality source and complete this album automatically.</p>
-          )}
-          <button disabled={busy} onClick={() => void acquire()}>
+              ) : (
+                <>
+                  {incomplete.missingTrackPositions?.length ? (
+                    <ul className="exploreMissingTracks" aria-label="Track positions suggested by tags">
+                      {incomplete.missingTrackPositions.map((track) => (
+                        <li key={track.disc + ":" + track.number}>Disc {track.disc}, track {track.number}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <p>Track tags suggest {incomplete.expectedTracks - incomplete.presentTracks} missing tracks. Check the official track list before finding sources.</p>
+                </>
+              )}
+              {incomplete.source === "catalogue" && (
+                <p>{incomplete.expectedTracks - incomplete.presentTracks} tracks missing from this edition. Find a high-quality source and complete this album automatically.</p>
+              )}
+            </div>
+          </details>
+          <button className="albumCompletionAction" disabled={busy} onClick={() => void acquire()}>
             <Sparkles size={15} />
             {busy ? "Dispatching…" : incomplete.source === "catalogue" ? "Complete album" : "Check album"}
           </button>

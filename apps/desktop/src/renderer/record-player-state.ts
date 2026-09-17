@@ -68,11 +68,4 @@ export const recordChangeTiming = {
   needleDrop: RECORD_NEEDLE_DROP_MS
 } as const;
 
-export function recordChangeLabel(elapsed: number): string {
-  if (elapsed < recordChangeTiming.armParked) return "Lifting the tonearm";
-  if (elapsed < recordChangeTiming.sleeved) return "Putting this record away";
-  if (elapsed < recordChangeTiming.sleeveArrived) return "A new album, a new atmosphere";
-  if (elapsed < recordChangeTiming.vinylDown) return "Setting the next record down";
-  if (elapsed < recordChangeTiming.needleDrop) return "Dropping the needle";
-  return "Letting the record turn";
-}
+// Ceremony status copy is intentionally omitted.

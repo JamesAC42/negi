@@ -31,21 +31,29 @@ export function useExploreJobs<T extends { id: string; status: string }>(
   useEffect(() => {
     let live = true;
     let pending = false;
+    let snapshot = "";
+    const controller = new AbortController();
     async function refresh() {
       if (pending) return;
       pending = true;
       try {
-        const data = await exploreApi<{ jobs: T[] }>(path);
+        const data = await exploreApi<{ jobs: T[] }>(path, undefined, controller.signal);
         if (!live) return;
+        let completed = false;
         for (const j of data.jobs)
           if (
             j.status === "succeeded" &&
             previous.current.has(j.id) &&
             previous.current.get(j.id) !== "succeeded"
           )
-            libraryChanged();
+            completed = true;
         previous.current = new Map(data.jobs.map((j) => [j.id, j.status]));
-        setJobs(data.jobs);
+        const nextSnapshot = JSON.stringify(data.jobs);
+        if (nextSnapshot !== snapshot) {
+          snapshot = nextSnapshot;
+          setJobs(data.jobs);
+        }
+        if (completed) libraryChanged();
         setError("");
       } catch (e) {
         if (live) setError(errorMessage(e));
@@ -59,6 +67,7 @@ export function useExploreJobs<T extends { id: string; status: string }>(
     const timer = window.setInterval(() => void refresh(), 2500);
     return () => {
       live = false;
+      controller.abort();
       clearInterval(timer);
       window.removeEventListener("explore-jobs-changed", onChanged);
     };

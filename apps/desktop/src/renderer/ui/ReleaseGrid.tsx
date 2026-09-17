@@ -1,3 +1,4 @@
+import { useArtworkVisibility } from "./useArtworkVisibility";
 import { getArtworkObjectUrl } from "../artwork-requests";
 import { Fragment, useEffect, useRef, useState } from "react";
 import {
@@ -56,7 +57,7 @@ export function ReleaseGrid({
           album={album}
           artist={artist}
           artistId={artistId}
-          eagerArtwork={index < 6}
+          eagerArtwork={false}
           order={index * 2}
           panelOrder={(Math.floor(index / columns) + 1) * columns * 2 - 1}
           open={expanded === album.id}
@@ -83,23 +84,7 @@ function Cover({
   const [src, setSrc] = useState(local || remote);
   const [status, setStatus] = useState("loading");
   const [displaySrc, setDisplaySrc] = useState<string | null>(null);
-  const [visible, setVisible] = useState(eager);
-  const frame = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (visible) return;
-    if (eager || !frame.current || typeof IntersectionObserver === "undefined") {
-      setVisible(true);
-      return;
-    }
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        setVisible(true);
-        observer.disconnect();
-      }
-    }, { rootMargin: "200px" });
-    observer.observe(frame.current);
-    return () => observer.disconnect();
-  }, [eager, visible]);
+  const { ref: frame, visible } = useArtworkVisibility(eager);
   useEffect(() => {
     setDisplaySrc(null);
     if (!visible) return;
@@ -122,7 +107,7 @@ function Cover({
   return (
     <span ref={frame} className={"releaseArtwork " + status}>
       <Disc3 size={40} aria-hidden="true" />
-      {status !== "missing" && displaySrc && (
+      {status !== "missing" && visible && displaySrc && (
         <img
           src={displaySrc}
           alt=""
@@ -476,8 +461,7 @@ function ReleaseCard({
                   {release.tracks.map((t) => (
                     <li key={t.disc + "-" + t.number}>
                       <span className="releaseTrackNumber">
-                        {new Set(release.tracks.map((track) => track.disc))
-                          .size > 1
+                        {discs > 1
                           ? t.disc + "."
                           : ""}
                         {String(t.number).padStart(2, "0")}

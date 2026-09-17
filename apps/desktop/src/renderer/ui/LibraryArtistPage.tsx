@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Disc3, ArrowUpRight } from "lucide-react";
 import type { AcquisitionJob, AlbumGroup, CatalogueArtist, CatalogueArtistProfile, CatalogueProvider, CatalogueSort } from "@music-os/core";
 import { ArtworkImage } from "./ArtworkImage";
@@ -38,6 +38,10 @@ export function LibraryArtistPage({ artist, albums = [], allAlbums, initialCatal
     return () => { request.abort(); window.removeEventListener("music-library-changed", refresh); };
   }, [allAlbums]);
   const current = trail[trail.length - 1];
+  const artistAlbums = useMemo(() => {
+    const key = identityKey(current.name);
+    return library.filter((album) => identityKey(album.artist) === key);
+  }, [library, current.name]);
   const goTo = (index: number) => setTrail((old) => old.slice(0, index + 1));
   const openArtist = (next: CatalogueArtist) => setTrail((old) => {
     if (next.requiresArtistMatch) {
@@ -58,7 +62,7 @@ export function LibraryArtistPage({ artist, albums = [], allAlbums, initialCatal
   </nav>;
   return <div className="artistJourney" ref={frame}>
     <ArtistProfileContent key={`${current.catalogue?.id ?? current.name}-${trail.length}`} artist={current.name}
-      albums={library.filter((album) => identityKey(album.artist) === identityKey(current.name))}
+      albums={artistAlbums}
       initialCatalogueArtist={resolvedIdentities.current.get(current.catalogue?.id ?? current.name) ?? current.catalogue} onBack={onBack} onOpenAlbum={onOpenAlbum}
       navigation={navigation} onOpenArtist={openArtist} libraryError={libraryError} onResolvedArtist={(resolved) => resolvedIdentities.current.set(current.catalogue?.id ?? current.name, resolved)} onCanonicalArtist={(id) => canonicalIdentities.current.set(current.catalogue?.id ?? current.name, id)}/>
   </div>;
@@ -81,6 +85,8 @@ function ArtistProfileContent({ artist, albums = [], initialCatalogueArtist, onO
   const [sort, setSort] = useState<CatalogueSort>("newest");
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
+  const [collectionLimit, setCollectionLimit] = useState(24);
+  const sortedAlbums = useMemo(() => [...albums].sort((a, b) => (b.year ?? "").localeCompare(a.year ?? "")), [albums]);
   const { jobs, error: jobsError } = useExploreJobs<AcquisitionJob>("/explore/albums/jobs");
   const artistJobs = jobs.filter((job) => identityKey(job.artist) === identityKey(artist));
   useEffect(() => {
@@ -118,7 +124,7 @@ function ArtistProfileContent({ artist, albums = [], initialCatalogueArtist, onO
   return <article className="libraryArtistPage discographyPage" aria-label={`${artist} artist overview`}>
     {navigation}
     <header className="artistProfileHero">
-      <div className="artistProfilePortrait"><Disc3 size={64} aria-hidden="true" />{portrait && <img key={portrait} src={portrait} alt={artist} onError={(e) => { e.currentTarget.style.display = "none"; }} />}</div>
+      <div className="artistProfilePortrait"><Disc3 size={64} aria-hidden="true" />{portrait && <img key={portrait} src={portrait} alt={artist} decoding="async" onError={(e) => { e.currentTarget.style.display = "none"; }} />}</div>
       <div><span className="exploreEyebrow">ARTIST OVERVIEW</span><h1 tabIndex={-1}>{artist}</h1><p>{details?.description || "A closer look at the artist behind your collection."}</p><div className="exploreTags">{details?.tags.map((tag) => <span key={tag}>{tag}</span>)}</div></div>
     </header>
     <div className="artistProfileStats"><div><strong>{albums.length}</strong><span>albums in your library</span></div><div><strong>{albums.reduce((sum, album) => sum + album.fileCount, 0)}</strong><span>local tracks</span></div><div><strong>{details?.tags.length || "—"}</strong><span>genres & tags</span></div></div>
@@ -140,7 +146,7 @@ function ArtistProfileContent({ artist, albums = [], initialCatalogueArtist, onO
     </section>
     {selected && <div id="artist-connections"><SimilarArtists key={selected.id} artist={selected} onOpenArtist={onOpenArtist} onCanonicalArtist={onCanonicalArtist} onFindCatalogueMatch={() => { setProvider("musicbrainz"); document.getElementById("artist-discography")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}/></div>}
     {libraryError && <p className="exploreFootnote">{libraryError}</p>}
-    {albums.length > 0 && <section className="artistProfileCollection"><div className="artistProfileSectionHeading"><h2>In your collection</h2><span>{albums.length} albums</span></div><div className="artistProfileLocalAlbums">{[...albums].sort((a,b) => (b.year ?? "").localeCompare(a.year ?? "")).map((album) => <button key={album.id} onClick={() => { if (onOpenAlbum) onOpenAlbum(album.id); else { setQuery(album.album); document.getElementById("artist-discography")?.scrollIntoView({ behavior: "smooth", block: "start" }); } }}><span className="artistProfileLocalArt"><Disc3 size={24}/><ArtworkImage src={`http://127.0.0.1:47831/artwork/album/${encodeURIComponent(album.id)}`} alt=""/></span><strong>{album.album}</strong><small>{album.year || "Undated"} · {album.fileCount} tracks</small></button>)}</div></section>}
+    {albums.length > 0 && <section className="artistProfileCollection"><div className="artistProfileSectionHeading"><h2>In your collection</h2><span>{albums.length} albums</span></div><div className="artistProfileLocalAlbums">{sortedAlbums.slice(0, collectionLimit).map((album) => <button key={album.id} onClick={() => { if (onOpenAlbum) onOpenAlbum(album.id); else { setQuery(album.album); document.getElementById("artist-discography")?.scrollIntoView({ behavior: "smooth", block: "start" }); } }}><span className="artistProfileLocalArt"><Disc3 size={24}/><ArtworkImage src={`http://127.0.0.1:47831/artwork/album/${encodeURIComponent(album.id)}`} alt=""/></span><strong>{album.album}</strong><small>{album.year || "Undated"} · {album.fileCount} tracks</small></button>)}</div>{albums.length > collectionLimit && <button className="secondary" onClick={() => setCollectionLimit((limit) => limit + 24)}>Show more collection albums ({albums.length - collectionLimit} more)</button>}</section>}
     <section id="artist-discography"><div className="artistProfileSectionHeading"><div><span className="exploreEyebrow">KEEP EXPLORING</span><h2>Discography</h2></div>{selected && <button className="secondary" onClick={() => setChoosing(!choosing)}>Change artist match</button>}</div>
       <div className="artistProfileControls"><select aria-label="Catalogue source" value={provider} onChange={(e) => setProvider(e.target.value as CatalogueProvider)}><option value="apple">Apple catalogue</option><option value="musicbrainz">MusicBrainz catalogue</option></select><select aria-label="Release order" value={sort} onChange={(e) => setSort(e.target.value as CatalogueSort)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="title">A–Z</option></select></div>
       {searching && <p role="status">Finding catalogue matches…</p>}{searchError && <p role="alert" className="exploreError">{searchError} <button onClick={() => setSearchRetry((n) => n + 1)}>Retry artist lookup</button></p>}

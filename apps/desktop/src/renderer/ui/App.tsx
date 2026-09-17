@@ -1,10 +1,16 @@
-import { SongQueueRow } from "./SongQueueRow";
+import { findCommandTracks } from "../command-search";
+import { sortAlbumCollection, sortArtistCollection } from "./album-sort";
+import { indexAlbumFavorites, normalizeAlbumFavoriteEntry } from "../album-favorites";
+import { VirtualArtistList, type ArtistListHandle } from "./VirtualArtistList";
+import { useArtworkVisibility } from "./useArtworkVisibility";
+import { SongPlaylistContext, SongQueueRow } from "./SongQueueRow";
 import { NowPlayingViews } from "./NowPlayingViews";
 import { createNowPlayingMotion, type NowPlayingMotion } from "../now-playing-motion";
+import { createVisualizerAnimation } from "../visualizer-animation";
 import { createVisualizerCanvas, type VisualizerCanvas } from "../visualizer-canvas";
 import { recordAlbumProgress } from "../record-player-state";
 import { mergePlaybackState, shouldRefreshPlaybackHistory } from "../playback-state.js";
-import { artworkObjectUrls, getArtworkObjectUrl } from "../artwork-requests";
+import { getArtworkObjectUrl, invalidateArtworkObjectUrl } from "../artwork-requests";
 import { AppearanceStudio } from "./AppearanceStudio";
 import { addBackgroundImage, appearanceStorageKey, curatedThemePresets, displayFonts, getAppearanceStyle, loadAppearanceSettings, type AppearanceMode, type AppearanceSettings, type SelectedBackgroundImage } from "../appearance";
 import { HomeInsights } from "./HomeInsights";
@@ -13,7 +19,7 @@ import "./home-journal.css";
 import { StyledSelect } from "./StyledSelect";
 import { LibraryArtistPage } from "./LibraryArtistPage";
 import { AlbumCompletion, ArtistExplorer, DiscoveryModes } from "./Explore";
-import { Fragment, memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowDownWideNarrow as LucideSort,
@@ -326,6 +332,9 @@ const emptyIncompleteAlbums: IncompleteAlbumsResponse = { albums: [], total: 0 }
 const emptyAlbumMergeSuggestions: AlbumMergeSuggestionsResponse = { suggestions: [], total: 0 };
 const emptyAlternateEditions: AlternateEditionGroupsResponse = { groups: [], total: 0 };
 const emptyAlbums: AlbumGroupsResponse = { albums: [], total: 0 };
+// Keep memoized library work stable while these resources have no snapshot.
+const emptyLibraryFiles: LibraryFile[] = [];
+const emptyPlaylists: Playlist[] = [];
 const libraryPageSize = 700;
 const albumPageSize = 180;
 const backendOrigin = "http://127.0.0.1:47831";
@@ -384,7 +393,6 @@ export function App(): ReactElement {
   const [alternateEditionsState, setAlternateEditionsState] = useState<AlternateEditionsState>({ status: "idle" });
   const [operationsState, setOperationsState] = useState<OperationsState>({ status: "loading" });
   const [albumsState, setAlbumsState] = useState<AlbumsState>({ status: "loading" });
-  const [homeRecentAlbums, setHomeRecentAlbums] = useState<AlbumGroupItem[]>([]);
   const [playlistsState, setPlaylistsState] = useState<PlaylistsState>({ status: "loading" });
   const [jobsState, setJobsState] = useState<JobsState>({ status: "loading", jobs: [] });
   const [tasteProfileState, setTasteProfileState] = useState<TasteProfileState>({ status: "loading" });
@@ -480,6 +488,7 @@ export function App(): ReactElement {
   const [artistViewTarget, setArtistViewTarget] = useState<ArtistViewTarget | null>(null);
   const [albumViewTarget, setAlbumViewTarget] = useState<AlbumViewTarget | null>(null);
   const [libraryWorkbenchTarget, setLibraryWorkbenchTarget] = useState<LibraryWorkbenchTarget | null>(null);
+  const [libraryNavigationKey, setLibraryNavigationKey] = useState(0);
   const [, setArtworkRevision] = useState(0);
   const [editingFile, setEditingFile] = useState<LibraryFile | null>(null);
   const [diagnosticsState, setDiagnosticsState] = useState<DiagnosticsState>({ status: "idle" });
@@ -719,6 +728,15 @@ export function App(): ReactElement {
     return () => window.removeEventListener("music-library-changed", refresh);
   }, [search]);
 
+  const initialAlbumsLoading = useRef(false);
+  async function loadInitialAlbums(): Promise<void> {
+    // Development effect replay and quick navigation share this initial read.
+    if (initialAlbumsLoading.current) return;
+    initialAlbumsLoading.current = true;
+    try { await refreshAlbums(); }
+    finally { initialAlbumsLoading.current = false; }
+  }
+
   async function refreshAlbums(): Promise<AlbumGroupsResponse | null> {
     try {
       const result = await listAlbums(0, Number.MAX_SAFE_INTEGER);
@@ -731,15 +749,6 @@ export function App(): ReactElement {
         albums: "albums" in current ? current.albums : emptyAlbums
       }));
       return null;
-    }
-  }
-
-  async function refreshHomeRecentAlbums(): Promise<void> {
-    try {
-      const result = await listAlbums(0, 6, "recent");
-      setHomeRecentAlbums(result.albums);
-    } catch {
-      // Keep the existing shelf if this supplementary Home request fails.
     }
   }
 
@@ -1153,14 +1162,13 @@ export function App(): ReactElement {
     }
     if (activeView === "Home") {
       if (albumsState.status === "loading") {
-        void refreshAlbums();
+        void loadInitialAlbums();
       }
-      void refreshHomeRecentAlbums();
       return;
     }
     if (activeView === "Library") {
       if (albumsState.status === "loading") {
-        void refreshAlbums();
+        void loadInitialAlbums();
       }
       if (tasteProfileState.status === "loading") {
         void refreshTasteProfile();
@@ -1168,7 +1176,7 @@ export function App(): ReactElement {
       return;
     }
     if ((activeView === "Albums" || activeView === "Artists") && albumsState.status === "loading") {
-      void refreshAlbums();
+      void loadInitialAlbums();
       return;
     }
     if (activeView === "Imports" && importsState.status === "loading") {
@@ -1749,7 +1757,6 @@ export function App(): ReactElement {
         }
       : current
     );
-    setHomeRecentAlbums((current) => current.map(reassignAlbum));
     setLibraryWorkbenchTarget({
       key: pageTargetRequestId.current++,
       artist,
@@ -1774,8 +1781,7 @@ export function App(): ReactElement {
       const [, reconciledAlbums] = await Promise.all([
         refreshLibrary(),
         refreshAlbums(),
-        refreshPlaylists(),
-        refreshHomeRecentAlbums()
+        refreshPlaylists()
       ]);
       const reconciledFocusedAlbum = reconciledAlbums?.albums.find((album) =>
         album.files.some((file) => focusedFileIds.has(file.id))
@@ -2025,6 +2031,24 @@ export function App(): ReactElement {
     replaceOperationBatch(result.batch);
     setSelectedLibraryFileIds(new Set());
     setActiveView("Operations");
+  }
+
+  async function handleAddSongToPlaylist(playlistId: string, fileId: string): Promise<"added" | "existing"> {
+    const proposed = await proposeAddTracksToPlaylist(playlistId, [fileId]);
+    replaceOperationBatch(proposed.batch);
+    const approved = await approveOperationBatch(proposed.batch.id);
+    replaceOperationBatch(approved.batch);
+    const applied = await applyOperationBatch(proposed.batch.id);
+    replaceOperationBatch(applied.batch);
+    if (applied.batch.status !== "applied") {
+      const error = applied.batch.operations.find((operation) => operation.error)?.error;
+      throw new Error(error && typeof error === "object" && "message" in error && typeof error.message === "string"
+        ? error.message : "Couldn't add this song to the playlist. Please try again.");
+    }
+    // A failed refresh must not turn a successful edit into a misleading save error.
+    await refreshPlaylists();
+    const after = applied.batch.operations[0]?.after;
+    return after && typeof after === "object" && "addedCount" in after && after.addedCount === 0 ? "existing" : "added";
   }
 
   async function handleProposeUpdatePlaylist(
@@ -2928,7 +2952,7 @@ export function App(): ReactElement {
   }
 
   const roots = "roots" in library ? library.roots : [];
-  const files = "files" in library ? library.files : [];
+  const files = "files" in library ? library.files : emptyLibraryFiles;
   const total = "total" in library ? library.total : 0;
   const duplicates = "duplicates" in duplicatesState ? duplicatesState.duplicates : emptyDuplicates;
   const metadataGaps = "gaps" in metadataGapsState ? metadataGapsState.gaps : emptyMetadataGaps;
@@ -2938,7 +2962,7 @@ export function App(): ReactElement {
   const alternateEditions = "editions" in alternateEditionsState ? alternateEditionsState.editions : emptyAlternateEditions;
   const albums = "albums" in albumsState ? albumsState.albums : emptyAlbums;
   const operationBatches = "batches" in operationsState ? operationsState.batches : [];
-  const playlists = "playlists" in playlistsState ? playlistsState.playlists : [];
+  const playlists = "playlists" in playlistsState ? playlistsState.playlists : emptyPlaylists;
   const selectedPlaylist = selectedPlaylistId ? playlists.find((playlist) => playlist.id === selectedPlaylistId) ?? null : null;
   const selectedRoot = roots[0] ?? null;
   const playbackFiles = useMemo(() => {
@@ -2980,6 +3004,7 @@ export function App(): ReactElement {
       return;
     }
     if (item === "Library") {
+      setLibraryNavigationKey((key) => key + 1);
       setLibraryWorkbenchTarget(null);
     }
     if (item === "Playlists") {
@@ -2999,6 +3024,7 @@ export function App(): ReactElement {
   }
 
   return (
+    <SongPlaylistContext.Provider value={{ playlists, status: playlistsState.status, onRefresh: refreshPlaylists, onAdd: handleAddSongToPlaylist }}>
     <main className={appShellClassName} style={appearanceStyle}>
       <header className="appTopbar">
         <button className="topBrand" type="button" onClick={() => navigateToView("Home")}>
@@ -3135,7 +3161,7 @@ export function App(): ReactElement {
           <HomeAnalyticsView
             onOpenSettings={() => navigateToView("Settings")}
             albumsState={albumsState}
-            recentAlbums={homeRecentAlbums}
+            onRefreshLibrary={refreshAlbums}
             libraryTotal={library.status === "ready" ? library.total : total}
             playback={playback}
             playbackBusy={playbackBusy}
@@ -3147,6 +3173,7 @@ export function App(): ReactElement {
         ) : activeView === "Library" ? (
           <LibraryWorkbenchView
             initialTarget={libraryWorkbenchTarget}
+            navigationKey={libraryNavigationKey}
             albumsState={albumsState}
             currentWaveform={currentWaveform.waveform}
             favoriteAlbumEntries={"profile" in tasteProfileState ? tasteProfileState.profile.profile.favoriteAlbums : []}
@@ -3603,6 +3630,7 @@ export function App(): ReactElement {
         />
       ) : null}
     </main>
+    </SongPlaylistContext.Provider>
   );
 }
 
@@ -3628,19 +3656,13 @@ function artistImageUrl(artist: string): string {
   return `${backendOrigin}/artist-image/${encodeURIComponent(artist)}`;
 }
 
-const loadedArtworkSrcs = new Set<string>();
 const failedArtworkSrcs = new Map<string, number>();
 const FAILED_ARTWORK_RETRY_MS = 30_000;
 
 function invalidateAlbumArtworkUrls(album: AlbumGroupItem): void {
   const urls = [artworkAlbumUrl(album.id), ...album.files.map((file) => artworkFileUrl(file.id))];
   for (const url of urls) {
-    const objectUrl = artworkObjectUrls.get(url);
-    if (objectUrl) {
-      URL.revokeObjectURL(objectUrl);
-    }
-    artworkObjectUrls.delete(url);
-    loadedArtworkSrcs.delete(url);
+    invalidateArtworkObjectUrl(url);
     failedArtworkSrcs.delete(url);
   }
   const version = Date.now();
@@ -3650,152 +3672,43 @@ function invalidateAlbumArtworkUrls(album: AlbumGroupItem): void {
   }
 }
 
-function Artwork({ src, className, eager }: { src: string | null; className: string; eager?: boolean }): ReactElement {
-  const frameRef = useRef<HTMLSpanElement | HTMLImageElement | null>(null);
-  const setFrameRef = (node: HTMLSpanElement | HTMLImageElement | null) => {
-    frameRef.current = node;
-  };
-  const [displaySrc, setDisplaySrc] = useState<string | null>(() => (src ? (artworkObjectUrls.get(src) ?? null) : null));
-  const [shouldLoad, setShouldLoad] = useState(() => Boolean(eager || (src && artworkObjectUrls.has(src))));
+const Artwork = memo(function Artwork({ src, className, eager }: { src: string | null; className: string; eager?: boolean }): ReactElement {
+  const { ref, visible } = useArtworkVisibility(Boolean(eager));
+  const [image, setImage] = useState<{ source: string | null; url: string | null; failed: boolean }>({ source: null, url: null, failed: false });
   const [retryVersion, setRetryVersion] = useState(0);
-  const [status, setStatus] = useState<"pending" | "ready" | "failed">(() =>
-    src && artworkObjectUrls.has(src) ? "ready" : !src || artworkFailedRecently(src) ? "failed" : "pending"
-  );
-
   useEffect(() => {
-    if (!src || artworkFailedRecently(src)) {
-      setDisplaySrc(null);
-      setStatus("failed");
-      return;
-    }
-    const cachedObjectUrl = artworkObjectUrls.get(src);
-    if (cachedObjectUrl) {
-      setDisplaySrc(cachedObjectUrl);
-      setShouldLoad(true);
-      setStatus("ready");
-      return;
-    }
-    setDisplaySrc(null);
-    setShouldLoad(Boolean(eager));
-    setStatus("pending");
-  }, [eager, src]);
-
-  useEffect(() => {
-    if (!src || shouldLoad || eager || artworkObjectUrls.has(src) || artworkFailedRecently(src)) {
-      return;
-    }
-    const node = frameRef.current;
-    if (!node || typeof IntersectionObserver === "undefined") {
-      setShouldLoad(true);
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setShouldLoad(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "640px" }
-    );
-    observer.observe(node);
-    return () => {
-      observer.disconnect();
-    };
-  }, [eager, shouldLoad, src]);
-
-  useEffect(() => {
-    if (!src || status !== "failed") {
-      return;
-    }
-    const failedAt = failedArtworkSrcs.get(src);
-    if (failedAt == null) {
-      return;
-    }
-    const remaining = Math.max(0, FAILED_ARTWORK_RETRY_MS - (Date.now() - failedAt));
-    const timer = window.setTimeout(() => {
-      failedArtworkSrcs.delete(src);
-      setStatus("pending");
-      setShouldLoad(true);
-      setRetryVersion((version) => version + 1);
-    }, remaining + 25);
-    return () => window.clearTimeout(timer);
-  }, [src, status]);
-
-  useEffect(() => {
-    if (!src || artworkFailedRecently(src)) {
-      setDisplaySrc(null);
-      setStatus("failed");
-      return;
-    }
-    const cachedObjectUrl = artworkObjectUrls.get(src);
-    if (cachedObjectUrl) {
-      setDisplaySrc(cachedObjectUrl);
-      setStatus("ready");
-      return;
-    }
-    if (!shouldLoad) {
-      setDisplaySrc(null);
-      setStatus("pending");
-      return;
-    }
-
-    let cancelled = false;
-    setDisplaySrc(null);
-    setStatus("pending");
+    setImage({ source: src, url: null, failed: false });
+    if (!src || !visible) return;
+    if (artworkFailedRecently(src)) { setImage({ source: src, url: null, failed: true }); return; }
     const controller = new AbortController();
-    void getArtworkObjectUrl(src, Boolean(eager), controller.signal)
-      .then((objectUrl) => {
-        if (cancelled) {
-          return;
-        }
-        failedArtworkSrcs.delete(src);
-        setDisplaySrc(objectUrl);
-        setStatus("ready");
-      })
-      .catch(() => {
-        if (cancelled) {
-          return;
-        }
-        failedArtworkSrcs.set(src, Date.now());
-        setDisplaySrc(null);
-        setStatus("failed");
-      });
+    void getArtworkObjectUrl(src, Boolean(eager), controller.signal).then(url => {
+      if (!controller.signal.aborted) { failedArtworkSrcs.delete(src); setImage({ source: src, url, failed: false }); }
+    }).catch(() => {
+      if (!controller.signal.aborted) { markArtworkFailed(src); setImage({ source: src, url: null, failed: true }); }
+    });
+    return () => controller.abort();
+  }, [src, eager, visible, retryVersion]);
+  useEffect(() => {
+    if (!src || !visible || image.source !== src || !image.failed) return;
+    const failedAt = failedArtworkSrcs.get(src);
+    if (failedAt == null) return;
+    const timer = window.setTimeout(() => {
+      failedArtworkSrcs.delete(src); setRetryVersion(version => version + 1);
+    }, Math.max(0, FAILED_ARTWORK_RETRY_MS - (Date.now() - failedAt)) + 25);
+    return () => clearTimeout(timer);
+  }, [src, visible, image.failed, image.source]);
+  const displaySrc = image.source === src && !image.failed && visible ? image.url : null;
+  if (!displaySrc) return <span aria-hidden="true" className={`${className} artFallback`} ref={ref}>
+    <svg viewBox="0 0 16 16"><path d="M13 2 6 3.5v7.2a2.6 2.6 0 1 0 1.2 2.2V6.5L11.8 5v4.2A2.6 2.6 0 1 0 13 11.3z" /></svg>
+  </span>;
+  return <img alt="" className={`${className} artLoaded`} decoding="async" loading="eager" ref={ref} src={displaySrc}
+    onError={() => { if (src) markArtworkFailed(src); setImage({ source: src, url: null, failed: true }); }} />;
+});
 
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [retryVersion, shouldLoad, src]);
-
-  if (!src || status === "failed" || !displaySrc) {
-    return (
-      <span aria-hidden="true" className={`${className} artFallback`} ref={setFrameRef}>
-        <svg viewBox="0 0 16 16">
-          <path d="M13 2 6 3.5v7.2a2.6 2.6 0 1 0 1.2 2.2V6.5L11.8 5v4.2A2.6 2.6 0 1 0 13 11.3z" />
-        </svg>
-      </span>
-    );
-  }
-  return (
-    <img
-      alt=""
-      className={`${className}${status === "ready" ? " artLoaded" : " artLoading"}`}
-      decoding="async"
-      loading={eager || loadedArtworkSrcs.has(src) ? "eager" : "lazy"}
-      ref={setFrameRef}
-      src={displaySrc}
-      onLoad={() => {
-        loadedArtworkSrcs.add(src);
-        setStatus("ready");
-      }}
-      onError={() => {
-        failedArtworkSrcs.set(src, Date.now());
-        setStatus("failed");
-      }}
-    />
-  );
+function markArtworkFailed(src: string): void {
+  failedArtworkSrcs.delete(src);
+  failedArtworkSrcs.set(src, Date.now());
+  if (failedArtworkSrcs.size > 512) failedArtworkSrcs.delete(failedArtworkSrcs.keys().next().value!);
 }
 
 function artworkFailedRecently(src: string): boolean {
@@ -4565,24 +4478,7 @@ function CommandPalette({
         .slice(0, 4),
     [normalized, playlists]
   );
-  const trackMatches = useMemo(
-    () =>
-      normalized.length < 2
-        ? []
-        : albums
-            .flatMap((album) =>
-              album.files.map((file) => ({
-                album,
-                file,
-                label: file.displayTags.title ?? file.filename
-              }))
-            )
-            .filter(({ album, file, label }) =>
-              `${label} ${file.displayTags.artist ?? album.artist} ${album.album}`.toLocaleLowerCase().includes(normalized)
-            )
-            .slice(0, 6),
-    [albums, normalized]
-  );
+  const trackMatches = useMemo(() => findCommandTracks(albums, normalized), [albums, normalized]);
   const hasResults =
     pageMatches.length + artistMatches.length + albumMatches.length + playlistMatches.length + trackMatches.length > 0;
   const paletteRoot = themedPortalRoot();
@@ -5036,6 +4932,7 @@ function albumArtworkSourceLabel(source: AlbumArtworkCandidate["source"]): strin
 
 function LibraryWorkbenchView({
   initialTarget,
+  navigationKey = 0,
   albumsState,
   currentWaveform,
   favoriteAlbumEntries,
@@ -5055,6 +4952,7 @@ function LibraryWorkbenchView({
   onSetFileRating
 }: {
   initialTarget: LibraryWorkbenchTarget | null;
+  navigationKey?: number;
   albumsState: AlbumsState;
   currentWaveform: WaveformSummaryResponse | null;
   favoriteAlbumEntries: string[];
@@ -5076,6 +4974,7 @@ function LibraryWorkbenchView({
   const albums = "albums" in albumsState ? albumsState.albums.albums : [];
   const [initialPreferences] = useState(loadLibraryWorkbenchPreferences);
   const [browseArtist, setBrowseArtist] = useState<string | null>(null);
+  useEffect(() => { setBrowseArtist(null); }, [navigationKey]);
   const [artistOverview, setArtistOverview] = useState(false);
   const [artistQuery, setArtistQuery] = useState("");
   const [favoriteOnly, setFavoriteOnly] = useState(initialPreferences.favoriteOnly);
@@ -5090,7 +4989,7 @@ function LibraryWorkbenchView({
   const [trackPreferenceBusyFileId, setTrackPreferenceBusyFileId] = useState<string | null>(null);
   const [trackPreferenceError, setTrackPreferenceError] = useState<string | null>(null);
   const [artworkAlbum, setArtworkAlbum] = useState<AlbumGroupItem | null>(null);
-  const artistListRef = useRef<HTMLDivElement | null>(null);
+  const artistListRef = useRef<ArtistListHandle | null>(null);
   useEffect(() => {
     if (!initialTarget) {
       return;
@@ -5101,23 +5000,28 @@ function LibraryWorkbenchView({
     setSelectedAlbumId(initialTarget.albumId ?? null);
     setSelectedFileId(initialTarget.fileId ?? null);
   }, [initialTarget]);
+  const favoriteAlbumIds = useMemo(() => indexAlbumFavorites(albums, favoriteAlbumEntries), [albums, favoriteAlbumEntries]);
+  const sortedLibraryAlbums = useMemo(() => sortAlbumsByMode(albums, albumSortMode), [albums, albumSortMode]);
   const filteredAlbums = useMemo(
-    () => favoriteOnly ? albums.filter((album) => isAlbumFavorite(album, favoriteAlbumEntries)) : albums,
-    [albums, favoriteAlbumEntries, favoriteOnly]
+    () => favoriteOnly ? sortedLibraryAlbums.filter(album => favoriteAlbumIds.has(album.id)) : sortedLibraryAlbums,
+    [sortedLibraryAlbums, favoriteAlbumIds, favoriteOnly]
   );
   const artistGroups = useMemo(
     () => sortArtistSections(
-      groupAlbumsByArtist(sortAlbumsByMode(filteredAlbums, albumSortMode)),
+      groupAlbumsByArtist(filteredAlbums),
       artistSortMode
     ),
     [albumSortMode, artistSortMode, filteredAlbums]
   );
+  const deferredArtistQuery = useDeferredValue(artistQuery);
   const visibleArtists = useMemo(() => {
-    const query = artistQuery.trim().toLocaleLowerCase();
+    const query = deferredArtistQuery.trim().toLocaleLowerCase();
     return query
       ? artistGroups.filter((section) => section.artist.toLocaleLowerCase().includes(query))
       : artistGroups;
-  }, [artistGroups, artistQuery]);
+  }, [artistGroups, deferredArtistQuery]);
+  const artistRows = useMemo(() => visibleArtists.map(section => ({ artist: section.artist, letter: getArtistStartLetter(section.artist), albums: section.albums.length, tracks: section.albums.reduce((sum, album) => sum + album.files.length, 0) })), [visibleArtists]);
+  const artistLetters = useMemo(() => new Set(artistRows.map(row => row.letter)), [artistRows]);
   const selectedArtist =
     visibleArtists.find((section) => section.artist === selectedArtistName) ??
     visibleArtists[0] ??
@@ -5138,7 +5042,7 @@ function LibraryWorkbenchView({
     [albums, selectedArtist?.artist]
   );
   const allSelectedArtistAlbumsFavorite = selectedArtistAlbums.length > 0 &&
-    selectedArtistAlbums.every((album) => isAlbumFavorite(album, favoriteAlbumEntries));
+    selectedArtistAlbums.every((album) => favoriteAlbumIds.has(album.id));
   const selectedFile =
     selectedAlbum?.files.find((file) => file.id === selectedFileId) ??
     selectedAlbum?.files[0] ??
@@ -5165,13 +5069,13 @@ function LibraryWorkbenchView({
     });
   }, [albumSortMode, artistSortMode, favoriteOnly, selectedAlbum?.id, selectedAlbumId, selectedArtist?.artist, selectedArtistName]);
 
-  function selectArtist(artist: string): void {
+  const selectArtist = useCallback((artist: string): void => {
     setArtistOverview(false);
     const firstAlbum = visibleArtists.find((section) => section.artist === artist)?.albums[0] ?? null;
     setSelectedArtistName(artist);
     setSelectedAlbumId(firstAlbum?.id ?? null);
     setSelectedFileId(null);
-  }
+  }, [visibleArtists]);
 
   function selectAlbum(albumId: string): void {
     setArtistOverview(false);
@@ -5180,10 +5084,8 @@ function LibraryWorkbenchView({
   }
 
   function jumpToArtistLetter(letter: string): void {
-    const target = artistListRef.current?.querySelector<HTMLButtonElement>(
-      `button[data-start-letter="${letter}"]`
-    );
-    target?.scrollIntoView({ block: "start" });
+    const index = artistRows.findIndex(row => row.letter === letter);
+    if (index >= 0) artistListRef.current?.scrollToIndex(index);
   }
 
   async function reassignAlbums(scope: "album" | "artist"): Promise<void> {
@@ -5309,7 +5211,7 @@ function LibraryWorkbenchView({
         <div className="libraryArtistBrowser">
           <nav className="artistLetterRail" aria-label="Jump to artist letter">
             {["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"].map((letter) => {
-              const available = visibleArtists.some((section) => getArtistStartLetter(section.artist) === letter);
+              const available = artistLetters.has(letter);
               return (
                 <button
                   aria-label={letter === "#" ? "Jump to numeric artists" : `Jump to artists beginning with ${letter}`}
@@ -5323,30 +5225,8 @@ function LibraryWorkbenchView({
               );
             })}
           </nav>
-          <div className="libraryArtistList" ref={artistListRef}>
-            {visibleArtists.length === 0 ? (
-              <div className="libraryPaneEmpty">
-                {favoriteOnly ? "No favorite albums yet." : "No artists match this filter."}
-              </div>
-            ) : null}
-            {visibleArtists.map((section) => {
-              const fileCount = section.albums.reduce((sum, album) => sum + album.files.length, 0);
-              return (
-                <button
-                  className={section.artist === selectedArtist?.artist ? "active" : ""}
-                  data-start-letter={getArtistStartLetter(section.artist)}
-                  key={section.artist}
-                  type="button"
-                  onClick={() => selectArtist(section.artist)}
-                >
-                  <strong>{section.artist}</strong>
-                  <span>
-                    {section.albums.length} album{section.albums.length === 1 ? "" : "s"} - {fileCount} track{fileCount === 1 ? "" : "s"}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          <VirtualArtistList ref={artistListRef} rows={artistRows} selected={selectedArtist?.artist ?? null}
+            empty={favoriteOnly ? "No favorite albums yet." : "No artists match this filter."} onSelect={selectArtist} />
         </div>
         <footer>
           <span>A-Z</span>
@@ -5384,7 +5264,7 @@ function LibraryWorkbenchView({
             <div className="libraryPaneEmpty">{favoriteOnly ? "Favorite an album to show it here." : "Choose an artist."}</div>
           ) : null}
           {selectedArtist?.albums.map((album) => {
-            const favorite = isAlbumFavorite(album, favoriteAlbumEntries);
+            const favorite = favoriteAlbumIds.has(album.id);
             return (
               <button
                 className={`${!artistOverview && album.id === selectedAlbum?.id ? "active" : ""}${favorite ? " favorite" : ""}`.trim()}
@@ -5440,18 +5320,18 @@ function LibraryWorkbenchView({
               </div>
               <div className="libraryAlbumActions">
                 <button
-                  aria-label={isAlbumFavorite(selectedAlbum, favoriteAlbumEntries) ? `Remove ${selectedAlbum.album} from favorites` : `Favorite ${selectedAlbum.album}`}
-                  aria-pressed={isAlbumFavorite(selectedAlbum, favoriteAlbumEntries)}
-                  className={isAlbumFavorite(selectedAlbum, favoriteAlbumEntries) ? "favorite active" : "favorite"}
+                  aria-label={favoriteAlbumIds.has(selectedAlbum.id) ? `Remove ${selectedAlbum.album} from favorites` : `Favorite ${selectedAlbum.album}`}
+                  aria-pressed={favoriteAlbumIds.has(selectedAlbum.id)}
+                  className={favoriteAlbumIds.has(selectedAlbum.id) ? "favorite active" : "favorite"}
                   disabled={favoriteBusy || reassignBusy}
                   type="button"
                   onClick={() => void onSetAlbumFavorite(
                     selectedAlbum,
-                    !isAlbumFavorite(selectedAlbum, favoriteAlbumEntries)
+                    !favoriteAlbumIds.has(selectedAlbum.id)
                   )}
                 >
                   <LucideHeart />
-                  {favoriteBusy ? "Saving…" : isAlbumFavorite(selectedAlbum, favoriteAlbumEntries) ? "Favorited" : "Favorite"}
+                  {favoriteBusy ? "Saving…" : favoriteAlbumIds.has(selectedAlbum.id) ? "Favorited" : "Favorite"}
                 </button>
                 <button
                   className="primary"
@@ -10446,11 +10326,11 @@ function DiscoveryGroupResult({
 type HomeAnalyticsPeriod = "7d" | "30d" | "90d" | "all";
 
 function HomeAnalyticsView({
-  albumsState, playback, playbackBusy, onOpenAlbum, onOpenArtistPage, onPlayAlbum, onPlayFile, onOpenSettings
+  albumsState, playback, playbackBusy, onOpenAlbum, onOpenArtistPage, onPlayAlbum, onPlayFile, onOpenSettings, onRefreshLibrary
 }: {
   onOpenSettings(): void;
   albumsState: AlbumsState;
-  recentAlbums: AlbumGroupItem[];
+  onRefreshLibrary(): Promise<AlbumGroupsResponse | null>;
   libraryTotal: number;
   playback: PlaybackStateResponse;
   playbackBusy: boolean;
@@ -10465,21 +10345,30 @@ function HomeAnalyticsView({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
+  const homeAlbums = "albums" in albumsState ? albumsState.albums.albums : null;
+  const refreshHome = async () => {
+    // A new parent snapshot triggers the analytics read; failed refreshes can retry it directly.
+    if (!await onRefreshLibrary()) setRefresh(value => value + 1);
+  };
   useEffect(() => {
+    if (!homeAlbums) {
+      setLoading(albumsState.status !== "error");
+      setError(albumsState.status === "error" ? albumsState.message : null);
+      return;
+    }
     const controller = new AbortController();
     setLoading(true);
     setError(null);
     Promise.all([
-      getJson("/library/albums", albumGroupsResponseSchema, controller.signal),
       getJson(`/home/listening?period=${period}`, homeListeningResponseSchema, controller.signal),
       getJson("/settings/taste-profile", tasteProfileResponseSchema, controller.signal).catch(() => null)
-    ]).then(([library, listening, taste]) => {
-      if (!controller.signal.aborted) setSnapshot({ albums: library.albums, listening, taste });
+    ]).then(([listening, taste]) => {
+      if (!controller.signal.aborted) setSnapshot({ albums: homeAlbums, listening, taste });
     }).catch((reason: unknown) => {
       if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Could not load listening history.");
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [period, playback.currentFileId, playback.status, albumsState.status, refresh]);
+  }, [period, playback.currentFileId, playback.status, homeAlbums, albumsState.status, refresh]);
 
   const data = useMemo(() => {
     if (!snapshot) return null;
@@ -10534,8 +10423,8 @@ function HomeAnalyticsView({
         </div>
       </header>
       <div className="homeAnalyticsScroll" aria-busy={loading}>
-        {error ? <div className="inlineError" role="alert">{error} <button type="button" onClick={() => setRefresh((value) => value + 1)}>Retry</button></div> : null}
-        {loading ? <div className="hjLoading" role="status">Reading your listening history…</div> : !error && data ? <>
+        {error ? <div className="inlineError" role="alert">{error} <button type="button" onClick={() => void refreshHome()}>Retry</button></div> : null}
+        {loading && !snapshot ? <div className="hjLoading" role="status">Reading your listening history…</div> : data ? <>
           <div className="hjEdition"><span>LISTENING JOURNAL <b>/ {label}</b></span><span>{snapshot?.albums.length.toLocaleString()} albums on your shelves</span></div>
           <div className="hjMain">
             <article className="hjWall">
@@ -10615,7 +10504,7 @@ function HomeAnalyticsView({
               {!data.waiting.length ? <p className="hjEmpty">Every album has had a first spin. Nicely explored.</p> : null}
             </article>
           </div>
-          <footer className="hjFooter"><span>From your playback history · refreshed when playback changes</span><span>Charts use UTC · listening is recorded playback position <button type="button" onClick={() => setRefresh((value) => value + 1)}>Refresh ↻</button></span></footer>
+          <footer className="hjFooter"><span>From your playback history · refreshed when playback changes</span><span>Charts use UTC · listening is recorded playback position <button type="button" onClick={() => void refreshHome()}>Refresh ↻</button></span></footer>
         </> : null}
       </div>
     </section>
@@ -12094,7 +11983,6 @@ function BeatSyncedAlbumGlow({
     if (!node) {
       return;
     }
-    let animationFrame = 0;
     let averageEnergy = 0;
     let pulse = 0;
     let lastFrameId = -1;
@@ -12120,14 +12008,13 @@ function BeatSyncedAlbumGlow({
         pulse = Math.max(beat * 4.2, pulse);
       }
       const clampedPulse = Math.min(1, pulse);
-      node.style.setProperty("--beat-glow-blur", `${0.5 + clampedPulse * 0.32}rem`);
       node.style.setProperty("--beat-glow-opacity", (0.66 + clampedPulse * 0.26).toFixed(3));
       node.style.setProperty("--beat-glow-scale", (1 + clampedPulse * 0.065).toFixed(3));
-      animationFrame = window.requestAnimationFrame(draw);
+      return playing || pulse > 0.0001;
     };
-    animationFrame = window.requestAnimationFrame(draw);
+    const animation = createVisualizerAnimation(node, draw);
     return () => {
-      window.cancelAnimationFrame(animationFrame);
+      animation.dispose();
       node.style.removeProperty("--beat-glow-blur");
       node.style.removeProperty("--beat-glow-opacity");
       node.style.removeProperty("--beat-glow-scale");
@@ -12731,17 +12618,30 @@ function PlaylistsView({
   onProposeUpdatePlaylist(playlistId: string, updates: { name: string; description: string | null }): Promise<void>;
   onProposeRemoveItem(playlistId: string, itemId: string): Promise<void>;
 }): ReactElement {
-  const playlists = "playlists" in playlistsState ? playlistsState.playlists : [];
-  const playlistTrackCount = playlists.reduce((sum, playlist) => sum + playlist.items.length, 0);
-  const playlistDurationMs = playlists.reduce((sum, playlist) => sum + playlist.items.reduce((trackSum, item) => trackSum + (item.file.durationMs ?? 0), 0), 0);
+  const playlists = "playlists" in playlistsState ? playlistsState.playlists : emptyPlaylists;
+  const playlistStats = useMemo(() => {
+    const durations = new Map<Playlist, number>();
+    let trackCount = 0;
+    let durationMs = 0;
+    for (const playlist of playlists) {
+      const duration = playlist.items.reduce((sum, item) => sum + (item.file.durationMs ?? 0), 0);
+      durations.set(playlist, duration);
+      trackCount += playlist.items.length;
+      durationMs += duration;
+    }
+    return { durations, trackCount, durationMs };
+  }, [playlists]);
+  const playlistTrackCount = playlistStats.trackCount;
+  const playlistDurationMs = playlistStats.durationMs;
 
   const [playlistQuery, setPlaylistQuery] = useState("");
   const [editingPlaylist, setEditingPlaylist] = useState(false);
   const [playlistNameDraft, setPlaylistNameDraft] = useState("");
   const [playlistDescriptionDraft, setPlaylistDescriptionDraft] = useState("");
-  const visiblePlaylists = playlists.filter((playlist) =>
-    `${playlist.name} ${playlist.description ?? ""}`.toLocaleLowerCase().includes(playlistQuery.trim().toLocaleLowerCase())
-  );
+  const normalizedPlaylistQuery = playlistQuery.trim().toLocaleLowerCase();
+  const visiblePlaylists = useMemo(() => playlists.filter((playlist) =>
+    `${playlist.name} ${playlist.description ?? ""}`.toLocaleLowerCase().includes(normalizedPlaylistQuery)
+  ), [playlists, normalizedPlaylistQuery]);
   const activePlaylist =
     selectedPlaylist ??
     visiblePlaylists[0] ??
@@ -12750,6 +12650,12 @@ function PlaylistsView({
   const activeQueue = useMemo(
     () => activePlaylist?.items.map((item) => item.file.id) ?? [],
     [activePlaylist]
+  );
+
+  const activePlaylistDurationMs = useMemo(
+    () => activePlaylist ? playlistStats.durations.get(activePlaylist)
+      ?? activePlaylist.items.reduce((sum, item) => sum + (item.file.durationMs ?? 0), 0) : 0,
+    [activePlaylist, playlistStats]
   );
 
   useEffect(() => {
@@ -12791,7 +12697,7 @@ function PlaylistsView({
         <div className="playlistBrowserRows">
           {visiblePlaylists.map((playlist) => {
             const preview = playlist.items.slice(0, 2);
-            const duration = playlist.items.reduce((sum, item) => sum + (item.file.durationMs ?? 0), 0);
+            const duration = playlistStats.durations.get(playlist) ?? 0;
             return (
               <button
                 className={playlist.id === activePlaylist?.id ? "active" : ""}
@@ -12839,7 +12745,7 @@ function PlaylistsView({
                 <span className="eyebrow">{activePlaylist.createdBy} - {activePlaylist.type}</span>
                 <h2>{activePlaylist.name}</h2>
                 <p>{activePlaylist.description ?? "No description."}</p>
-                <span>{activePlaylist.items.length} tracks - {formatListenTime(activePlaylist.items.reduce((sum, item) => sum + (item.file.durationMs ?? 0), 0))}</span>
+                <span>{activePlaylist.items.length} tracks - {formatListenTime(activePlaylistDurationMs)}</span>
               </div>
               <div className="playlistWorkspaceActions">
                 <button
@@ -13042,7 +12948,7 @@ function PlaylistDetailView({
   const [name, setName] = useState(playlist.name);
   const [description, setDescription] = useState(playlist.description ?? "");
   const changed = name.trim() !== playlist.name || description.trim() !== (playlist.description ?? "");
-  const totalDurationMs = playlist.items.reduce((sum, item) => sum + (item.file.durationMs ?? 0), 0);
+  const totalDurationMs = useMemo(() => playlist.items.reduce((sum, item) => sum + (item.file.durationMs ?? 0), 0), [playlist.items]);
   const playlistQueueFileIds = useMemo(() => playlist.items.map((item) => item.file.id), [playlist.items]);
 
   useEffect(() => {
@@ -14197,9 +14103,9 @@ function groupLibraryFilesByAlbum(files: LibraryFile[], sortMode: LibrarySortMod
     groups.set(key, existing);
   }
 
-  return [...groups.values()]
-    .map((group) => ({ ...group, formats: [...(groupFormats.get(group.key) ?? new Set<string>())].sort(), files: sortAlbumTrackFiles(group.files) }))
-    .sort((left, right) => compareLibraryAlbumGroups(left, right, sortMode));
+  const albums = [...groups.values()]
+    .map((group) => ({ ...group, formats: [...(groupFormats.get(group.key) ?? new Set<string>())].sort(), files: sortAlbumTrackFiles(group.files) }));
+  return sortAlbumCollection(albums, sortMode, true);
 }
 
 function getEstimatedLibraryAlbumGroupHeight(group: LibraryAlbumGroup): number {
@@ -14381,8 +14287,9 @@ function parseOptionalNumber(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+const textCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 function compareText(left: string, right: string): number {
-  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+  return textCollator.compare(left, right);
 }
 
 function sortAlbumsByArtistAlbum(albums: AlbumGroupItem[]): AlbumGroupItem[] {
@@ -14408,55 +14315,17 @@ function favoriteAlbumEntryMatches(entry: string, album: AlbumGroupItem): boolea
     normalizedEntry === title;
 }
 
-function normalizeAlbumFavoriteEntry(value: string): string {
-  return value
-    .normalize("NFKC")
-    .replace(/[–—]/g, "-")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLocaleLowerCase();
-}
 
 function sortAlbumsByMode(albums: AlbumGroupItem[], sortMode: AlbumSortMode): AlbumGroupItem[] {
-  return [...albums].sort((left, right) => compareAlbumsByMode(left, right, sortMode));
-}
-
-function compareLibraryAlbumGroups(left: LibraryAlbumGroup, right: LibraryAlbumGroup, sortMode: LibrarySortMode): number {
-  if (sortMode === "recent") {
-    return albumRecentTimestamp(right.files) - albumRecentTimestamp(left.files) || compareLibraryAlbumGroups(left, right, "artistAlbum");
-  }
-  if (sortMode === "listens") {
-    return albumPlayCount(right.files) - albumPlayCount(left.files) || compareLibraryAlbumGroups(left, right, "artistAlbum");
-  }
-  if (sortMode === "likes") {
-    return albumLikeCount(right.files) - albumLikeCount(left.files) || compareLibraryAlbumGroups(left, right, "artistAlbum");
-  }
-  if (sortMode === "rating") {
-    return albumAverageRating(right.files) - albumAverageRating(left.files) || compareLibraryAlbumGroups(left, right, "artistAlbum");
-  }
-  return compareText(left.artist, right.artist) || compareText(left.album, right.album) || compareText(left.year ?? "", right.year ?? "");
-}
-
-function compareAlbumsByMode(left: AlbumGroupItem, right: AlbumGroupItem, sortMode: AlbumSortMode): number {
-  if (sortMode === "recent") {
-    return albumRecentTimestamp(right.files) - albumRecentTimestamp(left.files) || compareAlbumsByMode(left, right, "artistAlbum");
-  }
-  if (sortMode === "listens") {
-    return albumPlayCount(right.files) - albumPlayCount(left.files) || compareAlbumsByMode(left, right, "artistAlbum");
-  }
-  if (sortMode === "likes") {
-    return albumLikeCount(right.files) - albumLikeCount(left.files) || compareAlbumsByMode(left, right, "artistAlbum");
-  }
-  if (sortMode === "rating") {
-    return albumAverageRating(right.files) - albumAverageRating(left.files) || compareAlbumsByMode(left, right, "artistAlbum");
-  }
-  return compareText(left.artist, right.artist) || compareText(left.album, right.album);
+  return sortAlbumCollection(albums, sortMode);
 }
 
 function groupAlbumsByArtist(albums: AlbumGroupItem[]): { artist: string; albums: AlbumGroupItem[] }[] {
   const groups = new Map<string, AlbumGroupItem[]>();
   for (const album of albums) {
-    groups.set(album.artist, [...(groups.get(album.artist) ?? []), album]);
+    const group = groups.get(album.artist);
+    if (group) group.push(album);
+    else groups.set(album.artist, [album]);
   }
   return [...groups.entries()]
     .map(([artist, groupAlbums]) => ({ artist, albums: groupAlbums }))
@@ -14467,27 +14336,7 @@ function sortArtistSections(
   sections: { artist: string; albums: AlbumGroupItem[] }[],
   sortMode: ArtistSortMode
 ): { artist: string; albums: AlbumGroupItem[] }[] {
-  return [...sections].sort((left, right) => compareArtistSections(left, right, sortMode));
-}
-
-function compareArtistSections(
-  left: { artist: string; albums: AlbumGroupItem[] },
-  right: { artist: string; albums: AlbumGroupItem[] },
-  sortMode: ArtistSortMode
-): number {
-  if (sortMode === "recent") {
-    return artistRecentTimestamp(right.albums) - artistRecentTimestamp(left.albums) || compareArtistSections(left, right, "artist");
-  }
-  if (sortMode === "listens") {
-    return artistPlayCount(right.albums) - artistPlayCount(left.albums) || compareArtistSections(left, right, "artist");
-  }
-  if (sortMode === "likes") {
-    return artistLikeCount(right.albums) - artistLikeCount(left.albums) || compareArtistSections(left, right, "artist");
-  }
-  if (sortMode === "rating") {
-    return artistAverageRating(right.albums) - artistAverageRating(left.albums) || compareArtistSections(left, right, "artist");
-  }
-  return compareText(left.artist, right.artist);
+  return sortArtistCollection(sections, sortMode);
 }
 
 function albumRecentTimestamp(files: LibraryFile[]): number {
@@ -15405,8 +15254,6 @@ function WaveformCanvas({
     }
     const surface = createVisualizerCanvas(canvas, () => draw(performance.now(), true));
     const observedAt = performance.now();
-    let animationFrame = 0;
-    let lastDrawAt = 0;
     let lastProgress = -1;
 
     const getProgress = (now: number): number => {
@@ -15428,24 +15275,20 @@ function WaveformCanvas({
     const draw = (now: number, force = false) => {
       const progress = getProgress(now);
       const width = surface.width;
-      if (!force && now - lastDrawAt < 34 && Math.abs(progress - lastProgress) * width < 0.25) {
+      if (!force && Math.abs(progress - lastProgress) * width < 0.25) {
         return;
       }
       drawWaveform(surface, waveform?.peaks ?? null, progress, variant);
-      lastDrawAt = now;
       lastProgress = progress;
     };
-    const tick = (now: number) => {
+    const animation = createVisualizerAnimation(canvas, (now) => {
       draw(now);
-      animationFrame = window.requestAnimationFrame(tick);
-    };
+      return playback.status === "playing";
+    });
     draw(performance.now(), true);
-    if (playback.status === "playing") {
-      animationFrame = window.requestAnimationFrame(tick);
-    }
     return () => {
       surface.dispose();
-      window.cancelAnimationFrame(animationFrame);
+      animation.dispose();
     };
   }, [playback.currentFileId, playback.positionMs, playback.durationMs, playback.status, positionFrameRef, variant, waveform]);
 
@@ -15470,12 +15313,7 @@ function SpectrumCanvas({
     if (!canvas) {
       return;
     }
-    const surface = createVisualizerCanvas(canvas);
-    if (!playing && !frameRef.current) {
-      drawSpectrum(surface, new Array(mode === "meter" ? 8 : 32).fill(0), mode);
-      return () => surface.dispose();
-    }
-    let animationFrame = 0;
+    const surface = createVisualizerCanvas(canvas, () => animation.invalidate());
     let previousDrawAt = performance.now();
     const levels = new Array(mode === "meter" ? 8 : 32).fill(0);
     const draw = (now: number) => {
@@ -15492,10 +15330,10 @@ function SpectrumCanvas({
         levels[index] += (next - levels[index]) * blend;
       }
       drawSpectrum(surface, levels, mode);
-      animationFrame = window.requestAnimationFrame(draw);
+      return playing || levels.some(level => level > 0.0001);
     };
-    animationFrame = window.requestAnimationFrame(draw);
-    return () => { surface.dispose(); window.cancelAnimationFrame(animationFrame); };
+    const animation = createVisualizerAnimation(canvas, draw);
+    return () => { surface.dispose(); animation.dispose(); };
   }, [frameRef, mode, playing]);
 
   return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
@@ -15519,8 +15357,7 @@ function LevelMeterCanvas({
     if (!canvas) {
       return;
     }
-    let animationFrame = 0;
-    const surface = createVisualizerCanvas(canvas);
+    const surface = createVisualizerCanvas(canvas, () => animation.invalidate());
     let level = 0;
     let peak = 0;
     let previousDrawAt = performance.now();
@@ -15538,10 +15375,10 @@ function LevelMeterCanvas({
       level += (incoming - level) * (1 - Math.exp(-elapsedMs / responseMs));
       peak = Math.max(level, peak * Math.exp(-elapsedMs / 310));
       drawLevelMeter(surface, level, peak);
-      animationFrame = window.requestAnimationFrame(draw);
+      return playing || peak > 0.0001;
     };
-    animationFrame = window.requestAnimationFrame(draw);
-    return () => { surface.dispose(); window.cancelAnimationFrame(animationFrame); };
+    const animation = createVisualizerAnimation(canvas, draw);
+    return () => { surface.dispose(); animation.dispose(); };
   }, [channel, frameRef, playing]);
 
   return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
@@ -15559,27 +15396,23 @@ function SpectrogramCanvas({
   playing: boolean;
 }): ReactElement {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const playingRef = useRef(playing);
-  playingRef.current = playing;
+  const previousFile = useRef(fileId);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) {
       return;
     }
-    let animationFrame = 0;
     let lastFrameId = -1;
     const surface = createVisualizerCanvas(canvas);
     const { context } = surface;
     const width = surface.width;
     const height = surface.height;
-    context.clearRect(0, 0, width, height);
+    if (previousFile.current !== fileId) context.clearRect(0, 0, width, height);
+    previousFile.current = fileId;
     const draw = () => {
       const frame = frameRef.current;
-      if (!playingRef.current) {
-        animationFrame = window.requestAnimationFrame(draw);
-        return;
-      }
+      if (!playing) return false;
       const bins = frame?.source === "sidecar" && frame.fileId === fileId && frame.fftBins?.length
         ? frame.fftBins
         : null;
@@ -15587,11 +15420,11 @@ function SpectrogramCanvas({
         lastFrameId = frame.frameId;
         drawSpectrogramColumn(surface, bins);
       }
-      animationFrame = window.requestAnimationFrame(draw);
+      return true;
     };
-    draw();
-    return () => { surface.dispose(); window.cancelAnimationFrame(animationFrame); };
-  }, [frameRef, fileId]);
+    const animation = createVisualizerAnimation(canvas, draw);
+    return () => { surface.dispose(); animation.dispose(); };
+  }, [frameRef, fileId, playing]);
 
   return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
 }
@@ -15664,6 +15497,10 @@ function VisualizerPanel({
   );
 }
 
+const waveformLayers = new WeakMap<HTMLCanvasElement, {
+  key: string; peaks: number[] | null; played: HTMLCanvasElement; unplayed: HTMLCanvasElement;
+}>();
+
 function drawWaveform(surface: VisualizerCanvas, peaks: number[] | null, progress: number, variant: "rail" | "hero"): void {
   surface.prepare();
   const { canvas, context, width, height } = surface;
@@ -15673,35 +15510,50 @@ function drawWaveform(surface: VisualizerCanvas, peaks: number[] | null, progres
   const clampedProgress = Math.max(0, Math.min(1, progress));
   const colors = getCanvasThemeColors(canvas);
   context.clearRect(0, 0, width, height);
-  const sourceValues = peaks && peaks.length > 0 ? peaks : fallbackPeaks(96);
-  const targetBars = Math.max(1, Math.floor(width / (variant === "hero" ? 2 : 1.25)));
-  const values = downsampleWaveformPeaks(sourceValues, targetBars);
-  const step = width / values.length;
+  const key = [width, height, surface.ratio, variant, colors.accent.r, colors.accent.g, colors.accent.b,
+    colors.bg.r, colors.bg.g, colors.bg.b].join(":");
+  let layers = waveformLayers.get(canvas);
+  if (!layers || layers.peaks !== peaks || layers.key !== key) {
+    const sourceValues = peaks && peaks.length > 0 ? peaks : fallbackPeaks(96);
+    const targetBars = Math.max(1, Math.floor(width / (variant === "hero" ? 2 : 1.25)));
+    const values = downsampleWaveformPeaks(sourceValues, targetBars);
+    const step = width / values.length;
+    const drawBars = (context: CanvasRenderingContext2D, played: boolean) => {
+      for (let index = 0; index < values.length; index += 1) {
+        const value = Math.max(0.035, values[index] ?? 0);
+        const barHeight = Math.max(1, value * height * (variant === "hero" ? 0.82 : 0.9));
+        const x = index * step;
+        const hueShift = index / Math.max(1, values.length - 1);
+        const characterColor = hueShift < 0.5
+          ? mixRgb(colors.accent, { r: 90, g: 210, b: 255 }, 0.16 + hueShift * 0.24)
+          : mixRgb(colors.accent, { r: 255, g: 226, b: 95 }, 0.18 + (hueShift - 0.5) * 0.28);
+        const unplayedColor = mixRgb(colors.bg, colors.accent, 0.16 + Math.sin(hueShift * Math.PI) * 0.08);
+        context.fillStyle = played
+          ? rgba(characterColor, variant === "hero" ? 0.92 : 0.64)
+          : rgba(unplayedColor, variant === "hero" ? 0.34 : 0.2);
+        context.fillRect(x, (height - barHeight) / 2, Math.max(1, step * 0.72), barHeight);
+      }
+    };
+    const createLayer = (played: boolean) => {
+      const layer = document.createElement("canvas");
+      layer.width = canvas.width;
+      layer.height = canvas.height;
+      const layerContext = layer.getContext("2d")!;
+      layerContext.setTransform(surface.ratio, 0, 0, surface.ratio, 0, 0);
+      drawBars(layerContext, played);
+      return layer;
+    };
+    layers = { key, peaks, unplayed: createLayer(false), played: createLayer(true) };
+    waveformLayers.set(canvas, layers);
+  }
   const playedWidth = clampedProgress * width;
-  const drawBars = (played: boolean) => {
-    for (let index = 0; index < values.length; index += 1) {
-      const value = Math.max(0.035, values[index] ?? 0);
-      const barHeight = Math.max(1, value * height * (variant === "hero" ? 0.82 : 0.9));
-      const x = index * step;
-      const hueShift = index / Math.max(1, values.length - 1);
-      const characterColor = hueShift < 0.5
-        ? mixRgb(colors.accent, { r: 90, g: 210, b: 255 }, 0.16 + hueShift * 0.24)
-        : mixRgb(colors.accent, { r: 255, g: 226, b: 95 }, 0.18 + (hueShift - 0.5) * 0.28);
-      const unplayedColor = mixRgb(colors.bg, colors.accent, 0.16 + Math.sin(hueShift * Math.PI) * 0.08);
-      context.fillStyle = played
-        ? rgba(characterColor, variant === "hero" ? 0.92 : 0.64)
-        : rgba(unplayedColor, variant === "hero" ? 0.34 : 0.2);
-      context.fillRect(x, (height - barHeight) / 2, Math.max(1, step * 0.72), barHeight);
-    }
-  };
-
-  drawBars(false);
+  context.drawImage(layers.unplayed, 0, 0, width, height);
   if (playedWidth > 0) {
     context.save();
     context.beginPath();
     context.rect(0, 0, playedWidth, height);
     context.clip();
-    drawBars(true);
+    context.drawImage(layers.played, 0, 0, width, height);
     context.restore();
   }
   const cursor = context.createLinearGradient(playedWidth - 1, 0, playedWidth + 1, height);

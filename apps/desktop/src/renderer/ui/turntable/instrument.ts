@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { batchStaticMeshes } from './static-meshes';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 export function buildInstrument() {
@@ -165,6 +166,8 @@ export function buildInstrument() {
   decal(deck, 'n e g i', .9, .21, 1.55, .59, .92, 40, '#aeb8b7');
   decal(deck, 'PRECISION  /  01', .9, .105, 1.55, .592, 1.1, 22, '#7f9297');
   decal(deck, 'START / STOP', .7, .085, -1.98, .592, 1.69, 18, '#9ba9ae');
+
+  for (const group of [deck, vinyl, tilt, labelSpin]) batchStaticMeshes(group);
 
   return { deck, vinyl, sleeve, arm, tilt, labelSpin, jacketFace, jacketBack, labelMaterial, ledMaterial, px, pz };
 }

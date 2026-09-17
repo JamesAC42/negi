@@ -31,7 +31,6 @@
 .recordCeremonyEyebrow { display: block; color: #c8b58c; font-size: .61rem; font-weight: 600; letter-spacing: .24em; }
 .recordCeremonyCopy h2 { color: #f1eee5; margin: .7rem 0 .25rem; font-size: clamp(1.15rem, 2.2vw, 1.85rem); font-weight: 500; letter-spacing: -.025em; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recordCeremonyCopy p { color: #a5ada7; font-size: .8rem; margin: 0; }
-.recordCeremonyStatus { display: block; min-height: 1rem; margin-top: 1rem; color: #898f89; font-size: .7rem; letter-spacing: .02em; }
 .recordCeremonyControls { display: flex; align-items: center; justify-content: center; gap: 1rem; margin-top: .85rem; }
 .recordCeremonyControls button { display: inline-flex; align-items: center; gap: .5rem; background: #171c1a; border: 1px solid #62675355; border-radius: 4px; color: #cecdbf; padding: .4rem .7rem; min-height: 2rem; font: inherit; font-size: .7rem; cursor: pointer; }
 .recordCeremonyControls button:hover { background: #272e24; border-color: #b6bb9477; }
@@ -58,7 +57,6 @@
 }
 @media (max-height: 720px) {
   .recordCeremonyCopy h2 { margin-top: .45rem; }
-  .recordCeremonyStatus { margin-top: .6rem; }
   .recordCeremonyControls { margin-top: .55rem; }
 }
 @media (prefers-reduced-motion: reduce) {

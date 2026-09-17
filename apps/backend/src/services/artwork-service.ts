@@ -38,6 +38,8 @@ interface ArtworkSearchCacheEntry {
 type ArtworkCandidateSource = AlbumArtworkCandidate["source"];
 
 const MAX_FILE_CACHE_ENTRIES = 6000;
+// Bound original image memory even when embedded covers are several megabytes.
+const MAX_ARTWORK_CACHE_BYTES = 64 * 1024 * 1024;
 const EMBEDDED_PROBE_LIMIT = 8;
 const MUSICBRAINZ_REQUEST_SPACING_MS = 1100;
 const ALBUM_INDEX_TTL_MS = 10_000;
@@ -63,9 +65,11 @@ const REMOTE_ARTWORK_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/web
 export class ArtworkService {
   readonly catalogue: CatalogueArtworkCache;
   readonly youtube: YoutubeArtwork;
-  private readonly fileCache = new Map<string, FileArtworkCacheEntry>();
+  private readonly fileCache = new ArtworkMemoryCache<FileArtworkCacheEntry>(MAX_FILE_CACHE_ENTRIES, MAX_ARTWORK_CACHE_BYTES);
   private readonly pendingFiles = new Map<string, Promise<ArtworkResult | null>>();
-  private readonly albumCache = new Map<string, AlbumArtworkCacheEntry>();
+  private readonly albumCache = new ArtworkMemoryCache<AlbumArtworkCacheEntry>(MAX_FILE_CACHE_ENTRIES, MAX_ARTWORK_CACHE_BYTES);
+  private readonly localArtworkWork = new ArtworkWorkQueue(4);
+  private readonly remoteArtworkWork = new ArtworkWorkQueue(3);
   private readonly pendingAlbums = new Map<string, Promise<ArtworkResult | null>>();
   private readonly artworkSearchCache = new Map<string, ArtworkSearchCacheEntry>();
   private readonly pendingArtworkSearches = new Map<string, Promise<AlbumArtworkCandidate[]>>();
@@ -97,7 +101,7 @@ export class ArtworkService {
   }
 
   private async getEmbeddedFileArtwork(fileId: string): Promise<ArtworkResult | null> {
-    const file = this.library.getFile(fileId);
+    const file = this.library.getArtworkFile(fileId);
     const cached = this.fileCache.get(fileId);
     if (cached && cached.mtime === file.mtime) {
       return cached.artwork;
@@ -108,7 +112,7 @@ export class ArtworkService {
       return pending;
     }
 
-    const lookup = extractEmbeddedArtwork(file.path)
+    const lookup = this.localArtworkWork.run(() => extractEmbeddedArtwork(file.path))
       .then((artwork) => {
         this.writeFileCache(fileId, file.mtime, artwork);
         return artwork;
@@ -121,12 +125,6 @@ export class ArtworkService {
   }
 
   private writeFileCache(fileId: string, mtime: string, artwork: ArtworkResult | null): void {
-    if (this.fileCache.size >= MAX_FILE_CACHE_ENTRIES) {
-      const oldestKey = this.fileCache.keys().next().value;
-      if (oldestKey != null) {
-        this.fileCache.delete(oldestKey);
-      }
-    }
     this.fileCache.set(fileId, { mtime, artwork });
   }
 
@@ -166,7 +164,7 @@ export class ArtworkService {
       return null;
     }
 
-    const localArtwork = await findSidecarArtwork(album.files.map((file) => file.path));
+    const localArtwork = await this.localArtworkWork.run(() => findSidecarArtwork(album.files.map((file) => file.path)));
     if (localArtwork) {
       return localArtwork;
     }
@@ -180,7 +178,7 @@ export class ArtworkService {
       }
     }
 
-    return this.lookupRemoteArtwork(album.artist, album.album);
+    return this.remoteArtworkWork.run(() => this.lookupRemoteArtwork(album.artist, album.album));
   }
 
   async searchAlbumArtwork(albumId: string, query?: string, requestedSource?: string): Promise<AlbumArtworkCandidate[]> {
@@ -420,10 +418,10 @@ export class ArtworkService {
   }
 
   private refreshAlbumIndex(): void {
-    if (Date.now() - this.albumIndexBuiltAt < ALBUM_INDEX_TTL_MS && this.albumById.size > 0) {
+    if (Date.now() - this.albumIndexBuiltAt < ALBUM_INDEX_TTL_MS && this.albumIndexBuiltAt > 0) {
       return;
     }
-    const albums = this.library.listAlbumGroups(Number.MAX_SAFE_INTEGER);
+    const albums = this.library.listArtworkAlbumGroups();
     this.albumById.clear();
     this.fileToAlbumId.clear();
     for (const album of albums) {
@@ -433,6 +431,69 @@ export class ArtworkService {
       }
     }
     this.albumIndexBuiltAt = Date.now();
+  }
+}
+
+/** Byte-bounded LRU cache; oversize artwork is served without retaining it. */
+export class ArtworkMemoryCache<T extends { artwork: ArtworkResult | null }> {
+  private readonly entries = new Map<string, T>();
+  private bytes = 0;
+
+  constructor(private readonly maxEntries: number, private readonly maxBytes: number) {}
+
+  get size(): number { return this.entries.size; }
+  get retainedBytes(): number { return this.bytes; }
+
+  get(key: string): T | undefined {
+    const entry = this.entries.get(key);
+    if (entry !== undefined) {
+      this.entries.delete(key);
+      this.entries.set(key, entry);
+    }
+    return entry;
+  }
+
+  delete(key: string): void {
+    const previous = this.entries.get(key);
+    if (previous !== undefined) {
+      this.bytes -= previous.artwork?.data.length ?? 0;
+      this.entries.delete(key);
+    }
+  }
+
+  set(key: string, entry: T): void {
+    this.delete(key);
+    const bytes = entry.artwork?.data.length ?? 0;
+    if (bytes > this.maxBytes) return;
+    while (this.entries.size > 0 &&
+      (this.entries.size >= this.maxEntries || this.bytes + bytes > this.maxBytes)) {
+      this.delete(this.entries.keys().next().value!);
+    }
+    this.entries.set(key, entry);
+    this.bytes += bytes;
+  }
+}
+
+/** Separate local and remote queues keep slow downloads from delaying local art. */
+export class ArtworkWorkQueue {
+  private active = 0;
+  private readonly waiting: Array<() => void> = [];
+
+  constructor(private readonly concurrency: number) {}
+
+  async run<T>(task: () => Promise<T>): Promise<T> {
+    if (this.active >= this.concurrency) {
+      await new Promise<void>((resolve) => this.waiting.push(resolve));
+    } else {
+      this.active += 1;
+    }
+    try {
+      return await task();
+    } finally {
+      const next = this.waiting.shift();
+      if (next) next();
+      else this.active -= 1;
+    }
   }
 }
 

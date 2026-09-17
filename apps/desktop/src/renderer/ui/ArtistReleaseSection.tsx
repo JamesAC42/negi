@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { CataloguePage, CatalogueSection, CatalogueSort } from "@music-os/core";
 import { ReleaseGrid } from "./ReleaseGrid";
 import { cachedExploreApi as api, artistSnapshot } from "./artist-resource";
 import { errorMessage } from "./explore-api";
 
-export function ArtistReleaseSection({ section, label, artistId, artist, sort, query, filter }: {
+export const ArtistReleaseSection = memo(function ArtistReleaseSection({ section, label, artistId, artist, sort, query, filter }: {
   section: CatalogueSection; label: string; artistId: string; artist: string;
   sort: CatalogueSort; query: string; filter: string;
 }) {
@@ -21,9 +21,11 @@ export function ArtistReleaseSection({ section, label, artistId, artist, sort, q
     setBusy(true); setError("");
     try {
       const result = await api<CataloguePage>("/explore/catalogue?" + new URLSearchParams({ artistId, artist, sort, section, offset: String(offset) }), undefined, controller.signal);
-      if (!controller.signal.aborted) setPage((old) => offset && old
-        ? { ...result, albums: [...old.albums, ...result.albums.filter((album) => !old.albums.some((existing) => existing.id === album.id))] }
-        : result);
+      if (!controller.signal.aborted) setPage((old) => {
+        if (!offset || !old) return result;
+        const existingIds = new Set(old.albums.map((album) => album.id));
+        return { ...result, albums: [...old.albums, ...result.albums.filter((album) => !existingIds.has(album.id))] };
+      });
     } catch (e) { if (!controller.signal.aborted) setError(errorMessage(e)); }
     finally { if (!controller.signal.aborted) setBusy(false); }
   }
@@ -40,8 +42,11 @@ export function ArtistReleaseSection({ section, label, artistId, artist, sort, q
     window.addEventListener("music-library-changed", refresh);
     return () => { request.current?.abort(); window.removeEventListener("music-library-changed", refresh); };
   }, [artistId, artist, sort, section, visible]);
-  const albums = (page?.albums ?? []).filter((album) => album.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()) &&
-    (filter === "all" || (filter === "owned" ? album.libraryStatus !== "missing" : ["missing", "partial"].includes(album.libraryStatus))));
+  const albums = useMemo(() => {
+    const needle = query.toLocaleLowerCase();
+    return (page?.albums ?? []).filter((album) => album.title.toLocaleLowerCase().includes(needle) &&
+      (filter === "all" || (filter === "owned" ? album.libraryStatus !== "missing" : ["missing", "partial"].includes(album.libraryStatus))));
+  }, [page?.albums, query, filter]);
   if (page?.total === 0 && !busy && !error) return null;
   return <section ref={sectionRef} className="artistProfileReleaseGroup" aria-label={label} aria-busy={busy}>
     <h3>{label} {page && <span>{page.total}</span>}</h3>
@@ -54,4 +59,4 @@ export function ArtistReleaseSection({ section, label, artistId, artist, sort, q
       {page && <span>{page.albums.length} of {page.total} loaded</span>}
     </div>
   </section>;
-}
+});

@@ -628,3 +628,80 @@
   overflow: visible;
   flex: 0 0 auto;
 }
+
+/* Keep completeness hints quiet until the listener asks for details. */
+.albumCompletionNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.3rem 1rem;
+  border-bottom: 1px solid var(--line);
+  color: var(--tx2);
+}
+.albumCompletionDetails { flex: 1; min-width: 0; }
+.albumCompletionDetails > summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-height: 1.9rem;
+  width: fit-content;
+  max-width: 100%;
+  list-style: none;
+  cursor: pointer;
+  font: 400 0.7rem/1.5 var(--font-body);
+}
+.albumCompletionDetails > summary::-webkit-details-marker { display: none; }
+.albumCompletionDetails > summary > svg { flex-shrink: 0; }
+.albumCompletionDetails[open] > summary > svg { transform: rotate(90deg); }
+.albumCompletionDetails > summary:hover,
+.albumCompletionNotice .albumCompletionAction:hover { color: var(--tx0); }
+.albumCompletionDetails > summary:focus-visible,
+.albumCompletionNotice .albumCompletionAction:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+.albumCompletionCount {
+  font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--tx2);
+}
+.albumCompletionNotice .albumCompletionAction {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 1.9rem;
+  margin: 0;
+  padding: 0.25rem 0.4rem;
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
+  color: var(--tx1);
+  font: 500 0.65rem/1.5 var(--font-body);
+}
+.albumCompletionBody {
+  padding: 0.45rem 0 0.65rem 1.2rem;
+  font: 400 0.7rem/1.6 var(--font-body);
+  color: var(--tx1);
+}
+.albumCompletionBody .exploreMissingTracks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: 0.2rem 1rem;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.5rem;
+}
+.albumCompletionBody p { margin: 0; max-width: 65ch; }
+.libraryTrackPane:has(.albumCompletionDetails[open]) { overflow-y: auto; }
+.libraryTrackPane:has(.albumCompletionDetails[open]) > * { flex-shrink: 0; }
+.libraryTrackPane:has(.albumCompletionDetails[open]) .libraryTrackList {
+  overflow: visible;
+  flex: 0 0 auto;
+}
+@media (max-width: 520px) {
+  .albumCompletionNotice { padding-inline: 0.65rem; }
+  .albumCompletionCount { display: none; }
+  .albumCompletionNotice .albumCompletionAction > svg { display: none; }
+}

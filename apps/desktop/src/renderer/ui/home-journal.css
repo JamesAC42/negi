@@ -1,6 +1,7 @@
 /* Home's editorial layout uses the same theme, geometry and type as the workbench. */
 .homeJournal { container-type: inline-size; --font-data: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace; }
-.homeJournal .homeAnalyticsScroll { overflow-x: hidden; }
+/* Artwork releases offscreen images. Anchor correction during those swaps can undo wheel scrolling. */
+.homeJournal .homeAnalyticsScroll { overflow-x: hidden; overflow-anchor: none; }
 .homeJournal button:focus-visible, .homeJournal [tabindex]:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
 .homeJournal .homeCollageTile:focus-visible .homeCollageLabel { opacity: 1; transform: none; }
 .hjEdition, .hjFooter, .hjWallFooter, .hjAxis { display: flex; justify-content: space-between; gap: 1rem; }

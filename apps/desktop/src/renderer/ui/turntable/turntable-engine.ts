@@ -120,7 +120,9 @@ export function createTurntableEngine(props: TurntableSceneProps): TurntableEngi
     fits.set(cacheKey, result); return result;
   }
   const pointer = new THREE.Vector2(); const pointerNow = new THREE.Vector2();
-  const q = new THREE.Quaternion();
+  // Layout targets are immutable; reuse them instead of allocating at display refresh rate.
+  const targets = new Map(Object.keys(arrangements).map(layout => [layout, layoutRig(layout as TurntableLayout)]));
+  const zeroPointer = new THREE.Vector2();
   const textures = new Map<string, THREE.Texture>(); const loading = new Set<string>();
   const controllers = new Set<AbortController>(); let applied = '';
   const fallback = document.createElement('canvas'); fallback.width = fallback.height = 256;
@@ -143,7 +145,7 @@ export function createTurntableEngine(props: TurntableSceneProps): TurntableEngi
       new THREE.TextureLoader().load(url, (texture) => {
         if (disposed) { texture.dispose(); return; }
         texture.colorSpace = THREE.SRGBColorSpace; texture.anisotropy = 8;
-        textures.set(source, texture); loading.delete(source); controllers.delete(controller);
+        textures.set(source, texture); loading.delete(source); controllers.delete(controller); controller.abort();
         // Bound GPU artwork retention during long listening sessions.
         if (textures.size > 4) for (const [old, value] of textures) {
           const p = latest.current;
@@ -152,8 +154,8 @@ export function createTurntableEngine(props: TurntableSceneProps): TurntableEngi
           }
         }
         applied = ''; wake();
-      }, undefined, () => { loading.delete(source); controllers.delete(controller); });
-    }).catch(() => { loading.delete(source); controllers.delete(controller); });
+      }, undefined, () => { loading.delete(source); controllers.delete(controller); controller.abort(); });
+    }).catch(() => { loading.delete(source); controllers.delete(controller); controller.abort(); });
   }
   function resize() {
     // CSS transforms only move/composite the canvas. Allocate for its full layout size.
@@ -171,22 +173,22 @@ export function createTurntableEngine(props: TurntableSceneProps): TurntableEngi
     frame = 0;
     if (!element || disposed || contextLost || !visible || document.hidden || latest.current.suspended) { previous = now; return; }
     const p = latest.current; const dt = Math.min(.05, Math.max(.001, (now - previous) / 1000)); previous = now;
-    const layout = arrangements[p.layout] ?? arrangements.classic;
     // Match the settled inline framing on the first focused frame. Easing from
     // the construction camera makes the instrument jump as the portal opens.
     const blend = p.reducedMotion || rendered === 0 ? 1 : 1 - Math.exp(-dt * 10);
-    const deckTarget = new THREE.Vector3().fromArray(layout.deck);
+    const target = targets.get(p.layout) ?? targets.get('classic')!;
+    const deckTarget = target.deckPosition;
     instrument.deck.position.lerp(deckTarget, blend);
-    q.setFromEuler(new THREE.Euler(...layout.deckRotation)); instrument.deck.quaternion.slerp(q, blend);
-    baseSleeve.lerp(new THREE.Vector3().fromArray(layout.sleeve), blend);
-    q.setFromEuler(new THREE.Euler(...layout.sleeveRotation)); baseSleeveQ.slerp(q, blend);
+    instrument.deck.quaternion.slerp(target.deckQuaternion, blend);
+    baseSleeve.lerp(target.sleevePosition, blend);
+    baseSleeveQ.slerp(target.sleeveQuaternion, blend);
     const restingFit = fit(p.layout);
     const exchangeFit = p.elapsed != null && !p.reducedMotion ? fit(p.layout, true) : restingFit;
     const framing = p.elapsed == null || p.reducedMotion ? 0 : phase(p.elapsed, 0, 500) * (1 - phase(p.elapsed, 3830, 3900));
     const fitted = { height: THREE.MathUtils.lerp(restingFit.height, exchangeFit.height, framing),
       x: THREE.MathUtils.lerp(restingFit.x, exchangeFit.x, framing), y: THREE.MathUtils.lerp(restingFit.y, exchangeFit.y, framing) };
     viewHeight = THREE.MathUtils.lerp(viewHeight, fitted.height, blend); viewX = THREE.MathUtils.lerp(viewX, fitted.x, blend); viewY = THREE.MathUtils.lerp(viewY, fitted.y, blend);
-    pointerNow.lerp(p.reducedMotion ? new THREE.Vector2() : pointer, blend);
+    pointerNow.lerp(p.reducedMotion ? zeroPointer : pointer, blend);
     world.rotation.set(pointerNow.y * .025, pointerNow.x * .035, 0);
     camera.top = viewY + viewHeight / 2; camera.bottom = viewY - viewHeight / 2;
     camera.left = viewX - viewHeight * width / height / 2; camera.right = viewX + viewHeight * width / height / 2; camera.updateProjectionMatrix();
@@ -227,7 +229,7 @@ export function createTurntableEngine(props: TurntableSceneProps): TurntableEngi
     shadowPose = nextShadowPose;
     renderer.render(root, camera); rendered++;
     if (rendered % 60 === 0) { canvas.dataset.drawCalls = String(renderer.info.render.calls); canvas.dataset.triangles = String(renderer.info.render.triangles); }
-    const moving = instrument.deck.position.distanceTo(deckTarget) > .001 || baseSleeve.distanceTo(new THREE.Vector3(...layout.sleeve)) > .001 || Math.abs(viewHeight - fitted.height) > .001 || Math.abs(viewX - fitted.x) > .001 || Math.abs(viewY - fitted.y) > .001 || (!p.reducedMotion && pointerNow.distanceTo(pointer) > .001) || Math.abs(instrument.arm.rotation.y - targetYaw) > .001 || instrument.deck.quaternion.angleTo(new THREE.Quaternion().setFromEuler(new THREE.Euler(...layout.deckRotation))) > .001 || baseSleeveQ.angleTo(new THREE.Quaternion().setFromEuler(new THREE.Euler(...layout.sleeveRotation))) > .001;
+    const moving = instrument.deck.position.distanceTo(deckTarget) > .001 || baseSleeve.distanceTo(target.sleevePosition) > .001 || Math.abs(viewHeight - fitted.height) > .001 || Math.abs(viewX - fitted.x) > .001 || Math.abs(viewY - fitted.y) > .001 || (!p.reducedMotion && pointerNow.distanceTo(pointer) > .001) || Math.abs(instrument.arm.rotation.y - targetYaw) > .001 || instrument.deck.quaternion.angleTo(target.deckQuaternion) > .001 || baseSleeveQ.angleTo(target.sleeveQuaternion) > .001;
     if ((!p.reducedMotion && (p.playing || speed > .002)) || moving) wake();
   }
   function move(event: PointerEvent) {

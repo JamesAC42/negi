@@ -30,6 +30,7 @@ export function SimilarArtists({ artist, onOpenArtist, onFindCatalogueMatch, onC
   const [filter, setFilter] = useState<ConnectionFilter>("all");
   const [limit, setLimit] = useState(9);
   useEffect(() => {
+    if (!inView) return;
     const request = new AbortController();
     const path = "/explore/similar-artists?" + new URLSearchParams({ artistId: artist.id, artist: artist.name });
     setData(artistSnapshot<SimilarArtistsResponse>(path)); setLoading(true); setError("");
@@ -37,7 +38,7 @@ export function SimilarArtists({ artist, onOpenArtist, onFindCatalogueMatch, onC
       .catch((reason) => { if (!request.signal.aborted) setError(errorMessage(reason)); })
       .finally(() => { if (!request.signal.aborted) setLoading(false); });
     return () => request.abort();
-  }, [artist.id, artist.name, retry]);
+  }, [artist.id, artist.name, retry, inView]);
   useEffect(() => { setFilter("all"); setLimit(9); }, [artist.id]);
   useEffect(() => {
     const refresh = () => setRetry((value) => value + 1);
@@ -53,16 +54,28 @@ export function SimilarArtists({ artist, onOpenArtist, onFindCatalogueMatch, onC
     return () => observer.disconnect();
   }, []);
   const warmed = useRef(new Set<string>());
+  const warmRequests = useRef(new Map<string, AbortController>());
+  useEffect(() => {
+    warmed.current.clear();
+    return () => {
+      for (const request of warmRequests.current.values()) request.abort();
+      warmRequests.current.clear();
+    };
+  }, [artist.id]);
   function warmArtist(connected: CatalogueArtist) {
-    if (warmed.current.has(connected.id)) return;
+    if (warmed.current.has(connected.id) || warmRequests.current.size >= 2) return;
     warmed.current.add(connected.id);
-    if (connected.requiresArtistMatch) {
-      void exploreApi("/explore/artists?" + new URLSearchParams({ q: connected.name, provider: "apple" })).catch(() => {});
-      return;
-    }
-    void exploreApi<CatalogueArtistProfile>("/explore/artist-profile?" + new URLSearchParams({ artistId: connected.id, artist: connected.name }))
-      .then((profile) => { if (profile.imageUrl) setPortraits((current) => ({ ...current, [connected.id]: { url: profile.imageUrl!, credit: profile.imageSourceUrl } })); })
-      .catch(() => {});
+    const request = new AbortController();
+    warmRequests.current.set(connected.id, request);
+    const path = connected.requiresArtistMatch
+      ? "/explore/artists?" + new URLSearchParams({ q: connected.name, provider: "apple" })
+      : "/explore/artist-profile?" + new URLSearchParams({ artistId: connected.id, artist: connected.name });
+    void exploreApi<CatalogueArtistProfile>(path, undefined, request.signal)
+      .then((profile) => {
+        if (!request.signal.aborted && profile.imageUrl) setPortraits((current) => ({ ...current, [connected.id]: { url: profile.imageUrl!, credit: profile.imageSourceUrl } }));
+      })
+      .catch(() => { warmed.current.delete(connected.id); })
+      .finally(() => { if (warmRequests.current.get(connected.id) === request) warmRequests.current.delete(connected.id); });
   }
   useEffect(() => {
     if (data?.artistId === artist.id && data.resolvedArtistId) canonicalCallback.current?.(data.resolvedArtistId);
@@ -80,7 +93,7 @@ export function SimilarArtists({ artist, onOpenArtist, onFindCatalogueMatch, onC
     const portrait = portraits[connected.id];
     return <article className={`similarArtistCard${featured ? " isFeatured" : ""}`} key={connected.id} style={{ "--connection-hue": artistHue(connected.name) } as CSSProperties}>
       <button className="similarArtistOpen" onMouseEnter={() => warmArtist(connected)} onFocus={() => warmArtist(connected)} onClick={() => onOpenArtist(connected)} aria-label={`Explore ${connected.name}`}>
-        <span className="similarArtistPortrait" aria-hidden="true"><span>{initials(connected.name)}</span>{portrait ? <img key={portrait.url} src={portrait.url} alt="" loading="lazy" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : connected.artworkUrl && <ArtworkImage src={connected.artworkUrl} alt="" />}</span>
+        <span className="similarArtistPortrait" aria-hidden="true"><span>{initials(connected.name)}</span>{portrait ? <img key={portrait.url} src={portrait.url} alt="" loading="lazy" decoding="async" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : connected.artworkUrl && <ArtworkImage src={connected.artworkUrl} alt="" />}</span>
         <span className="similarArtistIdentity"><span className="similarArtistConnection">{entry.sources.length > 1 ? <><GitBranch size={12} /> Multiple sources</> : entry.sources.includes("musicmap") ? <><Compass size={12} /> Music-Map connection</> : entry.sources.includes("listenbrainz") ? <><Headphones size={12} /> Listener connection</> : <><Compass size={12} /> {entry.connection === "related" ? "Artist connection" : "Shared musical territory"}</>}</span><strong>{connected.name}</strong><span className="similarArtistDescription">{connected.description || [connected.type, connected.country].filter(Boolean).join(" · ") || "Explore their releases and connections"}</span></span>
         <ArrowUpRight className="similarArtistArrow" size={18} aria-hidden="true" />
       </button>

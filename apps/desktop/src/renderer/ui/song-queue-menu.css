@@ -32,3 +32,181 @@
   background: var(--bg2);
   color: var(--tx0);
 }
+
+/* Compact, theme-owned surfaces; motion is shared with transitions-dev. */
+.queueMenu.songQueueMenu {
+  width: 14rem;
+  max-height: calc(100dvh - 1rem);
+  overflow-y: auto;
+}
+
+.songMenuDivider {
+  height: 1px;
+  background: var(--line2);
+  margin: 0.25rem 0;
+}
+
+.queueMenu.songQueueMenu .songMenuTrailing {
+  margin-left: auto;
+  width: 0.875rem;
+}
+
+.queueMenu.songQueueMenu[data-picker="true"] {
+  width: 18rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.queueMenu.songQueueMenu[data-picker="true"] > * {
+  flex-shrink: 0;
+}
+
+.queueMenu.songQueueMenu[data-picker="true"] .songPlaylistBack {
+  font-weight: 600;
+  color: var(--tx0);
+}
+
+.songPlaylistSearch {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.375rem 0.25rem;
+  padding: 0 0.5rem;
+  border: 1px solid var(--line2);
+  border-radius: var(--r-s);
+  background: var(--bg1);
+}
+
+.songPlaylistSearch:focus-within {
+  border-color: var(--acc);
+}
+
+.songPlaylistSearch svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  color: var(--tx2);
+  flex-shrink: 0;
+}
+
+.songPlaylistSearch input {
+  width: 100%;
+  min-width: 0;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--tx0);
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.songPlaylistSearch input:focus-visible {
+  outline: none;
+}
+
+.queueMenu.songQueueMenu[data-picker="true"] .songPlaylistOptions {
+  min-height: 0;
+  max-height: 15rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  flex-shrink: 1;
+}
+
+.queueMenu.songQueueMenu[data-picker="true"] .songPlaylistOptions button {
+  width: 100%;
+  min-height: 2.875rem;
+  text-align: left;
+}
+
+.songPlaylistOptions button > span {
+  display: grid;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.songPlaylistOptions strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--tx0);
+}
+
+.songPlaylistOptions small {
+  color: var(--tx2);
+  font-size: 0.6875rem;
+}
+
+.queueMenu.songQueueMenu button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.queueMenu.songQueueMenu button:disabled:hover {
+  background: transparent;
+  color: var(--tx1);
+}
+
+.songPlaylistEmpty, .songPlaylistNotice {
+  padding: 0.625rem 0.5rem;
+  margin: 0;
+  color: var(--tx2);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.songPlaylistNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  border-top: 1px solid var(--line2);
+  color: var(--tx0);
+}
+
+.songPlaylistNotice svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  color: var(--acc);
+}
+
+.songPlaylistNotice.error {
+  color: var(--danger, var(--tx0));
+}
+
+
+.t-dropdown {
+  transform-origin: top left;
+  transform: scale(var(--dropdown-pre-scale));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--dropdown-open-dur) var(--dropdown-ease),
+    opacity   var(--dropdown-open-dur) var(--dropdown-ease);
+  will-change: transform, opacity;
+}
+.t-dropdown[data-origin="top-right"]     { transform-origin: top right; }
+.t-dropdown[data-origin="top-center"]    { transform-origin: top center; }
+.t-dropdown[data-origin="bottom-left"]   { transform-origin: bottom left; }
+.t-dropdown[data-origin="bottom-center"] { transform-origin: bottom center; }
+.t-dropdown[data-origin="bottom-right"]  { transform-origin: bottom right; }
+
+.t-dropdown.is-open {
+  transform: scale(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+.t-dropdown.is-closing {
+  transform: scale(var(--dropdown-closing-scale));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--dropdown-close-dur) var(--dropdown-ease),
+    opacity   var(--dropdown-close-dur) var(--dropdown-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-dropdown { transition: none !important; }
+}

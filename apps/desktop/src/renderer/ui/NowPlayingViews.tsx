@@ -88,6 +88,7 @@ function LyricsPanel({ currentFile, playback, frameRef, getFrameAgeMs, onSeek, p
   const { result, failed, failure, retry, retrySeconds } = resource;
   const [following, setFollowing] = useState(true);
   const [active, setActive] = useState(-1);
+  const activeRef = useRef(-1);
   const [seekError, setSeekError] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const clock = useRef({ playback, observedAt: performance.now() });
@@ -105,20 +106,35 @@ function LyricsPanel({ currentFile, playback, frameRef, getFrameAgeMs, onSeek, p
     if (!visible || (result?.status !== "synced" && result?.status !== "plain")) return;
     if (result.status === "plain" && (!following || !playback.durationMs)) return;
     let frameId = 0;
+    const viewport = scroller.current;
+    let scrollHeight = 0;
+    let clientHeight = 0;
+    let lastScrollTop = NaN;
+    const measure = () => {
+      if (!viewport || result.status !== "plain") return;
+      scrollHeight = viewport.scrollHeight;
+      clientHeight = viewport.clientHeight;
+      lastScrollTop = NaN;
+    };
+    measure();
     const sync = (now: number) => {
       const snapshot = clock.current;
       const frame = frameRef.current;
       const position = lyricsPositionMs(snapshot.playback, now - snapshot.observedAt, frame,
         frame ? getFrameAgeMs(frame, now) : Infinity);
       if (result.status === "synced") {
-        setActive(previous => {
-          const next = activeLyricIndex(result.lines, position);
-          return next === previous ? previous : next;
-        });
-      } else {
-        const viewport = scroller.current;
-        if (viewport) viewport.scrollTop = plainLyricsScrollTop(position, snapshot.playback.durationMs,
-          viewport.scrollHeight, viewport.clientHeight);
+        const next = activeLyricIndex(result.lines, position);
+        // Dispatch only at a lyric boundary, rather than entering React every frame.
+        if (next !== activeRef.current) {
+          activeRef.current = next;
+          setActive(next);
+        }
+      } else if (viewport) {
+        const top = plainLyricsScrollTop(position, snapshot.playback.durationMs, scrollHeight, clientHeight);
+        if (top !== lastScrollTop) {
+          viewport.scrollTop = top;
+          lastScrollTop = top;
+        }
       }
     };
     const update = (now: number) => {
@@ -127,7 +143,8 @@ function LyricsPanel({ currentFile, playback, frameRef, getFrameAgeMs, onSeek, p
     };
     update(performance.now());
     // Wrapping and font changes alter the distance an untimed song must travel.
-    const resize = new ResizeObserver(() => sync(performance.now()));
+    // Keep layout reads outside the animation loop; resize also covers font reflow.
+    const resize = new ResizeObserver(() => { measure(); sync(performance.now()); });
     if (result.status === "plain" && scroller.current) {
       resize.observe(scroller.current);
       if (scroller.current.firstElementChild) resize.observe(scroller.current.firstElementChild);

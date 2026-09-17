@@ -2,7 +2,7 @@ import { ArtworkImage } from "./ArtworkImage";
 import { useEffect, useState, type ReactNode } from "react";
 import { ArrowUpRight, Disc3, Search } from "lucide-react";
 import type { AlbumGroup, CatalogueProvider } from "@music-os/core";
-import { exploreApi as api } from "./explore-api";
+import { cachedExploreApi as api } from "./artist-resource";
 import "./artist-search-landing.css";
 
 export function ArtistSearchLanding({
@@ -20,11 +20,11 @@ export function ArtistSearchLanding({
 }) {
   const [albums, setAlbums] = useState<AlbumGroup[]>([]);
   useEffect(() => {
-    let live = true;
-    void api<{ albums: AlbumGroup[] }>("/library/albums?limit=24&sort=recent")
+    const request = new AbortController();
+    void api<{ albums: AlbumGroup[] }>("/library/albums?limit=24&sort=recent", undefined, request.signal)
       .then(({ albums: recent }) => {
         const names = new Set<string>();
-        if (live) setAlbums(recent.filter((album) => {
+        if (!request.signal.aborted) setAlbums(recent.filter((album) => {
           const key = album.artist.trim().toLocaleLowerCase();
           if (!key || key === "unknown artist" || names.has(key)) return false;
           names.add(key);
@@ -32,7 +32,7 @@ export function ArtistSearchLanding({
         }).slice(0, 4));
       })
       .catch(() => { /* Library shortcuts are optional; search stays available. */ });
-    return () => { live = false; };
+    return () => request.abort();
   }, []);
   return (
     <section className="artistSearchLanding" aria-label="Browse artists">

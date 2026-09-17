@@ -14,6 +14,7 @@
     "playback-progress:smoke": "tsx src/scripts/playback-progress-smoke.ts",
     "appearance:smoke": "tsx src/scripts/appearance-smoke.ts",
     "typecheck": "tsc --noEmit",
+    "song-menu:smoke": "node src/scripts/song-menu-smoke.mjs",
     "artwork-requests:smoke": "tsx src/scripts/artwork-requests-smoke.ts",
     "artist-resource:smoke": "tsx src/scripts/artist-resource-smoke.ts",
     "record-player:smoke": "tsx src/scripts/record-player-smoke.ts",
@@ -21,7 +22,17 @@
     "now-playing-motion:smoke": "node src/scripts/now-playing-motion-smoke.mjs",
     "visualizer-canvas:smoke": "node src/scripts/visualizer-canvas-smoke.mjs",
     "turntable-cache:smoke": "node src/scripts/turntable-cache-smoke.mjs",
-    "lyrics:smoke": "tsx src/scripts/lyrics-smoke.ts"
+    "lyrics:smoke": "tsx src/scripts/lyrics-smoke.ts",
+    "visualizer-performance:smoke": "node src/scripts/visualizer-performance-smoke.mjs",
+    "turntable-batching:smoke": "tsx src/scripts/turntable-batching-smoke.ts",
+    "library-performance:smoke": "node src/scripts/library-performance-smoke.mjs",
+    "album-favorites:smoke": "tsx src/scripts/album-favorites-smoke.ts",
+    "home-refresh:smoke": "node src/scripts/home-refresh-smoke.mjs",
+    "home-scroll:smoke": "node src/scripts/home-scroll-smoke.mjs",
+    "album-sort:smoke": "tsx src/scripts/album-sort-smoke.ts",
+    "command-search:smoke": "tsx src/scripts/command-search-smoke.ts",
+    "playlist-performance:smoke": "node src/scripts/playlist-performance-smoke.mjs",
+    "explore-jobs:smoke": "node src/scripts/explore-jobs-smoke.mjs"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",

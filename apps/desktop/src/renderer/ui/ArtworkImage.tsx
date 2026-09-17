@@ -1,28 +1,13 @@
-import { useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
+import { memo, useEffect, useState, type ComponentPropsWithoutRef } from "react";
+import { useArtworkVisibility } from "./useArtworkVisibility";
 import { getArtworkObjectUrl } from "../artwork-requests";
 
 // Small image-only counterpart to the library's Artwork component. Both use
 // the same request budget so artist shortcuts cannot crowd out API calls.
-export function ArtworkImage({ src, loading = "lazy", style, ...props }: ComponentPropsWithoutRef<"img"> & { src: string }) {
-  const frame = useRef<HTMLImageElement>(null);
-  const [visible, setVisible] = useState(loading === "eager");
+export const ArtworkImage = memo(function ArtworkImage({ src, loading = "lazy", style, ...props }: ComponentPropsWithoutRef<"img"> & { src: string }) {
+  const { ref, visible } = useArtworkVisibility(loading === "eager");
   const [url, setUrl] = useState<string>();
   const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    if (visible) return;
-    if (loading === "eager" || !frame.current || typeof IntersectionObserver === "undefined") {
-      setVisible(true);
-      return;
-    }
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        setVisible(true);
-        observer.disconnect();
-      }
-    }, { rootMargin: "200px" });
-    observer.observe(frame.current);
-    return () => observer.disconnect();
-  }, [loading, visible]);
   useEffect(() => {
     setUrl(undefined);
     setFailed(false);
@@ -33,5 +18,5 @@ export function ArtworkImage({ src, loading = "lazy", style, ...props }: Compone
       .catch(() => { if (!controller.signal.aborted) setFailed(true); });
     return () => controller.abort();
   }, [src, loading, visible]);
-  return <img {...props} ref={frame} src={url} loading={loading} decoding="async" style={failed ? { ...style, display: "none" } : style} />;
-}
+  return <img {...props} ref={ref} src={visible ? url : undefined} loading="eager" decoding="async" style={failed ? { ...style, display: "none" } : style} />;
+});
