@@ -11355,7 +11355,7 @@ img.playerArt {
 
 /* Discovery transfer workbench -------------------------------- */
 
-.centerPane:has(.discoveryPage) {
+.centerPane:has(> .discoveryViewHost:not([hidden]) .discoveryPage) {
   padding: 0;
   overflow: hidden;
 }

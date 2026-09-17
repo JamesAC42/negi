@@ -1,3 +1,4 @@
+import { agentCapabilities } from "./services/agent-catalog-service.js";
 import { recordPlayerPresenceSchema, recordPlayerActionSchema } from "@music-os/core";
 import { getHomeListening } from "./services/home-listening.js";
 import { handleExplore } from "./explore-routes.js";
@@ -526,6 +527,17 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/agent/capabilities") {
+      writeJson(response, 200, { capabilities: agentCapabilities });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/agent/catalog/jobs") {
+      const ids = new Set((url.searchParams.get("ids") ?? "").split(",").filter(Boolean));
+      writeJson(response, 200, { jobs: ids.size ? app.albumAcquisitions.list([...ids].slice(0, 1000)) : [] });
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/agent/runs") {
       writeJson(response, 200, agentRunsResponseSchema.parse({ runs: app.agentRuns.listRuns() }));
       return;
@@ -537,9 +549,16 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    const agentPlaylistResumeMatch = url.pathname.match(/^\/agent\/playlist-workflows\/([^/]+)\/resume$/);
+    if (request.method === "POST" && agentPlaylistResumeMatch) {
+      await app.agentPlaylistWorkflows.resume(decodeURIComponent(agentPlaylistResumeMatch[1]!));
+      writeJson(response, 200, agentPlaylistWorkflowsResponseSchema.parse({ workflows: app.agentPlaylistWorkflows.listWorkflows() }));
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/agent/runs") {
       const body = agentRunRequestSchema.parse(await readJson(request));
-      const run = await app.agentRuns.run(body.message, body.threadId);
+      const run = await app.agentRuns.run(body.message, body.threadId, body.catalogAction);
       writeJson(response, 201, agentRunResponseSchema.parse({ run }));
       return;
     }
@@ -919,7 +938,7 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/agent/message") {
       const body = agentMessageRequestSchema.parse(await readJson(request));
-      const run = await app.agentRuns.run(body.message, body.threadId);
+      const run = await app.agentRuns.run(body.message, body.threadId, body.catalogAction);
       if (!run.response) {
         throw new Error(run.error ?? "Agent run completed without a response");
       }

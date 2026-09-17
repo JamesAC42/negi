@@ -1,4 +1,4 @@
-.centerPane:has(.exploreWorkspace) {
+.centerPane:has(> .discoveryViewHost:not([hidden]) .exploreWorkspace) {
   padding: 0;
   overflow: hidden;
   scrollbar-gutter: auto;

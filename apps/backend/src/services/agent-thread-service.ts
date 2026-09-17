@@ -1,3 +1,4 @@
+import type { OperationService } from "./operation-service.js";
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
 import type { AgentMessageResponse, AgentThreadResponse } from "@music-os/core";
@@ -20,7 +21,7 @@ interface AgentMessageRow {
 }
 
 export class AgentThreadService {
-  constructor(private readonly db: Database.Database) {}
+  constructor(private readonly db: Database.Database, private readonly operations?: Pick<OperationService, "getBatch">) {}
 
   getActiveThread(): AgentThreadResponse {
     const existing = this.db
@@ -47,7 +48,17 @@ export class AgentThreadService {
       .all(threadId) as AgentMessageRow[];
     return {
       thread: mapThread(row),
-      messages: messages.map(mapMessage)
+      messages: messages.map((row) => {
+        const message = mapMessage(row);
+        const batch = message.response?.operationBatch;
+        if (batch && this.operations && message.response) {
+          // Conversation JSON is a historical snapshot. Operation state is live:
+          // reopening a thread must never resurrect an already-applied proposal.
+          try { message.response.operationBatch = this.operations.getBatch(batch.id); }
+          catch { message.response.operationBatch = null; }
+        }
+        return message;
+      })
     };
   }
 

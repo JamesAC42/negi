@@ -819,6 +819,7 @@ try {
     undefined,
     app.agentPlaylistWorkflows
   );
+  app.tasteProfile.updateProfile({ ...app.tasteProfile.getProfile().profile, qualityPreferences: { preferLossless: true, allowMp3IfRare: true, minimumBitrateKbps: 320 } });
   const versionRun = await versionRuns.run("make me a version-sensitive playlist");
   assert(
     versionRun.response?.discoveryResults[0]?.discoveryId === "version-exact-mp3",

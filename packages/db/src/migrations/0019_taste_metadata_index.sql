@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_taste_embedded_tags_file ON embedded_tags(file_id);

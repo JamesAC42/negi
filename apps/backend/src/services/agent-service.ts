@@ -21,7 +21,7 @@ import type { TasteProfileService } from "./taste-profile-service.js";
 
 type LibraryFile = LibraryFilesResponse["files"][number];
 type DiscoverySearchTool = Pick<SlskdService, "search">;
-type TasteProfileReader = Pick<TasteProfileService, "getProfile">;
+type TasteProfileReader = Pick<TasteProfileService, "getProfile"> & Partial<Pick<TasteProfileService, "getEffectiveProfile">>;
 type DiscoveryQualityPreference = {
   preferredFormats: string[];
   preferLossless: boolean;
@@ -139,7 +139,7 @@ export class AgentService {
       return undefined;
     }
     try {
-      return compactTasteProfile(this.tasteProfile.getProfile().profile);
+      return compactTasteProfile(this.tasteProfile.getEffectiveProfile?.() ?? this.tasteProfile.getProfile().profile);
     } catch {
       return undefined;
     }
@@ -592,10 +592,16 @@ export class AgentService {
     originalMessage: string,
     options: AgentHandleMessageOptions
   ): Promise<AgentMessageResponse> {
-    const candidates = dedupeTrackCandidates(options.trackCandidates ?? []).slice(0, 20);
+    const proposed = dedupeTrackCandidates(options.trackCandidates ?? []).slice(0, 20);
+    const profile = this.tasteProfile?.getEffectiveProfile?.() ?? this.tasteProfile?.getProfile().profile;
+    const blocked = new Set(profile?.blockedArtists?.map(normalizeFallbackKey) ?? []);
+    const overplayed = new Set(profile?.overplayedTracks?.map(normalizeFallbackKey) ?? []);
+    const candidates = proposed.filter((candidate) => !blocked.has(normalizeFallbackKey(candidate.artist)) &&
+      !overplayed.has(normalizeFallbackKey(candidate.title)) &&
+      !overplayed.has(normalizeFallbackKey(candidate.artist + " " + candidate.title)));
     if (candidates.length === 0) {
       return {
-        reply:
+        reply: proposed.length > 0 ? "The proposed tracks conflict with your blocked artists or overplayed tracks. Try a different theme or update your preferences." :
           "I can build researched playlists, but this backend did not return any researched track candidates. Make sure the backend is running with MUSIC_OS_AGENT_MODEL_PROVIDER=openai and OPENAI_API_KEY or MUSIC_OS_OPENAI_API_KEY, then try again.",
         intent: "research_playlist",
         searchQuery,
@@ -1407,6 +1413,11 @@ function selectDiscoveryTrackResult(
   const normalizedTitle = normalizeFallbackKey(candidate.title);
   const normalizedAlbum = normalizeFallbackKey(candidate.album ?? "");
   const eligible = results.filter((result) => {
+    const extension = discoveryResultExtension(result);
+    const bitrate = result.bitrate ? (result.bitrate > 10000 ? result.bitrate / 1000 : result.bitrate) :
+      result.sizeBytes && result.lengthSeconds ? result.sizeBytes * 8 / result.lengthSeconds / 1000 : 0;
+    if (hasUnrequestedVersionQualifier(candidate, result) || !isAudioDiscoveryResult(result) || (extension === "mp3" && !qualityPreference.allowMp3IfRare) ||
+      (!losslessFormats.has(extension) && qualityPreference.minimumBitrateKbps != null && bitrate < qualityPreference.minimumBitrateKbps)) return false;
     if (result.isLocked) {
       return false;
     }

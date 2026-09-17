@@ -1,0 +1,113 @@
+/* The video stays mounted in this dialog while the shared transport owns playback. */
+.ytPersistentDialog { --modal-open-dur: 250ms; --modal-ease: cubic-bezier(.22,1,.36,1); box-sizing: border-box; width: min(1220px, calc(100vw - 48px)); max-width: none; max-height: calc(100dvh - 48px); padding: 0; overflow: auto; color: var(--tx0); border: 1px solid var(--line2); border-radius: 10px; background: var(--bg1); background: rgb(from var(--bg1) r g b / 1); box-shadow: 0 24px 100px #0008; }
+.ytPersistentDialog[open] { animation: yt-player-enter var(--modal-open-dur) var(--modal-ease); }
+.ytPersistentDialog::backdrop { background: #0009; backdrop-filter: blur(12px); }
+.ytPersistentDialog button, .ytPersistentDialog a { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; color: var(--tx1); background: var(--bg2); border: 1px solid var(--line2); border-radius: 4px; padding: .5rem .65rem; cursor: pointer; text-decoration: none; font: inherit; }
+.ytPersistentDialog button:hover, .ytPersistentDialog a:hover { color: var(--tx0); border-color: var(--acc-line); background: var(--acc-dim); }
+.ytPersistentDialog button:disabled { opacity: .45; cursor: default; }
+.ytPersistentDialog button:focus-visible, .ytPersistentDialog a:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; }
+.ytPersistentHeader { display: flex; justify-content: space-between; align-items: center; padding: .65rem 1rem; background: var(--bg1); border-bottom: 1px solid var(--line); }
+.ytPersistentHeader > span { display: flex; align-items: center; gap: .6rem; color: var(--tx2); font-size: .65rem; letter-spacing: .12em; }
+.ytPersistentHeader > button { padding: .3rem; background: none; border-color: transparent; }
+.ytPersistentLayout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; }
+.ytPersistentMain { min-width: 0; }
+.ytPersistentScreen { position: relative; background: #000; aspect-ratio: 16 / 9; }
+.ytPersistentScreen video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.ytPersistentLoading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .8rem; background: #000b; color: #fff; font-size: .75rem; pointer-events: none; }
+.ytPersistentInfo { padding: 1.25rem 1.35rem; background: var(--bg1); background: rgb(from var(--bg1) r g b / 1); }
+.ytPersistentEyebrow { color: var(--acc); font-size: .58rem; letter-spacing: .14em; margin-bottom: .6rem; }
+.ytPersistentInfo h2 { margin: 0; color: var(--tx0); font: 600 1.2rem/1.4 var(--font-head); overflow-wrap: anywhere; }
+.ytPersistentChannel { margin: .45rem 0; color: var(--tx1); font-size: .8rem; }
+.ytPersistentFacts { display: flex; flex-wrap: wrap; gap: .45rem 1rem; font-size: .62rem; color: var(--tx2); margin: .6rem 0 1rem; }
+.ytPersistentActions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; font-size: .65rem; }
+.ytPersistentActions > a { margin-left: auto; }
+.ytPersistentDescription { font-size: .72rem; line-height: 1.8; color: var(--tx1); white-space: pre-line; overflow-wrap: anywhere; max-height: 170px; overflow: auto; margin: 1rem 0 0; }
+.ytPersistentNotice, .ytPersistentError { font-size: .72rem; line-height: 1.7; color: var(--tx1); }
+.ytPersistentError { border: 1px solid var(--line2); padding: .7rem; display: flex; align-items: center; gap: .7rem; margin-bottom: .8rem; }
+.ytPersistentError > span { flex: 1; }
+.ytPersistentQueue { padding: 1.05rem .8rem; border-left: 1px solid var(--line2); min-width: 0; background: var(--bg0); background: rgb(from var(--bg0) r g b / 1); }
+.ytPersistentQueueHeading { display: flex; align-items: center; gap: .45rem; }
+.ytPersistentQueueHeading h3 { font: 600 .88rem var(--font-head); margin: 0; }
+.ytPersistentQueueHeading > span { margin-left: auto; color: var(--tx2); font-size: .6rem; white-space: nowrap; }
+.ytPersistentQueueHint, .ytPersistentQueueEmpty { font-size: .64rem; color: var(--tx2); line-height: 1.7; }
+.ytPersistentQueue ol { list-style: none; margin: .9rem -.2rem 0; padding: 0; max-height: 55vh; overflow: auto; }
+.ytPersistentQueue li { display: flex; align-items: center; gap: .1rem; margin-bottom: .4rem; border: 1px solid transparent; border-radius: 5px; }
+.ytPersistentQueue li.is-current { border-color: var(--acc-line); background: var(--acc-dim); }
+.ytPersistentDialog .ytPersistentQueueItem { justify-content: flex-start; gap: .6rem; flex: 1; min-width: 0; background: none; border: none; padding: .45rem; text-align: left; }
+.ytPersistentQueueThumb { display: flex; flex-shrink: 0; position: relative; width: 70px; aspect-ratio: 16 / 9; align-items: center; justify-content: center; background: var(--bg2); }
+.ytPersistentQueueThumb img { width: 100%; height: 100%; object-fit: cover; }
+.ytPersistentQueueThumb > span { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: #0005; }
+.ytPersistentQueueItem > span:last-child { min-width: 0; }
+.ytPersistentQueueItem strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font: 500 .68rem/1.5 var(--font-head); color: var(--tx0); }
+.ytPersistentQueueItem small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .56rem; color: var(--tx2); margin-top: .2rem; }
+.ytPersistentDialog .ytPersistentQueueRemove { padding: .25rem; border: none; background: none; }
+.ytBackgroundPrompt { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; padding: 1.5rem; background: #0009; backdrop-filter: blur(10px); }
+.ytBackgroundPrompt > div { width: min(390px, 100%); padding: 1.4rem; border: 1px solid var(--line2); border-radius: 8px; background: var(--bg1); background: rgb(from var(--bg1) r g b / 1); box-shadow: 0 15px 55px #0008; }
+.ytBackgroundPrompt h3 { margin: 0; font: 600 1.1rem/1.4 var(--font-head); }
+.ytBackgroundPrompt p { color: var(--tx1); font-size: .75rem; line-height: 1.7; }
+.ytBackgroundPrompt > div > div { display: flex; justify-content: flex-end; gap: .6rem; }
+.ytBackgroundPrompt button { min-width: 68px; font-size: .75rem; }
+.ytBackgroundPrompt button:last-child { background: var(--acc); border-color: var(--acc); color: var(--acc-ink); }
+@keyframes yt-player-enter { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+@media (max-width: 850px) { .ytPersistentDialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); } .ytPersistentLayout { grid-template-columns: minmax(0, 1fr); } .ytPersistentQueue { border-left: 0; border-top: 1px solid var(--line2); } .ytPersistentQueue ol { max-height: 220px; } .ytPersistentInfo { padding: 1rem; } }
+@media (max-width: 480px) { .ytPersistentActions > a { margin-left: 0; } .ytPersistentInfo h2 { font-size: 1rem; } .ytPersistentError { flex-direction: column; align-items: flex-start; } }
+@media (prefers-reduced-motion: reduce) { .ytPersistentDialog[open] { animation: none; } }
+/* Shared media controls keep Audio and Video at the same stable size. */
+.ytModeToolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .7rem 1rem; background: rgb(from var(--bg1) r g b / 1); border-bottom: 1px solid var(--line); }
+.ytModeToolbar > span { font-size: .65rem; color: var(--tx2); }
+.ytModeSwitch { --tabs-dur: 250ms; --tabs-ease: cubic-bezier(.22,1,.36,1); display: grid; grid-template-columns: repeat(2, 1fr); position: relative; padding: 3px; border: 1px solid var(--line2); border-radius: 7px; background: var(--bg0); }
+.ytModeSwitch > span { position: absolute; inset: 3px auto 3px 3px; width: calc((100% - 6px) / 2); background: var(--acc-dim); border: 1px solid var(--acc-line); border-radius: 4px; box-sizing: border-box; transition: transform var(--tabs-dur) var(--tabs-ease); }
+.ytModeSwitch[data-mode="video"] > span { transform: translateX(100%); }
+.ytPersistentDialog .ytModeSwitch button { z-index: 1; min-width: 95px; padding: .4rem .75rem; border: 0; background: transparent; font-size: .72rem; transition: color var(--tabs-dur) var(--tabs-ease); }
+.ytPersistentDialog .ytModeSwitch button[aria-pressed="true"] { color: var(--acc); }
+.ytAudioArtwork { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; background: var(--bg0); opacity: 0; pointer-events: none; transition: opacity 220ms ease; }
+.ytAudioArtwork img { width: 100%; height: 100%; object-fit: contain; }
+.ytAudioArtwork > span { position: absolute; bottom: 1rem; left: 1rem; display: flex; align-items: center; gap: .5rem; padding: .5rem .7rem; color: white; background: #111b; backdrop-filter: blur(12px); border: 1px solid #ffffff25; border-radius: 5px; font-size: .7rem; }
+.ytPersistentScreen[data-mode="audio"] .ytAudioArtwork { opacity: 1; }
+.ytVideoUnavailable { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: .8rem; color: var(--tx1); background: var(--bg0); font-size: .8rem; }
+.ytMediaControls { padding: .7rem 1rem .6rem; background: rgb(from var(--bg1) r g b / 1); border-bottom: 1px solid var(--line); }
+.ytMediaControls input { accent-color: var(--acc); cursor: pointer; padding: 0; }
+.ytMediaControls .ytMediaSeek { display: block; width: 100%; height: 14px; margin: 0 0 .45rem; }
+.ytMediaControls > div { display: flex; align-items: center; gap: .75rem; }
+.ytPersistentDialog .ytMediaControls button { padding: .35rem; border-color: transparent; background: transparent; }
+.ytPersistentDialog .ytMediaControls .ytMediaPlay { color: var(--acc); }
+.ytMediaTime { font-size: .72rem; font-variant-numeric: tabular-nums; color: var(--tx0); }
+.ytMediaTime > span { color: var(--tx2); }
+.ytMediaControls label { margin-left: auto; display: flex; align-items: center; gap: .6rem; color: var(--tx1); }
+.ytMediaControls label input { width: 85px; height: 14px; }
+.ytPersistentQueue { padding: 1.2rem 1rem; }
+.ytPersistentQueueHeading { gap: .6rem; min-height: 26px; }
+.ytPersistentQueueHint { margin: .65rem 0 1.1rem; line-height: 1.65; max-width: 26ch; }
+.ytPersistentQueue ol { margin: 0; }
+.ytPersistentQueue li { margin-bottom: .55rem; }
+.ytPersistentDialog .ytPersistentQueueItem { padding: .6rem; gap: .75rem; }
+.ytPersistentQueueItem small { margin-top: .35rem; line-height: 1.4; }
+.ytBackgroundPrompt, .ytBackgroundPrompt > div { box-sizing: border-box; }
+.ytBackgroundPrompt > div { padding: 1.6rem; width: min(420px, 100%); }
+.ytBackgroundPrompt p { margin: .8rem 0 1.5rem; }
+.ytBackgroundPrompt > div > div { gap: .75rem; }
+.ytBackgroundPrompt button { min-width: 88px; min-height: 38px; }
+@media(max-width:480px) { .ytMediaControls label input { width: 60px; } .ytModeToolbar > span { display: none; } .ytBackgroundPrompt { padding: 1rem; } }
+@media(prefers-reduced-motion:reduce) { .ytModeSwitch > span, .ytModeSwitch button, .ytAudioArtwork { transition: none; } }
+.ytPersistentMain:fullscreen { display: flex; flex-direction: column; background: #000; color: var(--tx0); }
+.ytPersistentMain:fullscreen .ytPersistentInfo, .ytPersistentMain:fullscreen .ytModeToolbar { display: none; }
+.ytPersistentMain:fullscreen .ytPersistentScreen { flex: 1; min-height: 0; aspect-ratio: auto; }
+.ytPersistentMain:fullscreen .ytMediaControls { flex: none; }
+/* Small, consistent sliders instead of platform-dependent range chrome. */
+.ytMediaControls input[type="range"], .youtubeTransport input[type="range"] { appearance: none; -webkit-appearance: none; background: transparent; border: 0; outline-offset: 4px; }
+.ytMediaControls input[type="range"]::-webkit-slider-runnable-track, .youtubeTransport input[type="range"]::-webkit-slider-runnable-track { height: 3px; border-radius: 2px; background: var(--line2); }
+.ytMediaControls input[type="range"]::-webkit-slider-thumb, .youtubeTransport input[type="range"]::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 10px; height: 10px; margin-top: -3.5px; border: 0; border-radius: 2px; background: var(--acc); }
+.ytMediaControls input[type="range"]::-moz-range-track, .youtubeTransport input[type="range"]::-moz-range-track { height: 3px; border-radius: 2px; background: var(--line2); }
+.ytMediaControls input[type="range"]::-moz-range-thumb, .youtubeTransport input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border: 0; border-radius: 2px; background: var(--acc); }.ytPersistentScreen { max-height: 42dvh; overflow: hidden; }
+.ytPersistentScreen video { position: absolute; inset: 0; }
+.ytPersistentMain:fullscreen .ytPersistentScreen { max-height: none; }
+.ytPersistentActions > .youtubeCopyLink { margin-left: auto; }
+.ytPersistentQueue li { flex-wrap: wrap; position: relative; padding: .2rem; }
+.ytPersistentDialog .ytQueueGrip { padding: .2rem 0; background: transparent; border: 0; color: var(--tx2); cursor: grab; flex-shrink: 0; }
+.ytQueueGrip:active { cursor: grabbing; }
+.ytPersistentDialog .ytPersistentQueueItem { padding: .4rem; gap: .5rem; }
+.ytQueueRowActions { display: flex; justify-content: flex-end; gap: .2rem; width: 100%; padding: 0 .2rem .2rem; }
+.ytPersistentDialog .ytQueueRowActions button { padding: .25rem; background: transparent; border-color: transparent; }
+.ytPersistentDialog .ytQueueRowActions button:hover { background: var(--acc-dim); border-color: var(--acc-line); }
+@media(max-width:480px) { .ytPersistentActions > .youtubeCopyLink { margin-left: 0; } }
+.ytPersistentScreen { width: 100%; }

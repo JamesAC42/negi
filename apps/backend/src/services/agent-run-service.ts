@@ -1,3 +1,5 @@
+import type { AgentCatalogService } from "./agent-catalog-service.js";
+import type { AgentCatalogActionRequest } from "@music-os/core";
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
 import type { AgentMessageResponse, AgentResearchSource, AgentRunResponse } from "@music-os/core";
@@ -48,7 +50,8 @@ export class AgentRunService {
     private readonly modelProvider?: AgentModelProvider,
     private readonly metadataTool?: AgentMetadataTool,
     private readonly playlistWorkflows?: AgentPlaylistWorkflowService,
-    private readonly autoStartResearchPlaylists = false
+    private readonly autoStartResearchPlaylists = false,
+    private readonly catalog?: AgentCatalogService
   ) {}
 
   listRuns(limit = 50): AgentRunResponse["run"][] {
@@ -72,7 +75,7 @@ export class AgentRunService {
     };
   }
 
-  async run(message: string, threadId?: string): Promise<AgentRunResponse["run"]> {
+  async run(message: string, threadId?: string, catalogAction?: AgentCatalogActionRequest): Promise<AgentRunResponse["run"]> {
     const objective = message.trim();
     if (!objective) {
       throw new Error("Agent run message cannot be empty");
@@ -98,6 +101,10 @@ export class AgentRunService {
     };
 
     try {
+      let catalogResponse = await this.handleCatalog(objective, thread.id, catalogAction);
+      if (catalogResponse) recordStep({ type: "tool", toolName: "catalog", status: "completed",
+        summary: catalogResponse.catalogPlan?.title ?? catalogResponse.reply,
+        output: { capability: catalogResponse.catalogPlan?.capability, status: catalogResponse.catalogPlan?.status, itemCount: catalogResponse.catalogPlan?.items.length } });
       const deterministicIntent = detectAgentIntent(objective);
       const searchQueryHints: string[] = [];
       let playlistName: string | undefined;
@@ -106,7 +113,7 @@ export class AgentRunService {
       let researchSources: AgentResearchSource[] = [];
       let suggestedIntent: AgentMessageResponse["intent"] | undefined;
       let suggestedSearchQuery: string | undefined;
-      if (this.metadataTool && deterministicIntent !== "research_playlist" && deterministicIntent !== "propose_playlist") {
+      if (!catalogResponse && this.metadataTool && deterministicIntent !== "research_playlist" && deterministicIntent !== "propose_playlist") {
         try {
           const metadata = await this.metadataTool.lookup(objective);
           if (metadata) {
@@ -131,11 +138,12 @@ export class AgentRunService {
           });
         }
       }
-      if (this.modelProvider && this.modelProvider.name !== "local") {
+      if (!catalogResponse && this.modelProvider && this.modelProvider.name !== "local") {
         try {
           const planningContext = this.agent.getPlanningContext();
           const modelPlan = await this.modelProvider.plan(objective, planningContext);
           if (modelPlan) {
+            if (modelPlan.catalogRequest && this.catalog) catalogResponse = await this.catalog.handle(objective, modelPlan.catalogRequest);
             suggestedIntent = modelPlan.intent ?? inferIntentFromModelPlan(modelPlan) ?? suggestedIntent;
             suggestedSearchQuery = modelPlan.searchQuery ?? suggestedSearchQuery;
             playlistName = modelPlan.playlistName ?? playlistName;
@@ -162,7 +170,7 @@ export class AgentRunService {
             error: error instanceof Error ? error.message : String(error)
           });
         }
-      } else {
+      } else if (!catalogResponse) {
         recordStep({
           type: "plan",
           toolName: "model:local",
@@ -176,7 +184,7 @@ export class AgentRunService {
         });
       }
       const response = {
-        ...(await this.agent.handleMessage(objective, {
+        ...(catalogResponse ?? await this.agent.handleMessage(objective, {
           recordStep,
           discoveryQueryHints: searchQueryHints,
           suggestedIntent,
@@ -283,6 +291,34 @@ export class AgentRunService {
     return row;
   }
 
+  private async handleCatalog(message: string, threadId: string, requested?: AgentCatalogActionRequest): Promise<AgentMessageResponse | null> {
+    if (!this.catalog) {
+      if (requested) throw new Error("Catalog planning is unavailable.");
+      return null;
+    }
+    if (requested) {
+      const previous = this.getRun(requested.runId);
+      if (previous.threadId !== threadId || !previous.response) throw new Error("Choose a catalog action from this conversation.");
+      return this.catalog.choose(previous.response, requested.choiceId, requested.runId + ":" + requested.choiceId);
+    }
+    // Exact label replies are accepted as a convenience. Never interpret a loose
+    // "yes" as download approval, or guess among ambiguous artist names.
+    const row = this.db.prepare("SELECT id, response_json FROM agent_runs WHERE thread_id = ? AND response_json IS NOT NULL ORDER BY rowid DESC LIMIT 1").get(threadId) as { id: string; response_json: string } | undefined;
+    if (row) {
+      const previous = JSON.parse(row.response_json) as AgentMessageResponse;
+      const matches = previous.catalogPlan?.choices.filter((choice) => choice.label.toLowerCase() === message.trim().toLowerCase()) ?? [];
+      if (matches.length === 1) return this.catalog.choose(previous, matches[0]!.id, row.id + ":" + matches[0]!.id);
+      if (previous.catalogPlan?.title === "Who performs this song?" && !/\b(find|download|recommend|playlist|play|search|album|song)\b/i.test(message)) {
+        const song = previous.catalogPlan.notes.find((note) => note.startsWith("Song requested: "))?.slice(16);
+        if (song) return this.catalog.handle("Find the song " + song + " by " + message.trim());
+      }
+      if (previous.catalogPlan?.title === "Which artist made this album?" && !/\b(find|download|recommend|playlist|play|search|album|song)\b/i.test(message)) {
+        const album = previous.catalogPlan.notes.find((note) => note.startsWith("Album requested: "))?.slice(17);
+        if (album) return this.catalog.handle((previous.catalogPlan.capability === "complete" ? "Complete the album " : "Download the album ") + album + " by " + message.trim());
+      }
+    }
+    return this.catalog.handle(message);
+  }
   private attachOperationBatch(response: AgentMessageResponse, threadId: string | null): void {
     if (!response.operationBatch || !threadId) {
       return;

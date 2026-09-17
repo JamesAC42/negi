@@ -19,18 +19,23 @@ import {
   errorMessage,
   identityKey,
   useExploreJobs,
+  ExploreVisibleContext,
 } from "./explore-api";
 import { ArtistExplorer } from "./ArtistExplorer";
+import type { YoutubeNavigationRequest } from "./YoutubeBrowser";
 import { YoutubeExplorer } from "./YoutubeExplorer";
 import "./explore.css";
 import "./discovery-workspace.css";
 export { ArtistExplorer };
-export function DiscoveryModes({ children }: { children: ReactNode }) {
-  const [mode, setMode] = useState("artists");
-  const [visited, setVisited] = useState(["artists"]);
+export function DiscoveryModes({ children, youtubeRequest, visible = true }: { children: ReactNode; youtubeRequest?: YoutubeNavigationRequest; visible?: boolean }) {
+  const [mode, setMode] = useState(youtubeRequest ? "youtube" : "artists");
+  const [visited, setVisited] = useState(youtubeRequest ? ["artists", "youtube"] : ["artists"]);
   const { jobs, error } = useExploreJobs<AcquisitionJob>(
-    "/explore/albums/jobs",
+    "/explore/albums/jobs", visible,
   );
+  useEffect(() => {
+    if (youtubeRequest) { setMode("youtube"); setVisited(old => old.includes("youtube") ? old : [...old, "youtube"]); }
+  }, [youtubeRequest?.id]);
   const active = jobs.filter((j) =>
     ["queued", "running"].includes(j.status),
   ).length;
@@ -39,7 +44,7 @@ export function DiscoveryModes({ children }: { children: ReactNode }) {
     setVisited((old) => (old.includes(next) ? old : [...old, next]));
   };
   return (
-    <div className="exploreWorkspace">
+    <ExploreVisibleContext.Provider value={visible}><div className="exploreWorkspace">
       <header className="exploreModeBar">
         <h2>Discovery</h2>
         <nav className="discoverySourceNav" aria-label="Discovery sections">
@@ -86,7 +91,7 @@ export function DiscoveryModes({ children }: { children: ReactNode }) {
         )}
         {visited.includes("youtube") && (
           <div className="discoveryModePane youtubeModePane" hidden={mode !== "youtube"}>
-            <YoutubeExplorer />
+            <YoutubeExplorer active={visible && mode === "youtube"} request={youtubeRequest} />
           </div>
         )}
         {mode === "activity" && (
@@ -95,7 +100,7 @@ export function DiscoveryModes({ children }: { children: ReactNode }) {
           </div>
         )}
       </div>
-    </div>
+    </div></ExploreVisibleContext.Provider>
   );
 }
 function AlbumActivity({

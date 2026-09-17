@@ -1,368 +1,42 @@
 import { useEffect, useState } from "react";
-import {
-  ArrowDownToLine,
-  ArrowUpRight,
-  Check,
-  Search,
-  X,
-  Inbox,
-  LoaderCircle,
-  Clapperboard as Youtube,
-} from "lucide-react";
+import { ArrowUpRight, Check, X, Inbox, Clapperboard as Youtube } from "lucide-react";
 import type { LibraryRoot, VideoJob, VideoResult } from "@music-os/core";
-import {
-  exploreApi as api,
-  errorMessage,
-  libraryChanged,
-  useExploreJobs,
-} from "./explore-api";
+import { exploreApi as api, errorMessage, libraryChanged, useExploreJobs } from "./explore-api";
+import { YoutubeBrowser, type YoutubeNavigationRequest } from "./YoutubeBrowser";
 import "./discovery-workspace.css";
-
 const isActive = (job: VideoJob) => ["queued", "running"].includes(job.status);
-const stateLabel = {
-  queued: "Queued",
-  running: "Downloading",
-  review: "Ready to review",
-  succeeded: "Imported",
-  failed: "Needs attention",
-  cancelled: "Cancelled",
-};
-const views = (n: number) =>
-  new Intl.NumberFormat(undefined, {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(n);
-function published(video: VideoResult) {
-  if (!video.uploadDate) return "Date unavailable";
-  const date = new Date(video.uploadDate + "T12:00:00");
-  return (
-    (video.approximateDate ? "≈ " : "") +
-    date.toLocaleDateString(undefined, {
-      month: "short",
-      year: "numeric",
-      ...(video.approximateDate ? {} : { day: "numeric" as const }),
-    })
-  );
-}
-export function YoutubeExplorer() {
-  const [tab, setTab] = useState("search");
+const stateLabel = { queued: "Queued", running: "Downloading", review: "Ready to review", succeeded: "Imported", failed: "Needs attention", cancelled: "Cancelled" };
+export function YoutubeExplorer({ active = true, request }: { active?: boolean; request?: YoutubeNavigationRequest }) {
   const [inboxFilter, setInboxFilter] = useState("all");
-  const [query, setQuery] = useState("");
-  const [searchedQuery, setSearchedQuery] = useState("");
-  const [loadingQuery, setLoadingQuery] = useState("");
-  const [results, setResults] = useState<VideoResult[]>([]);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [searched, setSearched] = useState(false);
-  const [health, setHealth] = useState<{
-    available: boolean;
-    message: string;
-    version: string | null;
-  } | null>(null);
-  const { jobs, error: jobsError } = useExploreJobs<VideoJob>(
-    "/explore/youtube/jobs",
-  );
+  const { jobs, error: jobsError } = useExploreJobs<VideoJob>("/explore/youtube/jobs", active);
   const [pending, setPending] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const reviewCount = jobs.filter((j) => j.status === "review").length;
-  const activeCount = jobs.filter(isActive).length;
-  useEffect(() => {
-    void api<{ available: boolean; message: string; version: string | null }>(
-      "/explore/youtube/health",
-    )
-      .then(setHealth)
-      .catch((e) => setError(errorMessage(e)));
-  }, []);
-  async function search() {
-    if (busy) return;
-    const term = query.trim();
-    setBusy(true);
-    setError("");
-    setLoadingQuery(term);
-    setNotice("");
-    try {
-      const data = await api<{ results: VideoResult[] }>(
-        "/explore/youtube/search?q=" + encodeURIComponent(term),
-      );
-      setResults(data.results);
-      setSearchedQuery(term);
-      setSearched(true);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  }
   async function download(video: VideoResult) {
-    setPending(video.id);
-    setError("");
+    setPending(video.id); setError("");
     try {
       await api("/explore/youtube/download", { url: video.url });
-      setNotice(
-        "Download queued. You can review the metadata here when the audio is ready.",
-      );
-      setInboxFilter("all");
-      setTab("inbox");
-      window.dispatchEvent(new Event("explore-jobs-changed"));
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setPending(null);
-    }
+      setNotice("Download queued. Review the metadata here when the audio is ready.");
+      setInboxFilter("all"); window.dispatchEvent(new Event("explore-jobs-changed")); return true;
+    } catch (e) { setError(errorMessage(e)); return false; }
+    finally { setPending(null); }
   }
   async function action(id: string, kind: string) {
-    try {
-      await api("/explore/youtube/" + kind, { id });
-      setError("");
-      window.dispatchEvent(new Event("explore-jobs-changed"));
-    } catch (e) {
-      setError(errorMessage(e));
-    }
+    try { await api("/explore/youtube/" + kind, { id }); setError(""); window.dispatchEvent(new Event("explore-jobs-changed")); }
+    catch (e) { setError(errorMessage(e)); }
   }
   const inboxFilters = [
     { id: "all", label: "All audio", test: (_: VideoJob) => true },
-    {
-      id: "review",
-      label: "Ready to review",
-      test: (j: VideoJob) => j.status === "review",
-    },
+    { id: "review", label: "Ready to review", test: (j: VideoJob) => j.status === "review" },
     { id: "active", label: "Downloading", test: isActive },
-    {
-      id: "history",
-      label: "History",
-      test: (j: VideoJob) =>
-        ["succeeded", "failed", "cancelled"].includes(j.status),
-    },
+    { id: "history", label: "History", test: (j: VideoJob) => ["succeeded", "failed", "cancelled"].includes(j.status) },
   ];
-  const rank = (j: VideoJob) =>
-    j.status === "review" ? 0 : isActive(j) ? 1 : j.status === "failed" ? 2 : 3;
-  const shown = [...jobs]
-    .filter(inboxFilters.find((f) => f.id === inboxFilter)!.test)
-    .sort((a, b) => rank(a) - rank(b));
-  return (
-    <section className="youtubeExplorer youtubeWorkspace">
-      <header className="youtubeHeading">
-        <div className="youtubeIdentity">
-          <span className="youtubeIcon">
-            <Youtube size={26} />
-          </span>
-          <div>
-            <h2>YouTube audio downloads</h2>
-            <p>
-              Download the best available audio with yt-dlp.
-            </p>
-          </div>
-        </div>
-        <form
-          className="youtubeSearchForm"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setTab("search");
-            void search();
-          }}
-        >
-          <Search size={18} aria-hidden="true" />
-          <input
-            aria-label="YouTube search or video link"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search music or paste a YouTube link…"
-          />
-          <button
-            disabled={busy || !query.trim() || health?.available === false}
-          >
-            {busy ? (
-              <>
-                <LoaderCircle size={14} className="youtubeSpinner" /> Searching…
-              </>
-            ) : (
-              <>
-                Find audio <ArrowUpRight size={14} />
-              </>
-            )}
-          </button>
-        </form>
-      </header>
-      <nav className="youtubeTabs" aria-label="YouTube sections">
-        <button
-          className={tab === "search" ? "active" : ""}
-          aria-current={tab === "search" ? "page" : undefined}
-          onClick={() => setTab("search")}
-        >
-          <Search size={16} /> Search
-        </button>
-        <button
-          className={tab === "inbox" ? "active" : ""}
-          aria-current={tab === "inbox" ? "page" : undefined}
-          onClick={() => setTab("inbox")}
-        >
-          <Inbox size={16} /> Audio inbox{" "}
-          <span className="discoveryCount">{reviewCount + activeCount}</span>
-        </button>
-        <span className="youtubeInboxHint">
-          {reviewCount > 0
-            ? reviewCount + " ready to review"
-            : activeCount > 0
-              ? activeCount + " downloading"
-              : "Review metadata before importing"}
-        </span>
-      </nav>
-      {health && !health.available && (
-        <p role="alert" className="exploreError">
-          {health.message}
-        </p>
-      )}
-      {(error || jobsError) && (
-        <p role="alert" className="exploreError">
-          {error || jobsError}
-        </p>
-      )}
-      <div className="youtubeSearchPage" hidden={tab !== "search"}>
-        {busy ? (
-          <div className="youtubeSearchLoading" role="status">
-            <LoaderCircle size={18} className="youtubeSpinner" />
-            <div>
-              <strong>Searching YouTube…</strong>
-              <p>
-                Looking for “{loadingQuery}”. You can check your audio inbox
-                while this loads.
-              </p>
-            </div>
-          </div>
-        ) : searched ? (
-          <div className="youtubeResultsHeading">
-            <h3>{results.length} recordings</h3>
-            <span>Results for “{searchedQuery}”</span>
-          </div>
-        ) : (
-          <div className="discoveryEmpty youtubeSearchEmpty">
-            <Youtube size={32} />
-            <h3>Search YouTube audio</h3>
-            <p>
-              Search by artist and title, or paste a video link to find its
-              audio.
-            </p>
-            <span>Search → Download → Review & import</span>
-          </div>
-        )}
-        {!busy && (
-          <div className="exploreVideoGrid youtubeResults">
-            {results.map((video, index) => {
-              const queued = jobs.some(
-                (j) =>
-                  j.url === video.url &&
-                  ["queued", "running", "review"].includes(j.status),
-              );
-              return (
-                <article className="exploreVideo youtubeVideo" key={video.id}>
-                  <a
-                    className="exploreVideoArt"
-                    href={video.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label={"Watch " + video.title + " on YouTube"}
-                  >
-                    <Youtube size={32} aria-hidden="true" />
-                    {video.thumbnail && (
-                      <img
-                        src={video.thumbnail}
-                        alt=""
-                        loading={index < 4 ? "eager" : "lazy"}
-                        onError={(e) => {
-                          e.currentTarget.style.display = "none";
-                        }}
-                      />
-                    )}
-                    <span>
-                      {video.liveStatus === "is_live"
-                        ? "LIVE"
-                        : video.duration != null
-                          ? Math.floor(video.duration / 60) +
-                            ":" +
-                            String(Math.floor(video.duration % 60)).padStart(
-                              2,
-                              "0",
-                            )
-                          : "Audio"}
-                    </span>
-                  </a>
-                  <div className="youtubeVideoBody">
-                    <h3 title={video.title}>{video.title}</h3>
-                    <p className="youtubeChannel" title={video.channel}>
-                      {video.channel || "Unknown channel"}
-                    </p>
-                    <div className="youtubeVideoFacts">
-                      <span
-                        title={
-                          video.viewCount != null
-                            ? video.viewCount.toLocaleString() + " views"
-                            : undefined
-                        }
-                      >
-                        {video.viewCount != null
-                          ? views(video.viewCount) + " views"
-                          : "Views unavailable"}
-                      </span>
-                      <time
-                        title={
-                          video.approximateDate
-                            ? "Approximate upload date from YouTube search"
-                            : undefined
-                        }
-                      >
-                        {published(video)}
-                      </time>
-                    </div>
-                    <div className="youtubeVideoActions">
-                      <button
-                        disabled={
-                          pending !== null ||
-                          queued ||
-                          video.liveStatus === "is_live" ||
-                          video.liveStatus === "is_upcoming"
-                        }
-                        onClick={() => void download(video)}
-                      >
-                        {pending === video.id ? (
-                          <LoaderCircle size={15} className="youtubeSpinner" />
-                        ) : queued ? (
-                          <Check size={15} />
-                        ) : (
-                          <ArrowDownToLine size={15} />
-                        )}{" "}
-                        {pending === video.id
-                          ? "Queuing…"
-                          : queued
-                            ? "In audio inbox"
-                            : "Download audio"}
-                      </button>
-                      <a
-                        href={video.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={"Open " + video.title + " on YouTube"}
-                        title="Watch on YouTube"
-                      >
-                        <ArrowUpRight size={17} />
-                      </a>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-        {searched && !results.length && !busy && (
-          <div className="discoveryEmpty">
-            <Search size={26} />
-            <h3>No recordings found</h3>
-            <p>Try an artist and song title, or paste a direct video link.</p>
-          </div>
-        )}
-      </div>
+  const rank = (j: VideoJob) => j.status === "review" ? 0 : isActive(j) ? 1 : j.status === "failed" ? 2 : 3;
+  const shown = [...jobs].filter(inboxFilters.find((f) => f.id === inboxFilter)!.test).sort((a,b) => rank(a)-rank(b));
+  return <YoutubeBrowser active={active} request={request} jobs={jobs} pending={pending} onDownload={download} error={error || jobsError} inbox={
       <section
         className="exploreVideoInbox youtubeInbox"
-        hidden={tab !== "inbox"}
+
         aria-label="Audio inbox"
       >
         <div className="discoverySectionHeading">
@@ -466,18 +140,14 @@ export function YoutubeExplorer() {
               Download a recording from Search. Its progress and metadata review
               will appear here.
             </p>
-            <button className="secondary" onClick={() => setTab("search")}>
+            <button className="secondary" onClick={() => window.dispatchEvent(new Event("youtube-browse-home"))}>
               Find a recording <ArrowUpRight size={14} />
             </button>
           </div>
         )}
       </section>
-      <footer className="youtubeWorkspaceFooter">
-        <span><Check size={12} /> Best available audio</span>
-        <span>Metadata review required before import</span>
-      </footer>
-    </section>
-  );
+
+  } />;
 }
 function VideoReview({
   job,

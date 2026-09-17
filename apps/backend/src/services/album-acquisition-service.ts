@@ -22,9 +22,11 @@ import {
   albumSearchQueries,
   albumMatchFailure,
   type AlbumFilePick,
+  type AlbumSourcePreferences,
 } from "./album-source-matching.js";
 export { matchReleaseFiles } from "./album-source-matching.js";
 type Payload = AcquireAlbumRequest & {
+  sourcePreferences?: AlbumSourcePreferences;
   downloadJobId?: string;
   picks?: AlbumFilePick[];
   tracks?: CatalogueTrack[];
@@ -66,13 +68,15 @@ export class AlbumAcquisitionService {
     this.closed = true;
     clearInterval(this.timer);
   }
-  list(): AcquisitionJob[] {
+  list(ids?: string[]): AcquisitionJob[] {
     return (
       this.db
         .prepare(
-          "SELECT * FROM jobs WHERE type = 'album_acquisition' ORDER BY created_at DESC LIMIT 100",
+          ids?.length
+            ? "SELECT * FROM jobs WHERE type = 'album_acquisition' AND id IN (" + ids.map(() => "?").join(",") + ") ORDER BY created_at DESC"
+            : "SELECT * FROM jobs WHERE type = 'album_acquisition' ORDER BY created_at DESC LIMIT 100",
         )
-        .all() as Row[]
+        .all(...(ids?.length ? ids : [])) as Row[]
     ).map((r) => {
       const p = JSON.parse(r.payload_json) as Payload;
       return {
@@ -90,7 +94,7 @@ export class AlbumAcquisitionService {
       };
     });
   }
-  create(request: AcquireAlbumRequest): AcquisitionJob {
+  create(request: AcquireAlbumRequest & { sourcePreferences?: AlbumSourcePreferences }): AcquisitionJob {
     if (request.artistId && request.releaseGroupId &&
       request.artistId.startsWith("apple:") !== request.releaseGroupId.startsWith("apple:"))
       throw new Error("Choose an artist and album from the same catalogue.");
@@ -109,7 +113,8 @@ export class AlbumAcquisitionService {
         throw new Error("The selected library album no longer exists.");
       request = { ...request, artist: album.artist, album: album.album };
     }
-    const existing = this.list().find(
+    const activeIds = (this.db.prepare("SELECT id FROM jobs WHERE type = 'album_acquisition' AND status IN ('running', 'queued')").all() as { id: string }[]).map((row) => row.id);
+    const existing = (activeIds.length ? this.list(activeIds) : []).find(
       (j) =>
         ["running", "queued"].includes(j.status) &&
         musicKey(j.artist) === musicKey(request.artist) &&
@@ -129,8 +134,10 @@ export class AlbumAcquisitionService {
           message: "Queued for album research",
         }),
       );
-    this.tick();
-    return this.list().find((j) => j.id === id)!;
+    // Callers may enqueue several jobs within a transaction. Start research only
+    // after that synchronous transaction commits, never for rolled-back jobs.
+    queueMicrotask(() => this.tick());
+    return this.list([id])[0]!;
   }
   cancel(id: string) {
     const row = this.row(id);
@@ -326,11 +333,11 @@ export class AlbumAcquisitionService {
         p,
         "Searching Soulseek for " +
           missing.length +
-          " missing tracks; preferring lossless sources",
+          " missing tracks; applying saved quality preferences",
         0.12,
       );
       const results = new Map<string, AlbumFilePick["result"]>();
-      let report = inspectReleaseFiles([], missing, p.artist, p.album, releaseTracks);
+      let report = inspectReleaseFiles([], missing, p.artist, p.album, releaseTracks, p.sourcePreferences);
       const queries = albumSearchQueries(p.artist, p.album);
       const searched = new Set<string>();
       const browsedFolders = new Set<string>();
@@ -351,7 +358,7 @@ export class AlbumAcquisitionService {
           const key = result.username + "\0" + result.path;
           if (!avoided.has(key) && !avoidedPeers.has(result.username ?? "")) results.set(key, result);
         }
-        report = inspectReleaseFiles([...results.values()], missing, p.artist, p.album, releaseTracks);
+        report = inspectReleaseFiles([...results.values()], missing, p.artist, p.album, releaseTracks, p.sourcePreferences);
         if (!report.missing.length) break;
         // A title search exposes only matching filenames, even when the peer
         // shares the entire album. Expand a few verified track anchors before
@@ -362,7 +369,7 @@ export class AlbumAcquisitionService {
           /^(flac|alac|wav|aiff|ape)$/i.test(result.extension || result.filename.split(".").at(-1) || "");
         const anchors = [...results.values()]
           .filter((result) => !browsedFolders.has(folderKey(result))
-            && inspectReleaseFiles([result], missing, p.artist, p.album, releaseTracks).picks.length > 0)
+            && inspectReleaseFiles([result], missing, p.artist, p.album, releaseTracks, p.sourcePreferences).picks.length > 0)
           .sort((a, b) => Number(isLossless(b)) - Number(isLossless(a)) || compareDiscoveryResultAvailability(a, b));
         for (const anchor of anchors) {
           if (browsedFolders.size >= 3 || !report.missing.length) break;
@@ -380,7 +387,7 @@ export class AlbumAcquisitionService {
             const source = result.username + "\0" + result.path;
             if (!avoided.has(source) && !avoidedPeers.has(result.username ?? "")) results.set(source, result);
           }
-          report = inspectReleaseFiles([...results.values()], missing, p.artist, p.album, releaseTracks);
+          report = inspectReleaseFiles([...results.values()], missing, p.artist, p.album, releaseTracks, p.sourcePreferences);
         }
         if (!report.missing.length) break;
         // Album queries may miss punctuation or files shared outside the expected

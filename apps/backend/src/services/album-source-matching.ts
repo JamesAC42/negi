@@ -1,7 +1,8 @@
-import type { CatalogueTrack, DiscoveryResult } from "@music-os/core";
+import type { CatalogueTrack, DiscoveryResult, TasteProfile } from "@music-os/core";
 import { musicKey, musicTitleKey } from "./album-completeness.js";
 import { compareDiscoveryResultAvailability } from "./discovery-availability.js";
 
+export type AlbumSourcePreferences = Pick<TasteProfile, "qualityPreferences" | "preferredFormats">;
 export type AlbumFilePick = { result: DiscoveryResult; track: CatalogueTrack };
 export interface AlbumMatchReport {
   picks: AlbumFilePick[];
@@ -26,23 +27,32 @@ function bitrate(r: DiscoveryResult) {
     ? r.sizeBytes * 8 / r.lengthSeconds / 1000
     : 0;
 }
-function highQuality(r: DiscoveryResult) {
+function highQuality(r: DiscoveryResult, preferences?: AlbumSourcePreferences) {
   const ext = extension(r);
   if (lossless.test(ext)) return true;
+  if (preferences && /^mp3$/i.test(ext) && !preferences.qualityPreferences.allowMp3IfRare) return false;
+  if (preferences?.qualityPreferences.minimumBitrateKbps != null) return bitrate(r) >= preferences.qualityPreferences.minimumBitrateKbps;
   const minimum = /^opus$/i.test(ext) ? 160
     : /^(aac|m4a|ogg)$/i.test(ext) || r.raw.isVariableBitRate === true ? 192 : 256;
   return bitrate(r) >= minimum;
 }
-function compareSources(a: DiscoveryResult, b: DiscoveryResult) {
+function preferenceScore(result: DiscoveryResult, preferences?: AlbumSourcePreferences): number {
+  const ext = extension(result).toLowerCase();
+  const index = preferences?.preferredFormats.map((format) => format.toLowerCase()).indexOf(ext) ?? -1;
+  return ((preferences?.qualityPreferences.preferLossless ?? true) && lossless.test(ext) ? 1000 : 0)
+    + (index >= 0 ? 100 - index : 0);
+}
+function compareSources(a: DiscoveryResult, b: DiscoveryResult, preferences?: AlbumSourcePreferences) {
   // Preserve lossless preference, but do not let a large lossless bitrate
   // outrank a peer that can actually start transferring the same music.
-  return Number(lossless.test(extension(b))) - Number(lossless.test(extension(a)))
+  return preferenceScore(b, preferences) - preferenceScore(a, preferences)
     || compareDiscoveryResultAvailability(a, b)
     || bitrate(b) - bitrate(a);
 }
-function compareFolders(a: AlbumFilePick[], b: AlbumFilePick[]) {
+function compareFolders(a: AlbumFilePick[], b: AlbumFilePick[], preferences?: AlbumSourcePreferences) {
   const losslessCount = (picks: AlbumFilePick[]) => picks.filter((p) => lossless.test(extension(p.result))).length;
-  const count = b.length - a.length || losslessCount(b) - losslessCount(a);
+  const quality = (picks: AlbumFilePick[]) => preferences ? picks.reduce((sum, pick) => sum + preferenceScore(pick.result, preferences), 0) : losslessCount(picks);
+  const count = b.length - a.length || quality(b) - quality(a);
   if (count || !a.length || !b.length) return count;
   // Files in a folder normally share one peer's availability. Use the least
   // available file if a combined search observed changing queue conditions.
@@ -102,6 +112,7 @@ export function inspectReleaseFiles(
   artist: string,
   album: string,
   allTracks: CatalogueTrack[] = tracks,
+  preferences?: AlbumSourcePreferences,
 ): AlbumMatchReport {
   const groups = new Map<string, DiscoveryResult[]>();
   const report: AlbumMatchReport = { picks: [], missing: tracks, locked: 0, lowQuality: 0, eligible: 0 };
@@ -113,7 +124,7 @@ export function inspectReleaseFiles(
     const path = musicKey(r.path);
     if (!path.includes(musicKey(artist)) || !albumNames(album).some((name) => path.includes(musicKey(name)))) continue;
     if (r.isLocked) { report.locked++; continue; }
-    if (!highQuality(r)) { report.lowQuality++; continue; }
+    if (!highQuality(r, preferences)) { report.lowQuality++; continue; }
     report.eligible++;
     const folder = (r.folder ?? r.path.replace(/[\\/][^\\/]+$/, "")).replaceAll("/", "\\")
       .replace(/\\(?:cd|disc|disk)[ ._-]*\d+$/i, "");
@@ -194,13 +205,13 @@ export function inspectReleaseFiles(
             && [...wanted].some((w) => !!w && titleForms(cleaned, artist, album).has(w)));
         }
         return exact || creditMatch || (ordinalSafe && ordered.get(trackKey(track)) === r);
-      }).sort(compareSources);
+      }).sort((a, b) => compareSources(a, b, preferences));
       const result = matches[0];
       if (!result) return [];
       used.add(sourceKey(result));
       return [{ result, track }];
     });
-  }).sort(compareFolders);
+  }).sort((a, b) => compareFolders(a, b, preferences));
   // Prefer a complete folder. If unavailable, combine confidently identified
   // tracks from multiple peers without reusing a file for two disc positions.
   const complete = candidates.find((picks) => picks.length === tracks.length);
@@ -208,7 +219,7 @@ export function inspectReleaseFiles(
   else {
     const byTrack = new Map<string, AlbumFilePick>();
     const used = new Set<string>();
-    for (const pick of candidates.flat().sort((a, b) => compareSources(a.result, b.result))) {
+    for (const pick of candidates.flat().sort((a, b) => compareSources(a.result, b.result, preferences))) {
       if (byTrack.has(trackKey(pick.track)) || used.has(sourceKey(pick.result))) continue;
       byTrack.set(trackKey(pick.track), pick);
       used.add(sourceKey(pick.result));

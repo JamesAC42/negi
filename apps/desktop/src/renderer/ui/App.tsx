@@ -1,3 +1,11 @@
+import { AgentResultsCard } from "./AgentResultsCard";
+import { YoutubePlayer } from "./YoutubePlayer";
+import { YoutubeTransport, YoutubeNowPlaying } from "./YoutubeNowPlaying";
+import { youtubePlayback, useYoutubeSourceActive } from "./youtube-playback";
+import { YoutubeSessionSettings } from "./YoutubeSessionSettings";
+import type { VideoResult } from "@music-os/core";
+import { AgentWorkspace, LearnedTastePanel, type CatalogAction } from "./AgentWorkspace";
+import { AgentCatalogCard, AgentActivityTrace } from "./AgentCatalogCard";
 import { findCommandTracks } from "../command-search";
 import { sortAlbumCollection, sortArtistCollection } from "./album-sort";
 import { indexAlbumFavorites, normalizeAlbumFavoriteEntry } from "../album-favorites";
@@ -5,6 +13,8 @@ import { VirtualArtistList, type ArtistListHandle } from "./VirtualArtistList";
 import { useArtworkVisibility } from "./useArtworkVisibility";
 import { SongPlaylistContext, SongQueueRow } from "./SongQueueRow";
 import { NowPlayingViews } from "./NowPlayingViews";
+import { NowPlayingSettings } from "./NowPlayingSettings";
+import { defaultNowPlayingSettings, useNowPlayingSettings, type NowPlayingSettings as NowPlayingPreferences } from "../now-playing-settings";
 import { createNowPlayingMotion, type NowPlayingMotion } from "../now-playing-motion";
 import { createVisualizerAnimation } from "../visualizer-animation";
 import { createVisualizerCanvas, type VisualizerCanvas } from "../visualizer-canvas";
@@ -12,7 +22,7 @@ import { recordAlbumProgress } from "../record-player-state";
 import { mergePlaybackState, shouldRefreshPlaybackHistory } from "../playback-state.js";
 import { getArtworkObjectUrl, invalidateArtworkObjectUrl } from "../artwork-requests";
 import { AppearanceStudio } from "./AppearanceStudio";
-import { addBackgroundImage, appearanceStorageKey, curatedThemePresets, displayFonts, getAppearanceStyle, loadAppearanceSettings, type AppearanceMode, type AppearanceSettings, type SelectedBackgroundImage } from "../appearance";
+import { addBackgroundImage, appearanceStorageKey, curatedThemePresets, displayFonts, getAppearanceStyle, loadAppearanceSettings, makeAccentPalette, type AppearanceMode, type AppearanceSettings, type SelectedBackgroundImage } from "../appearance";
 import { HomeInsights } from "./HomeInsights";
 import { homeListeningResponseSchema, type HomeListeningResponse } from "@music-os/core";
 import "./home-journal.css";
@@ -373,6 +383,8 @@ const visualizerModeStorageKey = "music-os:visualizer-mode:v1";
 const libraryWorkbenchPreferencesStorageKey = "music-os:library-workbench:v1";
 
 export function App(): ReactElement {
+  const youtubeActive = useYoutubeSourceActive();
+  const [youtubeNavigation, setYoutubeNavigation] = useState<{id: number; query: string} | null>(null);
   const discoverySearchRequestId = useRef(0);
   const pageTargetRequestId = useRef(0);
   const globalSearchRef = useRef<HTMLInputElement | null>(null);
@@ -380,6 +392,8 @@ export function App(): ReactElement {
   const playbackRef = useRef<PlaybackStateResponse | null>(null);
   const playbackActionIdRef = useRef(0);
   const [activeView, setActiveView] = useState("Home");
+  const [discoveryVisited, setDiscoveryVisited] = useState(false);
+  useEffect(() => { if (activeView === "Discovery") setDiscoveryVisited(true); }, [activeView]);
   const [health, setHealth] = useState<HealthState>({ status: "loading" });
   const [library, setLibrary] = useState<LibraryState>({
     status: "loading"
@@ -432,9 +446,10 @@ export function App(): ReactElement {
   const [discoveryDownloadJobs, setDiscoveryDownloadJobs] = useState<DiscoveryDownloadJob[]>([]);
   const [agentPlaylistWorkflows, setAgentPlaylistWorkflows] = useState<AgentPlaylistWorkflow[]>([]);
   const agentPlaylistWorkflowsRef = useRef<AgentPlaylistWorkflow[]>([]);
+  const workflowRefreshInFlight = useRef<Promise<AgentPlaylistWorkflow[]> | null>(null);
   const [savedDiscoveryCandidates, setSavedDiscoveryCandidates] = useState<SavedDiscoveryCandidate[]>([]);
   const [savedDiscoveryLists, setSavedDiscoveryLists] = useState<SavedDiscoveryList[]>([]);
-  const [agentInput, setAgentInput] = useState("");
+  const agentDraftRef = useRef("");
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([
     {
       id: "agent-welcome",
@@ -479,6 +494,7 @@ export function App(): ReactElement {
   const [libraryLoadingMore, setLibraryLoadingMore] = useState(false);
   const [albumsLoadingMore, setAlbumsLoadingMore] = useState(false);
   const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
+  const nowPlayingPreferences = useNowPlayingSettings();
   const [visualizerMode, setVisualizerMode] = useState<VisualizerMode>(() => loadVisualizerMode());
   const [visualizerCapabilities, setVisualizerCapabilities] = useState<VisualizerCapabilitiesResponse | null>(null);
   const [appearance, setAppearance] = useState<AppearanceSettings>(() => loadAppearanceSettings());
@@ -509,7 +525,7 @@ export function App(): ReactElement {
   const documentVisible = useDocumentVisible();
   const reducedMotion = useReducedMotion();
   const effectiveVisualizerMode = getEffectiveVisualizerMode(visualizerMode, visualizerCapabilities, reducedMotion);
-  const liveVisualizersEnabled = documentVisible && !reducedMotion;
+  const liveVisualizersEnabled = documentVisible && !reducedMotion && !youtubeActive;
   const nowPlayingStreamMode: VisualizerMode = visualizerCapabilities?.spectrogram === "available" && !reducedMotion
     ? "spectrogram"
     : effectiveVisualizerMode;
@@ -519,7 +535,30 @@ export function App(): ReactElement {
     playback.currentFileId
   );
   const barVisualizer = modalVisualizer;
-  const currentWaveform = useWaveform(playback.currentFileId, documentVisible && playback.status !== "stopped");
+  const currentWaveform = useWaveform(playback.currentFileId, documentVisible && playback.status !== "stopped" && !youtubeActive);
+
+  useEffect(() => {
+    const takeover = (event: Event) => {
+      const parsed = playbackStateSchema.safeParse((event as CustomEvent).detail);
+      if (parsed.success) {
+        ++playbackActionIdRef.current;
+        playbackRef.current = parsed.data;
+        setPlayback(parsed.data);
+        setNowPlayingOpen(false);
+      }
+    };
+    const exploreYoutube = (event: Event) => {
+      const video = (event as CustomEvent<VideoResult>).detail;
+      setActiveView("Discovery");
+      setYoutubeNavigation({ id: Date.now(), query: video.channel + " " + video.title });
+    };
+    window.addEventListener("youtube-playback-takeover", takeover);
+    window.addEventListener("youtube-player-explore", exploreYoutube);
+    return () => {
+      window.removeEventListener("youtube-playback-takeover", takeover);
+      window.removeEventListener("youtube-player-explore", exploreYoutube);
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -723,7 +762,7 @@ export function App(): ReactElement {
   }
 
   useEffect(() => {
-    const refresh = () => { void refreshLibrary(); void refreshAlbums(); void refreshImports(); };
+    const refresh = () => { void refreshLibrary(); void refreshAlbums(); void refreshImports(); void refreshPlaylists(); };
     window.addEventListener("music-library-changed", refresh);
     return () => window.removeEventListener("music-library-changed", refresh);
   }, [search]);
@@ -922,24 +961,41 @@ export function App(): ReactElement {
   }
 
   async function refreshAgentPlaylistWorkflows(): Promise<AgentPlaylistWorkflow[]> {
-    try {
-      const result = await listAgentPlaylistWorkflows();
-      const previousOpenWorkflowIds = new Set(
-        agentPlaylistWorkflowsRef.current.filter(isOpenAgentPlaylistWorkflow).map((workflow) => workflow.id)
-      );
-      const completedWorkflowCreatedPlaylist = result.workflows.some(
-        (workflow) => previousOpenWorkflowIds.has(workflow.id) && workflow.status === "completed" && workflow.playlistId
-      );
-      agentPlaylistWorkflowsRef.current = result.workflows;
-      setAgentPlaylistWorkflows(result.workflows);
-      if (completedWorkflowCreatedPlaylist) {
-        await Promise.all([refreshLibrary(), refreshAlbums(), refreshPlaylists()]);
+    if (workflowRefreshInFlight.current) return workflowRefreshInFlight.current;
+    const pending = (async () => {
+      try {
+        const result = await listAgentPlaylistWorkflows();
+        const previous = new Map(agentPlaylistWorkflowsRef.current.map(workflow => [workflow.id, workflow]));
+        const libraryChanged = result.workflows.some(workflow => {
+          const old = previous.get(workflow.id);
+          const ready = workflow.delivery?.readyTrackCount ?? 0;
+          return (Boolean(workflow.importId || workflow.playlistId) && !old) ||
+            ready !== (old?.delivery?.readyTrackCount ?? 0) ||
+            workflow.playlistId !== (old?.playlistId ?? null) ||
+            (Boolean(workflow.importId) && workflow.importId !== old?.importId) ||
+            (Boolean(workflow.importId) && workflow.status !== old?.status && !isOpenAgentPlaylistWorkflow(workflow));
+        });
+        const changed = JSON.stringify(result.workflows) !== JSON.stringify(agentPlaylistWorkflowsRef.current);
+        agentPlaylistWorkflowsRef.current = result.workflows;
+        if (changed) setAgentPlaylistWorkflows(result.workflows);
+        // Import success is independent of playlist completion: failed and partial
+        // workflows can already have added usable files to the library.
+        if (libraryChanged) window.dispatchEvent(new Event("music-library-changed"));
+        return result.workflows;
+      } catch (error) {
+        setDiscoveryDownloadState(current => ({ ...current, message: getErrorMessage(error) }));
+        return agentPlaylistWorkflowsRef.current;
       }
-      return result.workflows;
-    } catch (error) {
-      setDiscoveryDownloadState((current) => ({ ...current, message: getErrorMessage(error) }));
-      return agentPlaylistWorkflows;
-    }
+    })();
+    workflowRefreshInFlight.current = pending;
+    try { return await pending; }
+    finally { if (workflowRefreshInFlight.current === pending) workflowRefreshInFlight.current = null; }
+  }
+
+  async function recoverAgentPlaylist(workflowId: string): Promise<void> {
+    await postJson(`/agent/playlist-workflows/${encodeURIComponent(workflowId)}/resume`, {}, agentPlaylistWorkflowsResponseSchema);
+    await refreshAgentPlaylistWorkflows();
+    await refreshSelectedAgentThread();
   }
 
   async function refreshSavedDiscoveryCandidates(): Promise<void> {
@@ -1043,6 +1099,11 @@ export function App(): ReactElement {
   }
 
   function replaceOperationBatch(batch: OperationBatch): void {
+    setAgentMessages((current) => current.map((message) =>
+      message.role === "agent" && message.response?.operationBatch?.id === batch.id
+        ? { ...message, response: { ...message.response, operationBatch: batch } }
+        : message
+    ));
     setOperationsState((current) => {
       const batches = "batches" in current ? current.batches : [];
       const existingIndex = batches.findIndex((item) => item.id === batch.id);
@@ -1086,6 +1147,9 @@ export function App(): ReactElement {
   }
 
   function setOperationsError(error: unknown): void {
+    if (activeView === "Agent") {
+      setAgentMessages((current) => [...current, { id: crypto.randomUUID(), role: "agent", text: getErrorMessage(error), response: null }]);
+    }
     setOperationsState((current) => ({
       status: "error",
       message: getErrorMessage(error),
@@ -1191,7 +1255,7 @@ export function App(): ReactElement {
       void refreshJobs();
       return;
     }
-    if (activeView === "Settings" && tasteProfileState.status === "loading") {
+    if (activeView === "Settings") {
       void refreshTasteProfile();
       return;
     }
@@ -1202,8 +1266,10 @@ export function App(): ReactElement {
       void refreshSavedDiscoveryLists();
       return;
     }
-    if (activeView === "Agent" && agentThreadId == null) {
-      void refreshAgentThread();
+    if (activeView === "Agent") {
+      void refreshAgentPlaylistWorkflows();
+      void refreshTasteProfile();
+      if (agentThreadId == null) void refreshAgentThread();
     }
   }, [activeView]);
 
@@ -1311,30 +1377,21 @@ export function App(): ReactElement {
   }, [discoveryDownloadJobs]);
 
   useEffect(() => {
-    const openWorkflowIds = new Set(agentPlaylistWorkflows.filter(isOpenAgentPlaylistWorkflow).map((workflow) => workflow.id));
-    if (openWorkflowIds.size === 0) {
-      return;
-    }
-
+    if (!agentPlaylistWorkflows.some(isOpenAgentPlaylistWorkflow)) return;
+    let pending = false;
+    let live = true;
     const interval = window.setInterval(() => {
+      if (pending) return;
+      pending = true;
       void (async () => {
+        const before = agentPlaylistWorkflowsRef.current
+          .filter(workflow => workflow.threadId === agentThreadId).map(workflowConversationRevision).join("|");
         const workflows = await refreshAgentPlaylistWorkflows();
-        const completedWorkflowCreatedPlaylist = workflows.some(
-          (workflow) => openWorkflowIds.has(workflow.id) && workflow.status === "completed" && workflow.playlistId
-        );
-        if (completedWorkflowCreatedPlaylist) {
-          await refreshPlaylists();
-        }
-        const hasActiveThreadWorkflowUpdate =
-          activeView === "Agent" &&
-          workflows.some((workflow) => workflow.threadId === agentThreadId && (openWorkflowIds.has(workflow.id) || isOpenAgentPlaylistWorkflow(workflow)));
-        if (hasActiveThreadWorkflowUpdate) {
-          await refreshSelectedAgentThread();
-        }
-      })();
-    }, 5000);
-
-    return () => window.clearInterval(interval);
+        const after = workflows.filter(workflow => workflow.threadId === agentThreadId).map(workflowConversationRevision).join("|");
+        if (live && activeView === "Agent" && before !== after) await refreshSelectedAgentThread();
+      })().finally(() => { pending = false; });
+    }, 3000);
+    return () => { live = false; window.clearInterval(interval); };
   }, [agentPlaylistWorkflows, activeView, agentThreadId]);
 
   useEffect(() => {
@@ -1402,6 +1459,11 @@ export function App(): ReactElement {
       const result = await scanRoot(rootId);
       setScanResult(result);
       await Promise.all([refreshLibrary(), refreshAlbums()]);
+    if (activeView === "Agent" || activeView === "Settings") {
+      const result = await getTasteProfile();
+      // A background learning refresh must not replace a user's unsaved settings.
+      setTasteProfileState((current) => current.status === "saving" ? current : { status: "ready", profile: result });
+    }
       resetOptionalDuplicateDiagnostics();
     } finally {
       setBusyRootId(null);
@@ -1626,7 +1688,6 @@ export function App(): ReactElement {
   }
 
   async function handleApproveBatch(batchId: string): Promise<void> {
-    markOperationBatchStatus(batchId, "approved");
     try {
       const result = await approveOperationBatch(batchId);
       replaceOperationBatch(result.batch);
@@ -2051,13 +2112,29 @@ export function App(): ReactElement {
     return after && typeof after === "object" && "addedCount" in after && after.addedCount === 0 ? "existing" : "added";
   }
 
-  async function handleProposeUpdatePlaylist(
+  async function handleSavePlaylist(
     playlistId: string,
     updates: { name: string; description: string | null }
   ): Promise<void> {
-    const result = await proposeUpdatePlaylist(playlistId, updates);
-    replaceOperationBatch(result.batch);
-    setActiveView("Operations");
+    const proposed = await proposeUpdatePlaylist(playlistId, updates);
+    replaceOperationBatch(proposed.batch);
+    const approved = await approveOperationBatch(proposed.batch.id);
+    replaceOperationBatch(approved.batch);
+    const applied = await applyOperationBatch(proposed.batch.id);
+    replaceOperationBatch(applied.batch);
+    if (applied.batch.status !== "applied") {
+      const error = applied.batch.operations.find((operation) => operation.error)?.error;
+      throw new Error(error && typeof error === "object" && "message" in error && typeof error.message === "string"
+        ? error.message : "Couldn't save this playlist. Please try again.");
+    }
+    // Reflect the confirmed save immediately, even if the follow-up read fails.
+    setPlaylistsState((current) => ({
+      status: "ready",
+      playlists: ("playlists" in current ? current.playlists : []).map((playlist) =>
+        playlist.id === playlistId ? { ...playlist, ...updates } : playlist
+      )
+    }));
+    await refreshPlaylists();
   }
 
   async function handleProposeDeletePlaylist(playlist: Playlist): Promise<void> {
@@ -2126,6 +2203,7 @@ export function App(): ReactElement {
     const next = await getPlaybackState(signal);
     if (actionId !== playbackActionIdRef.current) return;
     const current = playbackRef.current;
+    if (next.status === "playing" && youtubePlayback.getSnapshot().sourceActive && !youtubePlayback.getSnapshot().takingOver) youtubePlayback.release();
     setPlayback((current) => mergePlaybackState(current, next));
     if (shouldRefreshPlaybackHistory(current, next)) {
       void refreshPlaybackHistoryViews();
@@ -2133,6 +2211,7 @@ export function App(): ReactElement {
   }
 
   async function handleRecordPlayerAction(id: string, action: "begin" | "complete" | "skip"): Promise<void> {
+    if (youtubePlayback.getSnapshot().sourceActive) return;
     const actionId = ++playbackActionIdRef.current;
     const next = await postJson("/playback/record-player/action", { id, action }, playbackStateSchema);
     if (actionId === playbackActionIdRef.current) setPlayback(next);
@@ -2147,6 +2226,7 @@ export function App(): ReactElement {
       return;
     }
 
+    await youtubePlayback.releaseAndWait();
     const actionId = ++playbackActionIdRef.current;
     setPlaybackBusy(true);
     try {
@@ -2242,6 +2322,7 @@ export function App(): ReactElement {
       return;
     }
 
+    await youtubePlayback.releaseAndWait();
     const actionId = ++playbackActionIdRef.current;
     setPlaybackBusy(true);
     try {
@@ -2276,6 +2357,7 @@ export function App(): ReactElement {
   }
 
   async function handlePauseResume(): Promise<void> {
+    if (youtubePlayback.getSnapshot().sourceActive) { void youtubePlayback.toggle(); return; }
     if (playbackBusy && playback.status !== "playing") {
       return;
     }
@@ -2307,6 +2389,7 @@ export function App(): ReactElement {
   }
 
   async function handleStop(): Promise<void> {
+    if (youtubePlayback.getSnapshot().sourceActive) { youtubePlayback.release(); return; }
     if (playback.status === "stopped" && !playback.currentFileId) {
       return;
     }
@@ -2324,6 +2407,7 @@ export function App(): ReactElement {
   }
 
   async function handlePrevious(): Promise<void> {
+    if (youtubePlayback.getSnapshot().sourceActive) { void youtubePlayback.previous(); return; }
     if (playbackBusy) {
       return;
     }
@@ -2340,6 +2424,7 @@ export function App(): ReactElement {
   }
 
   async function handleNext(): Promise<void> {
+    if (youtubePlayback.getSnapshot().sourceActive) { void youtubePlayback.next(); return; }
     if (playbackBusy) {
       return;
     }
@@ -2356,6 +2441,7 @@ export function App(): ReactElement {
   }
 
   async function handleSeekPlayback(event: MouseEvent<HTMLElement>): Promise<void> {
+    if (youtubePlayback.getSnapshot().sourceActive) { youtubePlayback.seek(getPointerRatio(event.currentTarget, event.clientX) * youtubePlayback.getSnapshot().durationMs); return; }
     if (playbackBusy || playback.status === "stopped" || !playback.durationMs || playback.durationMs <= 0) {
       return;
     }
@@ -2364,6 +2450,7 @@ export function App(): ReactElement {
   }
 
   async function seekPlaybackFromRatio(ratio: number): Promise<void> {
+    if (youtubePlayback.getSnapshot().sourceActive) { youtubePlayback.seek(Math.max(0, Math.min(1, ratio)) * youtubePlayback.getSnapshot().durationMs); return; }
     if (playbackBusy || playback.status === "stopped" || !playback.durationMs || playback.durationMs <= 0) {
       return;
     }
@@ -2384,6 +2471,7 @@ export function App(): ReactElement {
     if (!Number.isFinite(volumePercent)) {
       return;
     }
+    if (youtubePlayback.getSnapshot().sourceActive) { youtubePlayback.setVolume(volumePercent); return; }
     setPlayback((current) => ({ ...current, volumePercent }));
     try {
       setPlayback(await setPlaybackVolume(volumePercent));
@@ -2397,6 +2485,7 @@ export function App(): ReactElement {
       return;
     }
 
+    await youtubePlayback.releaseAndWait();
     const actionId = ++playbackActionIdRef.current;
     setPlaybackBusy(true);
     try {
@@ -2426,6 +2515,7 @@ export function App(): ReactElement {
       return;
     }
 
+    await youtubePlayback.releaseAndWait();
     const actionId = ++playbackActionIdRef.current;
     setPlaybackBusy(true);
     try {
@@ -2518,18 +2608,15 @@ export function App(): ReactElement {
     if (image) setAppearance((current) => addBackgroundImage(current, mode, image));
   }
 
-  async function handleAgentSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    const message = agentInput.trim();
+  async function submitAgentMessage(message: string, catalogAction?: CatalogAction): Promise<void> {
     if (!message || agentBusy) {
       return;
     }
 
-    setAgentInput("");
     setAgentBusy(true);
     setAgentMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", text: message }]);
     try {
-      const agentRun = await sendAgentMessage(message, agentThreadId ?? undefined);
+      const agentRun = await sendAgentMessage(message, agentThreadId ?? undefined, catalogAction);
       const response = agentRun.response;
       if (response.threadId) {
         setAgentThreadId(response.threadId);
@@ -2988,6 +3075,7 @@ export function App(): ReactElement {
     () => (playback.currentFileId ? playbackFiles.find((file) => file.id === playback.currentFileId) ?? null : null),
     [playback.currentFileId, playbackFiles]
   );
+  useQueuedArtworkVisualizerPalettes(playback, playbackFiles, appearance.mode, nowPlayingPreferences.settings.colorMode === "artwork");
   const appearanceStyle = useMemo(() => getAppearanceStyle(appearance), [appearance]);
   const hasBackgroundImage = Boolean(appearance.profiles[appearance.mode].background?.url);
   const appShellClassName = `appShell theme-${appearance.mode}${hasBackgroundImage ? " hasBackgroundImage" : ""}`;
@@ -3054,7 +3142,7 @@ export function App(): ReactElement {
 
         <div className="topbarSpacer" />
 
-        <div className="topTransport" aria-label="Playback controls">
+        {youtubeActive ? <YoutubeTransport /> : <div className="topTransport" aria-label="Playback controls">
           <button
             aria-label="Previous track"
             disabled={playbackBusy || playback.status === "stopped"}
@@ -3109,7 +3197,7 @@ export function App(): ReactElement {
               onChange={(event) => void handleVolumeChange(event.target.value)}
             />
           </label>
-        </div>
+        </div>}
 
         <button
           className="topAppearanceSwitch"
@@ -3157,6 +3245,65 @@ export function App(): ReactElement {
         {playback.status === "error" && playback.error ? (
           <div className="inlineError" role="alert">{playback.error}</div>
         ) : null}
+        {(discoveryVisited || activeView === "Discovery") && <div className="discoveryViewHost" hidden={activeView !== "Discovery"} style={{ display: activeView === "Discovery" ? "contents" : "none" }}>
+          <DiscoveryModes visible={activeView === "Discovery"} youtubeRequest={youtubeNavigation}><DiscoveryView
+            busyImportBatchId={busyImportBatchId}
+            discoveryQuery={discoveryQuery}
+            downloadState={discoveryDownloadState}
+            downloadJobs={discoveryDownloadJobs}
+            importsState={importsState}
+            playlistWorkflows={agentPlaylistWorkflows}
+            discoveryState={discoveryState}
+            discoverySource={discoverySource}
+            formatFilter={discoveryFormatFilter}
+            expandedClusterIds={expandedDiscoveryClusters}
+            expandedGroupIds={expandedDiscoveryGroups}
+            inspectedGroupId={inspectedDiscoveryGroupId}
+            availabilityFilter={discoveryAvailabilityFilter}
+            libraryFiles={files}
+            libraryFilter={discoveryLibraryFilter}
+            parsedListState={parsedDiscoveryList}
+            pastedListText={pastedDiscoveryList}
+            savedCandidates={savedDiscoveryCandidates}
+            savedLists={savedDiscoveryLists}
+            selectedFileIds={selectedDiscoveryFiles}
+            selectedGroupIds={selectedDiscoveryGroups}
+            setDiscoveryQuery={setDiscoveryQuery}
+            setDiscoverySource={setDiscoverySource}
+            setPastedListText={setPastedDiscoveryList}
+            sortMode={discoverySort}
+            setAvailabilityFilter={setDiscoveryAvailabilityFilter}
+            setFormatFilter={setDiscoveryFormatFilter}
+            setLibraryFilter={setDiscoveryLibraryFilter}
+            setSortMode={setDiscoverySort}
+            onGroupSelect={toggleDiscoveryGroupSelection}
+            onDownloadSelection={handleProposeDiscoveryDownload}
+            onDownloadResults={handleProposeDiscoveryResults}
+            onInspectGroup={setInspectedDiscoveryGroupId}
+            onOpenAgentThread={handleOpenAgentThread}
+            onOpenPlaylist={openPlaylist}
+            onOpenJobs={() => setActiveView("Jobs")}
+            onApplyImportBatch={handleApplyImportBatch}
+            onCancelDownload={handleCancelDiscoveryDownload}
+            onInspectImport={handleInspectImportItem}
+            onRejectImportBatch={handleRejectImportBatch}
+            onRetryDownload={handleRetryDiscoveryDownload}
+            onRefreshHealth={refreshDiscoveryHealth}
+            onProposeSavedCandidateDownload={handleProposeSavedDiscoveryCandidateDownload}
+            onRemoveSavedCandidate={handleRemoveSavedDiscoveryCandidate}
+            onSaveCandidate={handleSaveDiscoveryCandidate}
+            onSaveParsedList={handleSaveParsedDiscoveryList}
+            onSearchParsedItem={handleSearchParsedDiscoveryItem}
+            onLoadSavedList={handleLoadSavedDiscoveryList}
+            onSearchSavedListMissing={handleSearchSavedDiscoveryListMissing}
+            onParseList={handleParseDiscoveryList}
+            onRemoveSavedList={handleRemoveSavedDiscoveryList}
+            onSearch={handleDiscoverySearch}
+            onToggleFileSelect={toggleDiscoveryFileSelection}
+            onToggleCluster={toggleDiscoveryCluster}
+            onToggleGroup={toggleDiscoveryGroup}
+          /></DiscoveryModes>
+        </div>}
         {activeView === "Home" ? (
           <HomeAnalyticsView
             onOpenSettings={() => navigateToView("Settings")}
@@ -3355,63 +3502,7 @@ export function App(): ReactElement {
             onRevert={handleRevertBatch}
           />
         ) : activeView === "Discovery" ? (
-          <DiscoveryModes><DiscoveryView
-            busyImportBatchId={busyImportBatchId}
-            discoveryQuery={discoveryQuery}
-            downloadState={discoveryDownloadState}
-            downloadJobs={discoveryDownloadJobs}
-            importsState={importsState}
-            playlistWorkflows={agentPlaylistWorkflows}
-            discoveryState={discoveryState}
-            discoverySource={discoverySource}
-            formatFilter={discoveryFormatFilter}
-            expandedClusterIds={expandedDiscoveryClusters}
-            expandedGroupIds={expandedDiscoveryGroups}
-            inspectedGroupId={inspectedDiscoveryGroupId}
-            availabilityFilter={discoveryAvailabilityFilter}
-            libraryFiles={files}
-            libraryFilter={discoveryLibraryFilter}
-            parsedListState={parsedDiscoveryList}
-            pastedListText={pastedDiscoveryList}
-            savedCandidates={savedDiscoveryCandidates}
-            savedLists={savedDiscoveryLists}
-            selectedFileIds={selectedDiscoveryFiles}
-            selectedGroupIds={selectedDiscoveryGroups}
-            setDiscoveryQuery={setDiscoveryQuery}
-            setDiscoverySource={setDiscoverySource}
-            setPastedListText={setPastedDiscoveryList}
-            sortMode={discoverySort}
-            setAvailabilityFilter={setDiscoveryAvailabilityFilter}
-            setFormatFilter={setDiscoveryFormatFilter}
-            setLibraryFilter={setDiscoveryLibraryFilter}
-            setSortMode={setDiscoverySort}
-            onGroupSelect={toggleDiscoveryGroupSelection}
-            onDownloadSelection={handleProposeDiscoveryDownload}
-            onDownloadResults={handleProposeDiscoveryResults}
-            onInspectGroup={setInspectedDiscoveryGroupId}
-            onOpenAgentThread={handleOpenAgentThread}
-            onOpenPlaylist={openPlaylist}
-            onOpenJobs={() => setActiveView("Jobs")}
-            onApplyImportBatch={handleApplyImportBatch}
-            onCancelDownload={handleCancelDiscoveryDownload}
-            onInspectImport={handleInspectImportItem}
-            onRejectImportBatch={handleRejectImportBatch}
-            onRetryDownload={handleRetryDiscoveryDownload}
-            onRefreshHealth={refreshDiscoveryHealth}
-            onProposeSavedCandidateDownload={handleProposeSavedDiscoveryCandidateDownload}
-            onRemoveSavedCandidate={handleRemoveSavedDiscoveryCandidate}
-            onSaveCandidate={handleSaveDiscoveryCandidate}
-            onSaveParsedList={handleSaveParsedDiscoveryList}
-            onSearchParsedItem={handleSearchParsedDiscoveryItem}
-            onLoadSavedList={handleLoadSavedDiscoveryList}
-            onSearchSavedListMissing={handleSearchSavedDiscoveryListMissing}
-            onParseList={handleParseDiscoveryList}
-            onRemoveSavedList={handleRemoveSavedDiscoveryList}
-            onSearch={handleDiscoverySearch}
-            onToggleFileSelect={toggleDiscoveryFileSelection}
-            onToggleCluster={toggleDiscoveryCluster}
-            onToggleGroup={toggleDiscoveryGroup}
-          /></DiscoveryModes>
+          null
         ) : activeView === "Playlists" ? (
           <PlaylistsView
             playbackBusy={playbackBusy}
@@ -3428,13 +3519,18 @@ export function App(): ReactElement {
             onPlayFileIdsShuffled={handlePlayFileIdsShuffled}
             onPlayPlaylist={handlePlayPlaylist}
             onProposeDeletePlaylist={handleProposeDeletePlaylist}
-            onProposeUpdatePlaylist={handleProposeUpdatePlaylist}
+            onSavePlaylist={handleSavePlaylist}
             onProposeRemoveItem={handleProposeRemovePlaylistItem}
           />
         ) : activeView === "Agent" ? (
           <AgentView
+            workflows={agentPlaylistWorkflows}
+            onRecoverPlaylist={recoverAgentPlaylist}
+            taste={"profile" in tasteProfileState ? tasteProfileState.profile : null}
+            onOpenTaste={() => { setActiveView("Settings"); window.setTimeout(() => document.getElementById("settings-taste")?.scrollIntoView({ block: "start" }), 50); }}
+            onCatalogAction={submitAgentMessage}
             agentBusy={agentBusy}
-            agentInput={agentInput}
+            draftRef={agentDraftRef}
             activeThreadId={agentThreadId}
             messages={agentMessages}
             threads={agentThreads}
@@ -3445,15 +3541,15 @@ export function App(): ReactElement {
               setActiveView("Operations");
             }}
             onOpenPlaylist={openPlaylist}
-            setAgentInput={setAgentInput}
             onNewThread={handleNewAgentThread}
             onSelectThread={handleSelectAgentThread}
-            onSubmit={handleAgentSubmit}
+            onSubmit={submitAgentMessage}
           />
         ) : activeView === "Jobs" ? (
           <JobsView jobsState={jobsState} selectedJob={selectedJobDetail} onInspect={handleInspectJob} onRefresh={refreshJobs} />
         ) : activeView === "Settings" ? (
           <SettingsView
+            nowPlayingPreferences={nowPlayingPreferences}
             appearance={appearance}
             draft={tasteProfileDraft}
             state={tasteProfileState}
@@ -3470,7 +3566,7 @@ export function App(): ReactElement {
         )}
       </section>
 
-      <aside className="nowPlayingInspector">
+      {youtubeActive ? <YoutubeNowPlaying /> : <aside className="nowPlayingInspector">
         <div className="nowPlayingInspectorHeader">
           <strong>Now Playing</strong>
           <button
@@ -3583,8 +3679,9 @@ export function App(): ReactElement {
             </button>
           </div>
         </div>
-      </aside>
+      </aside>}
 
+      <YoutubePlayer />
 
       {editingFile ? (
         <MetadataEditor
@@ -3602,8 +3699,10 @@ export function App(): ReactElement {
         />
       ) : null}
 
-      {nowPlayingOpen ? (
+      {nowPlayingOpen && !youtubeActive ? (
         <NowPlayingModal
+          settings={nowPlayingPreferences.settings}
+          themeAccent={(appearanceStyle as Record<string, string>)["--acc"]}
           appearanceMode={appearance.mode}
           onRecordPlayerAction={handleRecordPlayerAction}
           onRecordPlayerPresence={handleRecordPlayerPresence}
@@ -3726,50 +3825,100 @@ function artworkFailedRecently(src: string): boolean {
 type VisualizerPalette = { acc: string; accDim: string; accInk: string; accLine: string };
 
 const artworkVisualizerPaletteCache = new Map<string, VisualizerPalette | null>();
+const artworkVisualizerPalettePending = new Map<string, Promise<VisualizerPalette | null>>();
+
+function prepareArtworkVisualizerPalette(src: string, mode: AppearanceMode): Promise<VisualizerPalette | null> {
+  const key = `${mode}:${src}`;
+  if (artworkVisualizerPaletteCache.has(key)) {
+    const cached = artworkVisualizerPaletteCache.get(key)!;
+    artworkVisualizerPaletteCache.delete(key);
+    artworkVisualizerPaletteCache.set(key, cached);
+    return Promise.resolve(cached);
+  }
+  const pending = artworkVisualizerPalettePending.get(key);
+  if (pending) return pending;
+
+  // Share extraction between the queue warmer and the visible player. Keep the
+  // Blob alive through decode, then release it even if the player has closed.
+  const controller = new AbortController();
+  const request = getArtworkObjectUrl(src, true, controller.signal)
+    .then(url => extractArtworkVisualizerPalette(url, mode))
+    .then(palette => {
+      artworkVisualizerPaletteCache.set(key, palette);
+      if (artworkVisualizerPaletteCache.size > 128) {
+        artworkVisualizerPaletteCache.delete(artworkVisualizerPaletteCache.keys().next().value!);
+      }
+      return palette;
+    })
+    .finally(() => {
+      controller.abort();
+      artworkVisualizerPalettePending.delete(key);
+    });
+  artworkVisualizerPalettePending.set(key, request);
+  return request;
+}
 
 function useArtworkVisualizerPalette(src: string | null, mode: AppearanceMode): VisualizerPalette | null {
   const cacheKey = src ? `${mode}:${src}` : "";
-  const [palette, setPalette] = useState<VisualizerPalette | null>(() => (
-    cacheKey ? artworkVisualizerPaletteCache.get(cacheKey) ?? null : null
-  ));
-
+  const [resolved, setResolved] = useState<{ key: string; palette: VisualizerPalette | null } | null>(null);
   useEffect(() => {
-    if (!src) {
-      setPalette(null);
-      return;
-    }
-    const cached = artworkVisualizerPaletteCache.get(cacheKey);
-    if (cached !== undefined) {
-      setPalette(cached);
-      return;
-    }
-
+    if (!src) return;
     let cancelled = false;
-    setPalette(null);
-    const controller = new AbortController();
-    void getArtworkObjectUrl(src, true, controller.signal)
-      .then((objectUrl) => extractArtworkVisualizerPalette(objectUrl, mode))
-      .then((nextPalette) => {
-        artworkVisualizerPaletteCache.set(cacheKey, nextPalette);
-        if (!cancelled) {
-          setPalette(nextPalette);
-        }
-      })
-      .catch(() => {
-        if (cancelled) return;
-        artworkVisualizerPaletteCache.set(cacheKey, null);
-        if (!cancelled) {
-          setPalette(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
+    void prepareArtworkVisualizerPalette(src, mode).then(palette => {
+      if (!cancelled) setResolved({ key: cacheKey, palette });
+    }).catch(() => {
+      // Transient fetch/decode failures must not poison future queue warmups.
+      if (!cancelled) setResolved({ key: cacheKey, palette: null });
+    });
+    return () => { cancelled = true; };
   }, [cacheKey, mode, src]);
 
-  return palette;
+  // A warmed palette belongs to this render, not a later effect. Never carry
+  // the previous record's color into the first paint of the new track.
+  return artworkVisualizerPaletteCache.get(cacheKey)
+    ?? (resolved?.key === cacheKey ? resolved.palette : null);
+}
+
+function useQueuedArtworkVisualizerPalettes(
+  playback: PlaybackStateResponse,
+  files: LibraryFile[],
+  mode: AppearanceMode,
+  enabled = true
+): void {
+  const filesById = useMemo(() => new Map(files.map(file => [file.id, file])), [files]);
+  const { currentFileId, queue, queueIndex, repeatMode } = playback;
+  const sourceIds = useMemo(() => {
+    if (!enabled || !currentFileId) return [];
+    const ids = new Set([currentFileId]);
+    const index = queueIndex ?? queue.indexOf(currentFileId);
+    if (index >= 0) {
+      const albumKey = (id: string) => {
+        const file = filesById.get(id);
+        const target = file ? getFileAlbumTarget(file) : null;
+        return target ? JSON.stringify(target) : id;
+      };
+      const currentAlbum = albumKey(currentFileId);
+      // Warm the immediate next track AND the next album's first track, even
+      // when many tracks from the current album remain. Respect queue order.
+      const count = repeatMode === "queue" ? queue.length - 1 : queue.length - index - 1;
+      for (let offset = 1; offset <= count; offset++) {
+        const id = queue[(index + offset) % queue.length];
+        if (offset === 1) ids.add(id);
+        if (albumKey(id) !== currentAlbum) {
+          ids.add(id);
+          break;
+        }
+      }
+    }
+    return [...ids];
+  }, [currentFileId, queue, queueIndex, repeatMode, filesById, enabled]);
+  // Playback snapshots can replace queue arrays every tick. Depend on the
+  // actual URLs (including artwork versions), so unchanged queues do no work.
+  const sourceKey = JSON.stringify(sourceIds.map(artworkFileUrl));
+  useEffect(() => {
+    const urls: string[] = JSON.parse(sourceKey);
+    for (const src of urls) void prepareArtworkVisualizerPalette(src, mode).catch(() => {});
+  }, [sourceKey, mode]);
 }
 
 async function extractArtworkVisualizerPalette(src: string, mode: AppearanceMode): Promise<VisualizerPalette | null> {
@@ -4990,6 +5139,7 @@ function LibraryWorkbenchView({
   const [trackPreferenceError, setTrackPreferenceError] = useState<string | null>(null);
   const [artworkAlbum, setArtworkAlbum] = useState<AlbumGroupItem | null>(null);
   const artistListRef = useRef<ArtistListHandle | null>(null);
+  const [pendingArtistLetter, setPendingArtistLetter] = useState<string | null>(null);
   useEffect(() => {
     if (!initialTarget) {
       return;
@@ -5022,6 +5172,13 @@ function LibraryWorkbenchView({
   }, [artistGroups, deferredArtistQuery]);
   const artistRows = useMemo(() => visibleArtists.map(section => ({ artist: section.artist, letter: getArtistStartLetter(section.artist), albums: section.albums.length, tracks: section.albums.reduce((sum, album) => sum + album.files.length, 0) })), [visibleArtists]);
   const artistLetters = useMemo(() => new Set(artistRows.map(row => row.letter)), [artistRows]);
+  useLayoutEffect(() => {
+    if (pendingArtistLetter === null) return;
+    // Wait for the alphabetized rows and the virtual list's sort reset to commit.
+    const index = artistRows.findIndex(row => row.letter === pendingArtistLetter);
+    if (index >= 0) artistListRef.current?.scrollToIndex(index);
+    setPendingArtistLetter(null);
+  }, [artistRows, pendingArtistLetter]);
   const selectedArtist =
     visibleArtists.find((section) => section.artist === selectedArtistName) ??
     visibleArtists[0] ??
@@ -5084,8 +5241,9 @@ function LibraryWorkbenchView({
   }
 
   function jumpToArtistLetter(letter: string): void {
-    const index = artistRows.findIndex(row => row.letter === letter);
-    if (index >= 0) artistListRef.current?.scrollToIndex(index);
+    setArtistSortMode("artist");
+    setAlbumSortMode("artistAlbum");
+    setPendingArtistLetter(letter);
   }
 
   async function reassignAlbums(scope: "album" | "artist"): Promise<void> {
@@ -7929,6 +8087,7 @@ const tasteListFields: Array<{ key: keyof Pick<
 ];
 
 function SettingsView({
+  nowPlayingPreferences,
   appearance,
   appearanceSaveError,
   draft,
@@ -7938,6 +8097,7 @@ function SettingsView({
   onSelectBackgroundImage,
   onSave
 }: {
+  nowPlayingPreferences: ReturnType<typeof useNowPlayingSettings>;
   appearance: AppearanceSettings;
   appearanceSaveError: string | null;
   draft: TasteProfile;
@@ -7967,7 +8127,9 @@ function SettingsView({
           <a className="settingsAppearanceLink" href="#studio-type"><span>Typography</span></a>
           <a className="settingsAppearanceLink" href="#studio-background"><span>Background images</span></a>
           <a className="settingsAppearanceLink" href="#studio-looks"><span>Saved looks</span></a>
+          <a href="#settings-now-playing"><UiIcon name="play" /><span>Now Playing</span></a>
           <a href="#settings-taste"><UiIcon name="artist" /><span>Taste profile</span></a>
+          <a href="#settings-youtube"><UiIcon name="play" /><span>YouTube playback</span></a>
           <a href="#settings-quality"><UiIcon name="format" /><span>Discovery quality</span></a>
           <a href="#settings-workflows"><UiIcon name="operations" /><span>Workflows</span></a>
         </nav>
@@ -7985,6 +8147,8 @@ function SettingsView({
       {state.status === "error" ? <div className="inlineError">{state.message}</div> : null}
       <AppearanceStudio appearance={appearance} setAppearance={setAppearance} onSelectBackgroundImage={onSelectBackgroundImage} saveError={appearanceSaveError} />
 
+      <NowPlayingSettings {...nowPlayingPreferences} />
+
       <section className="settingsHeader" id="settings-taste">
         <div>
           <strong>Taste Profile</strong>
@@ -7997,6 +8161,7 @@ function SettingsView({
         </button>
       </section>
 
+      <LearnedTastePanel taste={latest} />
       <section className="settingsGrid" aria-label="Taste profile editor">
         {tasteListFields.map((field) => (
           <label className="settingsField" key={field.key}>
@@ -8010,10 +8175,12 @@ function SettingsView({
         ))}
       </section>
 
+      <YoutubeSessionSettings />
+
       <section className="settingsPanel" id="settings-quality" aria-label="Quality preferences">
         <div>
           <strong>Quality Preferences</strong>
-          <span>Used by future discovery ranking and cleanup suggestions.</span>
+          <span>Used when the agent plans downloads and ranks available files.</span>
         </div>
         <label className="settingsCheck">
           <input
@@ -11278,6 +11445,8 @@ function SortSelect<T extends string>({
 }
 
 export function NowPlayingModal({
+  settings = defaultNowPlayingSettings,
+  themeAccent,
   onRecordPlayerAction,
   onRecordPlayerPresence,
   onStop,
@@ -11302,6 +11471,8 @@ export function NowPlayingModal({
   visualizerFrameRef,
   waveformState
 }: {
+  settings?: NowPlayingPreferences;
+  themeAccent?: string;
   onRecordPlayerAction(id: string, action: "begin" | "complete" | "skip"): Promise<void>;
   onRecordPlayerPresence(clientId: string, active: boolean, reducedMotion: boolean): Promise<void>;
   onStop(): Promise<void>;
@@ -11328,6 +11499,7 @@ export function NowPlayingModal({
 }): ReactElement {
   const [closing, setClosing] = useState(false);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const songInfoRef = useRef<HTMLDivElement>(null);
   const motionRef = useRef<NowPlayingMotion | null>(null);
   const onCloseRef = useRef(onClose);
   const filesById = useMemo(() => new Map(files.map((file) => [file.id, file])), [files]);
@@ -11348,7 +11520,9 @@ export function NowPlayingModal({
   const displayYear = currentFile ? cleanDisplayYear(currentFile.displayTags.year ?? currentFile.displayTags.date) : null;
   const albumTarget = currentFile ? getFileAlbumTarget(currentFile) : null;
   const artworkUrl = playback.currentFileId ? artworkFileUrl(playback.currentFileId) : null;
-  const visualizerPalette = useArtworkVisualizerPalette(artworkUrl, appearanceMode);
+  const artworkPalette = useArtworkVisualizerPalette(settings.colorMode === "artwork" ? artworkUrl : null, appearanceMode);
+  const customPalette = useMemo(() => makeAccentPalette(settings.customColor, appearanceMode), [settings.customColor, appearanceMode]);
+  const visualizerPalette = settings.colorMode === "custom" ? customPalette : settings.colorMode === "artwork" ? artworkPalette : null;
   const visualizerStyle = useMemo<CSSProperties | undefined>(() => {
     if (!visualizerPalette) {
       return undefined;
@@ -11360,6 +11534,30 @@ export function NowPlayingModal({
       "--acc-dim": visualizerPalette.accDim
     } as CSSProperties;
   }, [visualizerPalette]);
+  useLayoutEffect(() => {
+    // Bypass the normal 250 ms canvas theme cache on an album/theme change.
+    // Redraw settled/paused canvases too, without restarting their animation.
+    for (const canvas of backdropRef.current?.querySelectorAll("canvas") ?? []) {
+      canvasThemeColorCache.delete(canvas);
+      canvasThemeRedraw.get(canvas)?.();
+    }
+  }, [visualizerPalette, appearanceMode, themeAccent]);
+  useLayoutEffect(() => {
+    const info = songInfoRef.current;
+    const column = info?.parentElement;
+    if (!settings.liveSpectrum || !info || !column) return;
+    // The info card keeps its intrinsic height; only the spectrum uses spare space.
+    // Observe wrapping, fonts and record/lyrics layout changes, not playback ticks.
+    const updateLimit = (height: number) => {
+      column.style.setProperty("--np-spectrum-max-height", `${height * 1.5}px`);
+    };
+    updateLimit(info.getBoundingClientRect().height);
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) updateLimit(entry.borderBoxSize[0]?.blockSize ?? info.getBoundingClientRect().height);
+    });
+    observer.observe(info);
+    return () => observer.disconnect();
+  }, [settings.liveSpectrum]);
   const queueFileIdsRef = useRef(playback.queue);
   const onPlayFileRef = useRef(onPlayFile);
   const onReplaceUpNextRef = useRef(onReplaceUpNext);
@@ -11424,6 +11622,11 @@ export function NowPlayingModal({
         aria-label="Now playing"
         aria-modal="true"
         className="nowPlayingOverlay"
+        data-left-meter={settings.leftMeter}
+        data-right-meter={settings.rightMeter}
+        data-waveform={settings.waveform}
+        data-spectrogram={settings.spectrogram}
+        data-live-spectrum={settings.liveSpectrum}
         role="dialog"
         style={visualizerStyle}
         onMouseDown={(event) => event.stopPropagation()}
@@ -11432,6 +11635,7 @@ export function NowPlayingModal({
         <div className="overlayEdgeReveal right" aria-hidden="true" />
         <div className="nowPlayingCockpit">
           <VisualizerPanel
+            settings={settings}
             frameRef={visualizerFrameRef}
             playback={playback}
             waveformState={waveformState}
@@ -11455,7 +11659,7 @@ export function NowPlayingModal({
               <BeatSyncedAlbumGlow frameRef={visualizerFrameRef} playing={playback.status === "playing"} />
             </div>
             <div className="nowPlayingRightColumn">
-              <div className="nowPlayingModalInfo hasRecordPlayer">
+              <div className="nowPlayingModalInfo hasRecordPlayer" ref={songInfoRef}>
                 <div className="nowPlayingSongIdentity">
                   <span>{playback.albumTransition ? "Changing records" : playback.status}</span>
                   <h2>{displayTitle}</h2>
@@ -11526,13 +11730,13 @@ export function NowPlayingModal({
                   </dl>
                 ) : null}
               </div>
-              <div className="focusSpectrum" aria-hidden="true">
+              {settings.liveSpectrum ? <div className="focusSpectrum" aria-hidden="true">
                 <div className="focusSpectrumLabel">
                   <span>Live spectrum</span>
                   <small>20 Hz - 20 kHz</small>
                 </div>
                 <SpectrumCanvas className="focusSpectrumCanvas" frameRef={visualizerFrameRef} mode="spectrum" playing={playback.status === "playing"} />
-              </div>
+              </div> : null}
             </div>
             <div className="nowPlayingControlDeck">
               <div className="nowPlayingControlSurface">
@@ -11547,13 +11751,13 @@ export function NowPlayingModal({
                       onClick={(event) => void onSeek(getPointerRatio(event.currentTarget, event.clientX))}
                     >
                       <span className="progressRail">
-                        <WaveformCanvas
+                        {settings.waveform ? <WaveformCanvas
                           className="modalWaveformRailCanvas"
                           playback={playback}
                           positionFrameRef={visualizerFrameRef}
                           variant="rail"
                           waveform={waveformState.waveform}
-                        />
+                        /> : <span className="modalSimpleProgress" style={{ width: `${Math.max(0, Math.min(100, playback.durationMs ? playback.positionMs / playback.durationMs * 100 : 0))}%` }} />}
                       </span>
                     </button>
                     <span>{formatTime(playback.durationMs)}</span>
@@ -12598,7 +12802,7 @@ function PlaylistsView({
   onPlayFileIdsShuffled,
   onPlayPlaylist,
   onProposeDeletePlaylist,
-  onProposeUpdatePlaylist,
+  onSavePlaylist,
   onProposeRemoveItem
 }: {
   currentWaveform: WaveformSummaryResponse | null;
@@ -12615,7 +12819,7 @@ function PlaylistsView({
   onPlayFileIdsShuffled(fileIds: string[]): Promise<void>;
   onPlayPlaylist(playlistId: string): Promise<void>;
   onProposeDeletePlaylist(playlist: Playlist): Promise<void>;
-  onProposeUpdatePlaylist(playlistId: string, updates: { name: string; description: string | null }): Promise<void>;
+  onSavePlaylist(playlistId: string, updates: { name: string; description: string | null }): Promise<void>;
   onProposeRemoveItem(playlistId: string, itemId: string): Promise<void>;
 }): ReactElement {
   const playlists = "playlists" in playlistsState ? playlistsState.playlists : emptyPlaylists;
@@ -12636,6 +12840,8 @@ function PlaylistsView({
 
   const [playlistQuery, setPlaylistQuery] = useState("");
   const [editingPlaylist, setEditingPlaylist] = useState(false);
+  const [savingPlaylist, setSavingPlaylist] = useState(false);
+  const [playlistSaveError, setPlaylistSaveError] = useState<string | null>(null);
   const [playlistNameDraft, setPlaylistNameDraft] = useState("");
   const [playlistDescriptionDraft, setPlaylistDescriptionDraft] = useState("");
   const normalizedPlaylistQuery = playlistQuery.trim().toLocaleLowerCase();
@@ -12662,18 +12868,27 @@ function PlaylistsView({
     setPlaylistNameDraft(activePlaylist?.name ?? "");
     setPlaylistDescriptionDraft(activePlaylist?.description ?? "");
     setEditingPlaylist(false);
+    setPlaylistSaveError(null);
   }, [activePlaylist?.description, activePlaylist?.id, activePlaylist?.name]);
 
   async function submitPlaylistEdit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!activePlaylist || !playlistNameDraft.trim()) {
+    if (savingPlaylist || !activePlaylist || !playlistNameDraft.trim()) {
       return;
     }
-    await onProposeUpdatePlaylist(activePlaylist.id, {
-      name: playlistNameDraft.trim(),
-      description: playlistDescriptionDraft.trim() || null
-    });
-    setEditingPlaylist(false);
+    setSavingPlaylist(true);
+    setPlaylistSaveError(null);
+    try {
+      await onSavePlaylist(activePlaylist.id, {
+        name: playlistNameDraft.trim(),
+        description: playlistDescriptionDraft.trim() || null
+      });
+      setEditingPlaylist(false);
+    } catch (error) {
+      setPlaylistSaveError(getErrorMessage(error));
+    } finally {
+      setSavingPlaylist(false);
+    }
   }
 
   return (
@@ -12702,6 +12917,7 @@ function PlaylistsView({
               <button
                 className={playlist.id === activePlaylist?.id ? "active" : ""}
                 key={playlist.id}
+                disabled={savingPlaylist}
                 type="button"
                 onClick={() => onOpenPlaylist(playlist.id)}
               >
@@ -12726,7 +12942,7 @@ function PlaylistsView({
         </div>
         <footer>
           <span>{formatListenTime(playlistDurationMs)} total</span>
-          <button type="button" onClick={onBack}>Clear selection</button>
+          <button disabled={savingPlaylist} type="button" onClick={onBack}>Clear selection</button>
         </footer>
       </aside>
 
@@ -12766,8 +12982,8 @@ function PlaylistsView({
                 <button disabled={playbackBusy || activeQueue.length === 0} type="button" onClick={() => void onEnqueuePlayback(activeQueue, "end")}>
                   Queue
                 </button>
-                <button type="button" onClick={() => setEditingPlaylist((current) => !current)}>Edit</button>
-                <button className="dangerButton" type="button" onClick={() => void onProposeDeletePlaylist(activePlaylist)}>Delete</button>
+                <button disabled={savingPlaylist} type="button" onClick={() => { setPlaylistSaveError(null); setEditingPlaylist((current) => !current); }}>Edit</button>
+                <button className="dangerButton" disabled={savingPlaylist} type="button" onClick={() => void onProposeDeletePlaylist(activePlaylist)}>Delete</button>
               </div>
             </header>
 
@@ -12775,15 +12991,17 @@ function PlaylistsView({
               <form className="playlistWorkspaceEdit" onSubmit={(event) => void submitPlaylistEdit(event)}>
                 <label>
                   <span>Name</span>
-                  <input value={playlistNameDraft} onChange={(event) => setPlaylistNameDraft(event.target.value)} />
+                  <input disabled={savingPlaylist} value={playlistNameDraft} onChange={(event) => setPlaylistNameDraft(event.target.value)} />
                 </label>
                 <label>
                   <span>Description</span>
-                  <input value={playlistDescriptionDraft} onChange={(event) => setPlaylistDescriptionDraft(event.target.value)} />
+                  <input disabled={savingPlaylist} value={playlistDescriptionDraft} onChange={(event) => setPlaylistDescriptionDraft(event.target.value)} />
                 </label>
-                <button disabled={!playlistNameDraft.trim()} type="submit">Propose changes</button>
+                <button disabled={savingPlaylist || !playlistNameDraft.trim()} type="submit">{savingPlaylist ? "Saving…" : "Save"}</button>
               </form>
             ) : null}
+
+            {playlistSaveError ? <div className="inlineError" role="alert">{playlistSaveError}</div> : null}
 
             <div className="playlistWorkspaceTrackHeader" aria-hidden="true">
               <span />
@@ -12927,7 +13145,7 @@ function PlaylistDetailView({
   onPlayFileIdsShuffled,
   onPlayPlaylist,
   onProposeDeletePlaylist,
-  onProposeUpdatePlaylist,
+  onSavePlaylist,
   onProposeRemoveItem
 }: {
   currentWaveform: WaveformSummaryResponse | null;
@@ -12942,10 +13160,12 @@ function PlaylistDetailView({
   onPlayFileIdsShuffled(fileIds: string[]): Promise<void>;
   onPlayPlaylist(playlistId: string): Promise<void>;
   onProposeDeletePlaylist(playlist: Playlist): Promise<void>;
-  onProposeUpdatePlaylist(playlistId: string, updates: { name: string; description: string | null }): Promise<void>;
+  onSavePlaylist(playlistId: string, updates: { name: string; description: string | null }): Promise<void>;
   onProposeRemoveItem(playlistId: string, itemId: string): Promise<void>;
 }): ReactElement {
   const [name, setName] = useState(playlist.name);
+  const [savingPlaylist, setSavingPlaylist] = useState(false);
+  const [playlistSaveError, setPlaylistSaveError] = useState<string | null>(null);
   const [description, setDescription] = useState(playlist.description ?? "");
   const changed = name.trim() !== playlist.name || description.trim() !== (playlist.description ?? "");
   const totalDurationMs = useMemo(() => playlist.items.reduce((sum, item) => sum + (item.file.durationMs ?? 0), 0), [playlist.items]);
@@ -12953,19 +13173,28 @@ function PlaylistDetailView({
 
   useEffect(() => {
     setName(playlist.name);
+    setPlaylistSaveError(null);
     setDescription(playlist.description ?? "");
   }, [playlist.description, playlist.id, playlist.name]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const nextName = name.trim();
-    if (!nextName || !changed) {
+    if (savingPlaylist || !nextName || !changed) {
       return;
     }
-    await onProposeUpdatePlaylist(playlist.id, {
-      name: nextName,
-      description: description.trim() || null
-    });
+    setSavingPlaylist(true);
+    setPlaylistSaveError(null);
+    try {
+      await onSavePlaylist(playlist.id, {
+        name: nextName,
+        description: description.trim() || null
+      });
+    } catch (error) {
+      setPlaylistSaveError(getErrorMessage(error));
+    } finally {
+      setSavingPlaylist(false);
+    }
   }
 
   return (
@@ -13041,21 +13270,23 @@ function PlaylistDetailView({
           <form className="playlistEditForm" onSubmit={(event) => void handleSubmit(event)}>
             <label>
               <span>Name</span>
-              <input aria-label="Playlist name" value={name} onChange={(event) => setName(event.target.value)} />
+              <input aria-label="Playlist name" disabled={savingPlaylist} value={name} onChange={(event) => setName(event.target.value)} />
             </label>
             <label>
               <span>Description</span>
               <input
                 aria-label="Playlist description"
+                disabled={savingPlaylist}
                 placeholder="Description"
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
               />
             </label>
-            <button disabled={!changed || !name.trim()} type="submit">
-              Propose Edit
+            <button disabled={savingPlaylist || !changed || !name.trim()} type="submit">
+              {savingPlaylist ? "Saving…" : "Save"}
             </button>
           </form>
+          {playlistSaveError ? <div className="inlineError" role="alert">{playlistSaveError}</div> : null}
           <div className="playlistTracks" role="list" aria-label="Playlist tracks">
             {playlist.items.length === 0 ? <div className="emptyState">This playlist has no tracks.</div> : null}
             {playlist.items.map((item) => {
@@ -13125,339 +13356,49 @@ function PlaylistDetailView({
 }
 
 function AgentView({
-  agentBusy,
-  agentInput,
-  activeThreadId,
-  messages,
-  threads,
-  onApplyOperationBatch,
-  onApproveOperationBatch,
-  onOpenOperations,
-  onOpenPlaylist,
-  setAgentInput,
-  onNewThread,
-  onSelectThread,
-  onSubmit
+  agentBusy, draftRef, activeThreadId, messages, threads, taste, workflows, onRecoverPlaylist,
+  onApplyOperationBatch, onApproveOperationBatch, onOpenOperations, onOpenPlaylist,
+  onNewThread, onSelectThread, onSubmit, onOpenTaste, onCatalogAction
 }: {
-  agentBusy: boolean;
-  agentInput: string;
-  activeThreadId: string | null;
-  messages: AgentMessage[];
-  threads: AgentThreadsResponse["threads"];
+  agentBusy: boolean; draftRef: { current: string }; activeThreadId: string | null;
+  messages: AgentMessage[]; threads: AgentThreadsResponse["threads"]; taste: TasteProfileResponse | null;
+  workflows: AgentPlaylistWorkflow[]; onRecoverPlaylist(id: string): Promise<void>;
   onApplyOperationBatch(batchId: string): Promise<void>;
   onApproveOperationBatch(batchId: string): Promise<void>;
-  onOpenOperations(): void;
-  onOpenPlaylist(playlistId: string): void | Promise<void>;
-  setAgentInput(value: string): void;
+  onOpenOperations(): void; onOpenPlaylist(playlistId: string): void | Promise<void>;
   onNewThread(): Promise<void>;
-  onSelectThread(threadId: string): Promise<void>;
-  onSubmit(event: FormEvent<HTMLFormElement>): Promise<void>;
+  onSelectThread(threadId: string): Promise<void>; onSubmit(message: string): Promise<void>;
+  onOpenTaste(): void; onCatalogAction(message: string, action: CatalogAction): Promise<void>;
 }): ReactElement {
-  const [threadQuery, setThreadQuery] = useState("");
-  const activeThread = threads.find((thread) => thread.id === activeThreadId) ?? null;
-  const threadGroups = useMemo(() => {
-    const now = Date.now();
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
-    const query = threadQuery.trim().toLocaleLowerCase();
-    const groups: Array<{ label: string; threads: typeof threads }> = [
-      { label: "Today", threads: [] },
-      { label: "Previous 7 days", threads: [] },
-      { label: "Older", threads: [] }
-    ];
-
-    for (const thread of [...threads].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))) {
-      if (query && !thread.title.toLocaleLowerCase().includes(query)) {
-        continue;
-      }
-      const updatedAt = new Date(thread.updatedAt).getTime();
-      const groupIndex = updatedAt >= startOfToday.getTime() ? 0 : updatedAt >= weekAgo ? 1 : 2;
-      groups[groupIndex]!.threads.push(thread);
-    }
-
-    return groups.filter((group) => group.threads.length > 0);
-  }, [threadQuery, threads]);
-
-  return (
-    <section className="agentView" aria-label="Agent">
-      <aside className="agentThreadRail">
-        <header>
-          <div>
-            <NavIcon view="Agent" />
-            <h1>Agent</h1>
-          </div>
-          <button disabled={agentBusy} type="button" onClick={() => void onNewThread()}>
-            <span aria-hidden="true">+</span>
-            New chat
-          </button>
-        </header>
-        <label className="agentThreadSearch">
-          <UiIcon name="search" />
-          <input
-            aria-label="Search chats"
-            placeholder="Search chats"
-            value={threadQuery}
-            onChange={(event) => setThreadQuery(event.target.value)}
-          />
-        </label>
-        <div className="agentThreadList">
-          {threadGroups.map((group) => (
-            <section key={group.label}>
-              <div className="agentThreadGroupLabel">
-                <span>{group.label}</span>
-                <small>{group.threads.length}</small>
-              </div>
-              {group.threads.map((thread) => (
-                <button
-                  aria-current={thread.id === activeThreadId ? "true" : undefined}
-                  className={thread.id === activeThreadId ? "active" : ""}
-                  disabled={agentBusy}
-                  key={thread.id}
-                  type="button"
-                  onClick={() => void onSelectThread(thread.id)}
-                >
-                  <strong>{thread.title}</strong>
-                  <span>{formatDateTime(thread.updatedAt)}</span>
-                </button>
-              ))}
-            </section>
-          ))}
-          {threadGroups.length === 0 ? <div className="agentThreadEmpty">No matching chats.</div> : null}
-        </div>
-        <footer>
-          <span className="agentConnectionDot" aria-hidden="true" />
-          <span>Tools connected</span>
-        </footer>
-      </aside>
-
-      <section className="agentConversation">
-        <header className="agentConversationHeader">
-          <div>
-            <h2>{activeThread?.title ?? "New chat"}</h2>
-            <span>{activeThread ? `Updated ${formatDateTime(activeThread.updatedAt)}` : "No thread selected"}</span>
-          </div>
-          <button className="secondary" type="button" onClick={onOpenOperations}>
-            Operations
-          </button>
-        </header>
-
-        <div className="agentTranscript">
-          {messages.length === 0 && !agentBusy ? (
-            <div className="agentEmptyConversation">
-              <NavIcon view="Agent" />
-              <strong>New chat</strong>
-            </div>
-          ) : null}
-          <div className="agentMessageColumn">
-            {messages.map((message) => (
-              <article className={`agentMessage ${message.role}`} key={message.id}>
-                <header>
-                  <span className="agentAvatar" aria-hidden="true">{message.role === "user" ? "Y" : <NavIcon view="Agent" />}</span>
-                  <strong>{message.role === "user" ? "You" : "Agent"}</strong>
-                </header>
-                <div className="agentMessageBody">
-                  {message.role === "agent" && message.response?.playlistId ? (
-                    <p>
-                      {message.text}{" "}
-                      <button className="inlineTextButton" type="button" onClick={() => void onOpenPlaylist(message.response!.playlistId!)}>
-                        Open playlist
-                      </button>
-                    </p>
-                  ) : (
-                    <p>{message.text}</p>
-                  )}
-                  {message.role === "agent" && message.response ? (
-                    <AgentResultSummary
-                      response={message.response}
-                      run={message.run ?? null}
-                      onApplyOperationBatch={onApplyOperationBatch}
-                      onApproveOperationBatch={onApproveOperationBatch}
-                      onOpenOperations={onOpenOperations}
-                      onOpenPlaylist={onOpenPlaylist}
-                    />
-                  ) : null}
-                </div>
-              </article>
-            ))}
-            {agentBusy ? (
-              <article className="agentMessage agent">
-                <header>
-                  <span className="agentAvatar" aria-hidden="true"><NavIcon view="Agent" /></span>
-                  <strong>Agent</strong>
-                </header>
-                <div className="agentMessageBody"><p>Planning request...</p></div>
-              </article>
-            ) : null}
-          </div>
-        </div>
-
-        <form className="agentComposer" onSubmit={(event) => void onSubmit(event)}>
-          <div className="agentComposerInner">
-            <input
-              aria-label="Agent message"
-              placeholder="Message the music agent"
-              value={agentInput}
-              onChange={(event) => setAgentInput(event.target.value)}
-            />
-            <button aria-label="Send message" disabled={agentBusy || !agentInput.trim()} type="submit">
-              Send
-            </button>
-          </div>
-        </form>
-      </section>
-    </section>
-  );
+  const latestCatalog = [...messages].reverse().find(message => message.role === "agent" && message.response?.catalogPlan);
+  return <AgentWorkspace busy={agentBusy} draftRef={draftRef} activeThreadId={activeThreadId}
+    messages={messages} threads={threads} taste={taste}
+    onNewThread={onNewThread} onSelectThread={onSelectThread} onSubmit={onSubmit}
+    onOpenTaste={onOpenTaste} onOpenOperations={onOpenOperations}
+    renderResult={message => message.response ? <>
+      {message.response.catalogPlan && <AgentCatalogCard plan={message.response.catalogPlan}
+        runId={message.response.runId ?? message.run?.id}
+        disabled={agentBusy || latestCatalog?.id !== message.id} onChoose={onCatalogAction} />}
+      <AgentResultSummary response={message.response} run={message.run}
+        workflow={workflows.find(workflow => workflow.runId === (message.response?.runId ?? message.run?.id) || workflow.operationBatchId === message.response?.operationBatch?.id)}
+        onRecoverPlaylist={onRecoverPlaylist}
+        onApplyOperationBatch={onApplyOperationBatch} onApproveOperationBatch={onApproveOperationBatch}
+        onOpenOperations={onOpenOperations} onOpenPlaylist={onOpenPlaylist} />
+    </> : null} />;
 }
 
-function AgentResultSummary({
-  response,
-  run,
-  onApplyOperationBatch,
-  onApproveOperationBatch,
-  onOpenOperations,
-  onOpenPlaylist
-}: {
-  response: AgentMessageResponse;
-  run?: AgentRun | null;
-  onApplyOperationBatch(batchId: string): Promise<void>;
-  onApproveOperationBatch(batchId: string): Promise<void>;
-  onOpenOperations(): void;
-  onOpenPlaylist(playlistId: string): void | Promise<void>;
+function AgentResultSummary({response,run,workflow,onApplyOperationBatch,onApproveOperationBatch,onOpenOperations,onOpenPlaylist,onRecoverPlaylist}: {
+  response: AgentMessageResponse; run?: AgentRun | null; workflow?: AgentPlaylistWorkflow;
+  onApplyOperationBatch(batchId: string): Promise<void>; onApproveOperationBatch(batchId: string): Promise<void>;
+  onOpenOperations(): void; onOpenPlaylist(playlistId: string): void | Promise<void>;
+  onRecoverPlaylist(id: string): Promise<void>;
 }): ReactElement {
-  const resultCount =
-    response.intent === "search_discovery"
-      ? response.discoveryResults.length
-      : response.intent === "parse_pasted_list"
-        ? response.parsedListItems.length
-        : response.intent === "propose_import"
-          ? response.importResults.length
-        : response.results.length;
-  return (
-    <div className="agentResultSummary">
-      <span>
-        Tool: {response.intent} · Query: {response.searchQuery || "-"} · Results: {resultCount}
-      </span>
-      {response.operationBatch ? (
-        <span>
-          Proposed batch: {response.operationBatch.summary} · {response.operationBatch.status}
-        </span>
-      ) : null}
-      {response.operationBatch ? (
-        <div className="agentResultActions">
-          <button className="secondary compactButton" type="button" onClick={onOpenOperations}>
-            Review in Operations
-          </button>
-          <button
-            className="secondary compactButton"
-            disabled={response.operationBatch.status !== "proposed" && response.operationBatch.status !== "draft"}
-            type="button"
-            onClick={() => void onApproveOperationBatch(response.operationBatch!.id)}
-          >
-            Approve
-          </button>
-          <button
-            className="secondary compactButton"
-            disabled={response.operationBatch.status !== "approved" || !isOperationBatchExecutable(response.operationBatch)}
-            type="button"
-            onClick={() => void onApplyOperationBatch(response.operationBatch!.id)}
-          >
-            Apply
-          </button>
-        </div>
-      ) : null}
-      {response.playlistId ? (
-        <div className="agentResultActions">
-          <button className="secondary compactButton" type="button" onClick={() => void onOpenPlaylist(response.playlistId!)}>
-            Open Playlist
-          </button>
-        </div>
-      ) : null}
-      {run && run.steps.length > 0 ? <AgentRunTrace run={run} /> : null}
-      {response.researchSources && response.researchSources.length > 0 ? (
-        <div className="agentResults">
-          {response.researchSources.slice(0, 6).map((source) => (
-            <a href={source.url} key={source.url} rel="noreferrer" target="_blank">
-              {source.title}
-              {source.summary ? ` · ${source.summary}` : ""}
-            </a>
-          ))}
-        </div>
-      ) : null}
-      {response.results.length > 0 ? (
-        <div className="agentResults">
-          {response.results.slice(0, 8).map((result) => (
-            <span key={result.fileId}>
-              {result.title} · {result.artist ?? "Unknown Artist"} · {result.album ?? "Unknown Album"}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      {response.discoveryGroups && response.discoveryGroups.length > 0 ? (
-        <div className="agentResults">
-          {response.discoveryGroups.slice(0, 6).map((group) => (
-            <span key={`${group.releaseArtist ?? "unknown"}-${group.releaseTitle}`}>
-              {group.releaseArtist ? `${group.releaseArtist} - ${group.releaseTitle}` : group.releaseTitle} ·{" "}
-              {group.sourceCount} source{group.sourceCount === 1 ? "" : "s"} · {group.unlockedCount} unlocked ·{" "}
-              {group.bestFormat ?? "file"} · owned matches {group.ownedMatchCount}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      {response.discoveryResults.length > 0 ? (
-        <div className="agentResults">
-          {response.discoveryResults.slice(0, 8).map((result) => (
-            <span key={result.discoveryId}>
-              {result.filename} · {result.username ?? "Unknown user"} · {result.extension?.toUpperCase() ?? "file"} ·{" "}
-              {result.isLocked ? "locked" : "available"} · owned matches {result.ownedMatchCount}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      {response.parsedListItems.length > 0 ? (
-        <div className="agentResults">
-          {response.parsedListItems.slice(0, 8).map((item) => (
-            <span key={`${item.rank ?? "item"}-${item.query}`}>
-              {item.rank ? `${item.rank}. ` : ""}
-              {item.artist ? `${item.artist} - ` : ""}
-              {item.title}
-              {item.year ? ` · ${item.year}` : ""} · owned matches {item.ownedMatchCount}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      {response.importResults.length > 0 ? (
-        <div className="agentResults">
-          {response.importResults.slice(0, 8).map((item) => (
-            <span key={item.importItemId}>
-              {item.artist ?? "Unknown Artist"} - {item.title ?? "Unknown Title"} · {item.album ?? "Unknown Album"}
-              {item.year ? ` · ${item.year}` : ""} · duplicates {item.duplicateCount}
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function AgentRunTrace({ run }: { run: AgentRun }): ReactElement {
-  return (
-    <details className="agentResults">
-      <summary>
-        Run trace - {run.status} - {run.steps.length} step{run.steps.length === 1 ? "" : "s"}
-      </summary>
-      {run.steps.map((step) => (
-        <span key={step.id}>
-          {step.stepIndex + 1}. {stepLabel(step.type, step.toolName)} - {step.status} - {step.summary}
-          {step.error ? ` - ${step.error}` : ""}
-        </span>
-      ))}
-    </details>
-  );
-}
-
-function stepLabel(type: AgentRun["steps"][number]["type"], toolName: string | null): string {
-  return toolName ? `${type}:${toolName}` : type;
+  if (response.playlistId && !run && !response.operationBatch) {
+    return <div className="agentResultActions"><button type="button" onClick={() => void onOpenPlaylist(response.playlistId!)}>Open playlist</button></div>;
+  }
+  return <AgentResultsCard response={response} run={run} workflow={workflow}
+    onOpenPlaylist={onOpenPlaylist} onOpenOperations={onOpenOperations}
+    onApprove={onApproveOperationBatch} onApply={onApplyOperationBatch} onRecover={onRecoverPlaylist} />;
 }
 
 async function listRoots(signal?: AbortSignal) {
@@ -13705,8 +13646,8 @@ async function createAgentThread() {
   return postJson("/agent/threads", {}, agentThreadResponseSchema);
 }
 
-async function sendAgentMessage(message: string, threadId: string | undefined) {
-  const result = await postJson("/agent/runs", { message, threadId }, agentRunResponseSchema);
+async function sendAgentMessage(message: string, threadId: string | undefined, catalogAction?: CatalogAction) {
+  const result = await postJson("/agent/runs", { message, threadId, catalogAction }, agentRunResponseSchema);
   if (!result.run.response) {
     throw new Error(result.run.error ?? "Agent run did not return a response");
   }
@@ -14912,7 +14853,12 @@ function titleCase(value: string): string {
   return value.replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
+function workflowConversationRevision(workflow: AgentPlaylistWorkflow): string {
+  return JSON.stringify([workflow.id, workflow.status, workflow.playlistId, workflow.error, workflow.delivery]);
+}
+
 function formatAgentPlaylistWorkflowCompactStatus(workflow: AgentPlaylistWorkflow): string {
+  if (workflow.status === "partial" && workflow.playlistId) return "Ready with gaps";
   if (workflow.status === "completed" && workflow.playlistId) {
     return "Completed - playlist ready";
   }
@@ -14920,7 +14866,7 @@ function formatAgentPlaylistWorkflowCompactStatus(workflow: AgentPlaylistWorkflo
 }
 
 function isOpenAgentPlaylistWorkflow(workflow: AgentPlaylistWorkflow): boolean {
-  return workflow.status !== "completed" && workflow.status !== "failed";
+  return workflow.status !== "completed" && workflow.status !== "partial" && workflow.status !== "failed";
 }
 
 function formatAgentPlaylistWorkflowDetail(workflow: AgentPlaylistWorkflow): string {
@@ -15286,7 +15232,9 @@ function WaveformCanvas({
       return playback.status === "playing";
     });
     draw(performance.now(), true);
+    canvasThemeRedraw.set(canvas, () => draw(performance.now(), true));
     return () => {
+      canvasThemeRedraw.delete(canvas);
       surface.dispose();
       animation.dispose();
     };
@@ -15333,7 +15281,8 @@ function SpectrumCanvas({
       return playing || levels.some(level => level > 0.0001);
     };
     const animation = createVisualizerAnimation(canvas, draw);
-    return () => { surface.dispose(); animation.dispose(); };
+    canvasThemeRedraw.set(canvas, () => { draw(performance.now()); });
+    return () => { canvasThemeRedraw.delete(canvas); surface.dispose(); animation.dispose(); };
   }, [frameRef, mode, playing]);
 
   return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
@@ -15378,7 +15327,8 @@ function LevelMeterCanvas({
       return playing || peak > 0.0001;
     };
     const animation = createVisualizerAnimation(canvas, draw);
-    return () => { surface.dispose(); animation.dispose(); };
+    canvasThemeRedraw.set(canvas, () => { draw(performance.now()); });
+    return () => { canvasThemeRedraw.delete(canvas); surface.dispose(); animation.dispose(); };
   }, [channel, frameRef, playing]);
 
   return <canvas aria-hidden="true" className={className} ref={canvasRef} />;
@@ -15430,10 +15380,12 @@ function SpectrogramCanvas({
 }
 
 function VisualizerPanel({
+  settings,
   frameRef,
   playback,
   waveformState
 }: {
+  settings: NowPlayingPreferences;
   frameRef: MutableRefObject<VisualizerFrameResponse | null>;
   playback: PlaybackStateResponse;
   waveformState: WaveformState;
@@ -15441,7 +15393,7 @@ function VisualizerPanel({
   return (
     <section className="visualizerPanel" aria-label="Playback visualizer">
       <div className="visualizerStage">
-        <div className="waveformRibbon">
+        {settings.waveform ? <div className="waveformRibbon">
           <WaveformCanvas
             className="heroWaveformCanvas"
             playback={playback}
@@ -15449,8 +15401,8 @@ function VisualizerPanel({
             variant="hero"
             waveform={waveformState.waveform}
           />
-        </div>
-        <div className="meterRail left" aria-hidden="true">
+        </div> : null}
+        {settings.leftMeter ? <div className="meterRail left" aria-hidden="true">
           <div className="meterHeader">
             <strong>L</strong>
             <span>Meter</span>
@@ -15460,8 +15412,8 @@ function VisualizerPanel({
             {[0, -6, -12, -18, -24, -36, -48, -60].map((tick) => <span key={tick}>{tick}</span>)}
           </div>
           <small>dB</small>
-        </div>
-        <div className="meterRail right" aria-hidden="true">
+        </div> : null}
+        {settings.rightMeter ? <div className="meterRail right" aria-hidden="true">
           <div className="meterHeader">
             <strong>R</strong>
             <span>Meter</span>
@@ -15471,8 +15423,8 @@ function VisualizerPanel({
             {[0, -6, -12, -18, -24, -36, -48, -60].map((tick) => <span key={tick}>{tick}</span>)}
           </div>
           <small>dB</small>
-        </div>
-        <div className="spectrogramFloor">
+        </div> : null}
+        {settings.spectrogram ? <div className="spectrogramFloor">
           <div className="visualizerLabel">
             <strong>Spectrogram</strong>
           </div>
@@ -15491,7 +15443,7 @@ function VisualizerPanel({
             <span>0 dB</span>
           </div>
           <SpectrogramCanvas className="spectrogramCanvas" fileId={playback.currentFileId} frameRef={frameRef} playing={playback.status === "playing"} />
-        </div>
+        </div> : null}
       </div>
     </section>
   );
@@ -15712,6 +15664,8 @@ interface HslColor {
   s: number;
   l: number;
 }
+
+const canvasThemeRedraw = new WeakMap<HTMLCanvasElement, () => void>();
 
 const canvasThemeColorCache = new WeakMap<
   HTMLCanvasElement,

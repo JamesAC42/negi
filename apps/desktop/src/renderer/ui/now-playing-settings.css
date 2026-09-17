@@ -1,0 +1,165 @@
+.nowPlayingSettings {
+  display: grid;
+  min-width: 0;
+  container-type: inline-size;
+  margin: 1.25rem;
+  gap: 24px;
+  padding: clamp(18px, 3vw, 30px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg1);
+  scroll-margin-top: 24px;
+}
+.nowPlayingSettingsGroup { min-width: 0; margin: 0; padding: 0; border: 0; }
+.nowPlayingSettingsGroup legend { padding: 0 0 12px; color: var(--tx0); font-weight: 700; font-size: 13px; }
+.nowPlayingSettingsToggles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.nowPlayingSettingsToggle { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px; border: 1px solid var(--line); border-radius: var(--r-s); cursor: pointer; background: var(--bg2); }
+.nowPlayingSettingsToggle > span { display: grid; gap: 5px; }
+.nowPlayingSettingsToggle strong { color: var(--tx0); font-size: 13px; }
+.nowPlayingSettingsToggle small, .nowPlayingSettingsHint, .nowPlayingSettingsColor p { color: var(--tx2); font-size: 12px; line-height: 1.5; }
+.nowPlayingSettingsToggle input[type="checkbox"] { appearance: none; display: block; box-shadow: none; flex: 0 0 34px; width: 34px; height: 20px; margin: 0; padding: 2px; border: 1px solid var(--line); border-radius: 20px; background: var(--bg3); cursor: pointer; }
+.nowPlayingSettingsToggle input[type="checkbox"]::before { content: ""; display: block; transform: none; clip-path: none; width: 14px; height: 14px; border-radius: 50%; background: var(--tx2); }
+.nowPlayingSettingsToggle input[type="checkbox"]:checked { background: var(--acc); border-color: var(--acc); }
+.nowPlayingSettingsToggle input[type="checkbox"]:checked::before { margin-left: 14px; transform: none; background: var(--acc-ink); }
+.nowPlayingSettingsToggle input[type="checkbox"]:focus-visible { outline: 2px solid var(--acc); outline-offset: 4px; }
+.nowPlayingSettingsHint { margin: 12px 0 0; }
+.nowPlayingSettingsColor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 240px); gap: 16px; align-items: center; }
+.nowPlayingSettingsColor label, .nowPlayingCustomColor label > span { color: var(--tx1); font-size: 12px; font-weight: 600; }
+.nowPlayingSettingsColor p { margin: 5px 0 0; }
+.nowPlayingCustomColor { display: flex; align-items: end; flex-wrap: wrap; gap: 14px; margin-top: 18px; }
+.nowPlayingCustomColor label { display: grid; gap: 8px; }
+.nowPlayingCustomColor input { height: 36px; border: 1px solid var(--line); border-radius: var(--r-s); background: var(--bg2); color: var(--tx0); }
+.nowPlayingCustomColor input[type="text"] { width: 130px; padding: 0 10px; font-family: var(--font-mono); }
+.nowPlayingCustomColor input[type="color"] { width: 54px; padding: 4px; cursor: pointer; }
+.nowPlayingCustomColor small { flex-basis: 100%; color: var(--tx2); }
+@media (max-width: 760px) {
+  .nowPlayingSettingsToggles, .nowPlayingSettingsColor { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Reclaim each disabled visualizer's space without changing the enabled layout. */
+@media (min-width: 981px) {
+  .nowPlayingOverlay .nowPlayingCockpit {
+    --visualizer-left-gutter: var(--visualizer-side-gutter);
+    --visualizer-right-gutter: var(--visualizer-side-gutter);
+    padding-left: var(--visualizer-left-gutter);
+    padding-right: var(--visualizer-right-gutter);
+  }
+  .nowPlayingOverlay[data-left-meter="false"] .nowPlayingCockpit {
+    --visualizer-left-gutter: clamp(1rem, 2vw, 1.625rem);
+  }
+  .nowPlayingOverlay[data-right-meter="false"] .nowPlayingCockpit {
+    --visualizer-right-gutter: clamp(1rem, 2vw, 1.625rem);
+  }
+  .nowPlayingOverlay .waveformRibbon {
+    left: var(--visualizer-left-gutter);
+    right: var(--visualizer-right-gutter);
+    width: auto;
+    transform: none;
+  }
+}
+.nowPlayingOverlay[data-waveform="false"] .nowPlayingCockpit {
+  grid-template-rows: 0 0 minmax(0, 1fr);
+  row-gap: 0;
+  padding-top: 3.5rem;
+}
+.nowPlayingOverlay[data-waveform="false"] .meterRail { top: 3.5rem; }
+.nowPlayingOverlay[data-spectrogram="false"] .nowPlayingCockpit {
+  --spectrogram-clearance: 1.5rem;
+  padding-bottom: var(--spectrogram-clearance);
+}
+.nowPlayingOverlay .nowPlayingRightColumn {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.nowPlayingOverlay .nowPlayingModalInfo { flex: 0 0 auto; }
+.nowPlayingOverlay .focusSpectrum {
+  flex: 0 0 auto;
+  height: clamp(12rem, 24vh, 24rem);
+  max-height: var(--np-spectrum-max-height, 30rem);
+}
+.nowPlayingOverlay[data-live-spectrum="false"] .nowPlayingRightColumn {
+  align-self: center;
+}
+.nowPlayingOverlay .modalSimpleProgress {
+  display: block;
+  height: 100%;
+  background: var(--acc);
+  border-radius: inherit;
+}
+.nowPlayingOverlay[data-waveform="false"] .progressRail { height: 4px; }
+@media (max-width: 980px) {
+  .nowPlayingOverlay[data-waveform="false"] .nowPlayingCockpit { grid-template-rows: 0 0 auto; }
+}
+
+.nowPlayingSettings h2 { margin: 0; color: var(--tx0); font: 650 clamp(1.5rem, 2.5vw, 2rem)/1.15 var(--font-head); letter-spacing: -.035em; }
+.nowPlayingSettings .studioHeading { margin-bottom: 0; }
+@container (max-width: 560px) {
+  .nowPlayingSettingsToggles, .nowPlayingSettingsColor { grid-template-columns: minmax(0, 1fr); }
+}
+/* Center the player as one content-sized stack; spare height stays outside it. */
+.nowPlayingBackdrop .nowPlayingOverlay .nowPlayingCockpit {
+  /* Retain the middle sections' original usable width when meter gutters vanish. */
+  --np-content-max-width: min(76rem, calc(100% - 2rem
+    - (var(--visualizer-side-gutter) - var(--visualizer-left-gutter))
+    - (var(--visualizer-side-gutter) - var(--visualizer-right-gutter))));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  gap: clamp(.75rem, 1.2vw, 1rem);
+  padding-block: clamp(1rem, 2vw, 1.625rem);
+  overflow-y: auto;
+}
+.nowPlayingOverlay .nowPlayingCockpit .visualizerPanel,
+.nowPlayingOverlay .nowPlayingCockpit .visualizerStage { display: contents; }
+.nowPlayingOverlay .nowPlayingCockpit .waveformRibbon,
+.nowPlayingOverlay .nowPlayingCockpit .spectrogramFloor {
+  position: relative;
+  inset: auto;
+  flex: none;
+  width: 100%;
+  transform: none;
+}
+.nowPlayingOverlay .nowPlayingCockpit .waveformRibbon { order: 1; }
+.nowPlayingOverlay .nowPlayingCockpit .nowPlayingFocus {
+  order: 2;
+  flex: none;
+  height: auto;
+  max-height: none;
+  grid-template-rows: max-content auto;
+  overflow: visible;
+  padding: 0;
+}
+.nowPlayingOverlay .nowPlayingCockpit .spectrogramFloor { order: 3; }
+
+.nowPlayingOverlay .nowPlayingCockpit .waveformRibbon,
+.nowPlayingOverlay .nowPlayingCockpit .nowPlayingFocus,
+.nowPlayingOverlay .nowPlayingCockpit .spectrogramFloor {
+  width: min(100%, var(--np-content-max-width));
+}
+@media (max-width: 980px) {
+  .nowPlayingBackdrop .nowPlayingOverlay .nowPlayingCockpit { --np-content-max-width: 32rem; }
+}
+/* Share a fixed desktop height: visualizers give up space before controls do. */
+@media (min-width: 981px) {
+  .nowPlayingBackdrop .nowPlayingOverlay .nowPlayingCockpit { overflow: hidden; }
+  .nowPlayingOverlay .nowPlayingCockpit .waveformRibbon {
+    flex: 0 1 auto;
+    min-height: 1.5rem;
+  }
+  .nowPlayingOverlay .nowPlayingCockpit .spectrogramFloor {
+    flex: 0 1 auto;
+    min-height: 4rem;
+  }
+  .nowPlayingOverlay .nowPlayingCockpit .nowPlayingFocus {
+    flex: 0 1 auto;
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .nowPlayingOverlay .nowPlayingCockpit .focusSpectrum {
+    flex: 1 1 auto;
+    min-height: 4rem;
+  }
+  .nowPlayingOverlay .nowPlayingCockpit .nowPlayingArtShell { max-height: 100%; }
+  .nowPlayingOverlay .nowPlayingCockpit .nowPlayingFocus::before { inset: 0; }
+}

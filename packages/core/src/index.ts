@@ -8,3 +8,5 @@ export * from "./schemas/explore.js";
 
 export * from "./schemas/home.js";
 export * from "./lyrics.js";
+
+export * from "./schemas/agent-catalog.js";

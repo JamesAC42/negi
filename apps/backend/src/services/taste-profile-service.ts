@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { TasteLearningService, effectiveTasteProfile } from "./taste-learning-service.js";
 import {
   tasteProfileSchema,
   type TasteProfile,
@@ -26,7 +27,15 @@ const profileKeys = [
 ] as const satisfies ReadonlyArray<keyof TasteProfile>;
 
 export class TasteProfileService {
-  constructor(private readonly db: Database.Database) {}
+  private readonly learning: TasteLearningService;
+
+  constructor(private readonly db: Database.Database) {
+    this.learning = new TasteLearningService(db);
+  }
+
+  getEffectiveProfile(): TasteProfile {
+    return this.getProfile().effectiveProfile!;
+  }
 
   getProfile(): TasteProfileResponse {
     const rows = this.db
@@ -52,10 +61,13 @@ export class TasteProfileService {
     const profile = tasteProfileSchema.parse(values);
     const updatedAt =
       entries.reduce<string | null>((latest, entry) => (latest == null || entry.updatedAt > latest ? entry.updatedAt : latest), null);
+    const learned = this.learning.getProfile();
     return {
       profile,
       entries,
-      updatedAt
+      updatedAt,
+      learned,
+      effectiveProfile: effectiveTasteProfile(profile, learned.profile)
     };
   }
 

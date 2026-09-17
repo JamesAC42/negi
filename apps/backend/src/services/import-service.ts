@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
 import { constants } from "node:fs";
 import { copyFile, mkdir, readdir, rename, stat, unlink } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import type { DuplicateCandidate, ImportBatch, ImportItem, LibraryRoot, MetadataCandidate } from "@music-os/core";
 import type { BackendConfig } from "../config.js";
 import { LibraryRepository } from "./library-repository.js";
@@ -12,6 +12,7 @@ import type { AcousticFingerprintService } from "./acoustic-fingerprint-service.
 
 export class ImportService {
   private readonly stagingRoot: string;
+  private readonly approvals = new Map<string, { libraryRootId: string; promise: Promise<ImportItem> }>();
 
   constructor(
     private readonly db: Database.Database,
@@ -92,6 +93,26 @@ export class ImportService {
   }
 
   async approveItem(importItemId: string, libraryRootId: string): Promise<ImportItem> {
+    const pending = this.approvals.get(importItemId);
+    if (pending) {
+      if (pending.libraryRootId !== libraryRootId) {
+        throw new Error("Import item is already being approved into another library root");
+      }
+      return pending.promise;
+    }
+
+    // Operations and background workflows can approve the same item together.
+    // They must share both the file move and its final database result.
+    const promise = this.approveItemOnce(importItemId, libraryRootId);
+    this.approvals.set(importItemId, { libraryRootId, promise });
+    try {
+      return await promise;
+    } finally {
+      this.approvals.delete(importItemId);
+    }
+  }
+
+  private async approveItemOnce(importItemId: string, libraryRootId: string): Promise<ImportItem> {
     const item = this.getItem(importItemId);
     if (item.status === "imported") {
       return item;
@@ -101,42 +122,55 @@ export class ImportService {
     }
 
     const root = this.library.getRoot(libraryRootId);
-    const destination = buildDestinationPath(root, item, item.stagingPath);
-    await mkdir(dirname(destination), { recursive: true });
-
-    const finalPath = await uniqueDestination(destination);
-    await moveImportedFile(item.stagingPath, finalPath);
+    // A previous attempt may have moved the file before metadata/promotion failed.
+    // Retain that exact destination so retries never need the vanished staging file.
+    let finalPath = item.stagingPath;
+    const relativeDestination = relative(root.path, item.stagingPath);
+    const isAlreadyInRoot = relativeDestination !== ".." && !relativeDestination.startsWith(`..${sep}`) && !isAbsolute(relativeDestination);
+    if (item.stagingPath !== item.proposedDestination || !isAlreadyInRoot) {
+      const destination = buildDestinationPath(root, item, item.stagingPath);
+      await mkdir(dirname(destination), { recursive: true });
+      finalPath = await uniqueDestination(destination);
+      await moveImportedFile(item.stagingPath, finalPath);
+      this.db.prepare(
+        "UPDATE import_items SET staging_path = ?, proposed_destination = ?, updated_at = datetime('now') WHERE id = ?"
+      ).run(finalPath, finalPath, importItemId);
+    }
 
     let importedFileId = item.fileId;
-    if (importedFileId) {
-      this.library.promoteStagedFile(importedFileId, root.id, finalPath);
-    } else {
+    if (!importedFileId) {
       const scanned = await scanAudioFile(root.id, finalPath);
-      const upsert = this.library.upsertFile({ ...scanned, staged: false, importItemId: null });
-      await this.storeFingerprint(upsert.id, finalPath);
+      // Keep the file hidden until finalization commits; remember its ID even if
+      // optional enrichment fails so a retry reuses the same library identity.
+      const upsert = this.library.upsertFile({ ...scanned, staged: true, importItemId });
       importedFileId = upsert.id;
+      this.db.prepare("UPDATE import_items SET file_id = ? WHERE id = ?").run(importedFileId, importItemId);
+      await this.storeFingerprint(importedFileId, finalPath);
     }
 
-    this.db
-      .prepare(
-        `UPDATE import_items
-         SET file_id = ?, staging_path = ?, status = 'imported', proposed_destination = ?, updated_at = datetime('now')
-         WHERE id = ?`
-      )
-      .run(importedFileId, finalPath, finalPath, importItemId);
-
-    if (importedFileId && item.selectedCandidate?.source === "manual") {
-      this.library.setFileMetadataOverrides(importedFileId, {
-        artist: item.detectedArtist, albumartist: item.detectedArtist,
-        album: item.detectedAlbum, title: item.detectedTitle,
-        year: item.detectedYear == null ? null : String(item.detectedYear)
-      });
-    }
-    this.refreshImportStatus(item.importId);
+    this.db.transaction(() => {
+      this.library.promoteStagedFile(importedFileId, root.id, finalPath);
+      if (item.selectedCandidate?.source === "manual") {
+        this.library.setFileMetadataOverrides(importedFileId, {
+          artist: item.detectedArtist, albumartist: item.detectedArtist,
+          album: item.detectedAlbum, title: item.detectedTitle,
+          year: item.detectedYear == null ? null : String(item.detectedYear)
+        });
+      }
+      this.db
+        .prepare(
+          `UPDATE import_items
+           SET file_id = ?, staging_path = ?, status = 'imported', proposed_destination = ?, updated_at = datetime('now')
+           WHERE id = ?`
+        )
+        .run(importedFileId, finalPath, finalPath, importItemId);
+      this.refreshImportStatus(item.importId);
+    })();
     return this.getItem(importItemId);
   }
 
   rejectItem(importItemId: string): ImportItem {
+    this.assertNotApproving(importItemId);
     const item = this.getItem(importItemId);
     if (item.status === "imported") {
       throw new Error("Imported item cannot be rejected");
@@ -153,6 +187,7 @@ export class ImportService {
     importItemId: string,
     metadata: { artist?: string | number | null; album?: string | number | null; title?: string | number | null; year?: string | number | null }
   ): ImportItem {
+    this.assertNotApproving(importItemId);
     const item = this.getItem(importItemId);
     if (item.status !== "needs_review") {
       throw new Error(`Import item metadata cannot be edited from status ${item.status}`);
@@ -208,6 +243,12 @@ export class ImportService {
       );
 
     return this.getItem(importItemId);
+  }
+
+  private assertNotApproving(importItemId: string): void {
+    if (this.approvals.has(importItemId)) {
+      throw new Error("Import item is currently being approved");
+    }
   }
 
   private async createItemFromPath(

@@ -1,9 +1,12 @@
+import { handleYoutubePlayback } from './youtube-playback-routes.js';
+import { youtubePreferences, youtubeHome } from './services/youtube-personalization.js';
 import { z } from "zod";
 import {
   acquireAlbumRequestSchema,
   catalogueIdSchema,
   catalogueSectionSchema,
   youtubeDownloadRequestSchema,
+  youtubeBrowseRequestSchema,
   youtubeReviewRequestSchema,
 } from "@music-os/core";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -20,6 +23,9 @@ export async function handleExplore(
 ): Promise<boolean> {
   const path = url.pathname;
   if (!path.startsWith("/explore/")) return false;
+  if (await handleYoutubePlayback(request, response, url, app.youtube.playback, read, write)) return true;
+  if (request.method === 'GET' && path === '/explore/youtube/preferences') { write(response, 200, youtubePreferences(app.tasteProfile.getEffectiveProfile())); return true; }
+  if (request.method === 'GET' && path === '/explore/youtube/home') { write(response, 200, await youtubeHome(app.tasteProfile.getEffectiveProfile(), request => app.youtube.browse(request), z.coerce.number().int().min(1).max(20).parse(url.searchParams.get('page') ?? 1))); return true; }
   if (request.method === "GET" && path === "/explore/cover") {
     const groupId = id.parse(url.searchParams.get("id"));
     const artwork = await app.artwork.catalogue
@@ -118,6 +124,13 @@ export async function handleExplore(
     result = { jobs: app.albumAcquisitions.list() };
   } else if (request.method === "GET" && path === "/explore/youtube/health")
     result = await app.youtube.health();
+  else if (request.method === "GET" && path === "/explore/youtube/browse")
+    result = await app.youtube.browse(youtubeBrowseRequestSchema.parse({
+      kind: url.searchParams.get("kind") ?? undefined,
+      q: url.searchParams.get("q"),
+      page: url.searchParams.get("page") ?? undefined,
+      sort: url.searchParams.get("sort") ?? undefined,
+    }));
   else if (request.method === "GET" && path === "/explore/youtube/search")
     result = {
       results: await app.youtube.search(label.parse(url.searchParams.get("q"))),

@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
-import type { AgentMessageResponse, AgentPlaylistWorkflow, DiscoveryDownloadJob, Operation, OperationBatch } from "@music-os/core";
+import type { AgentMessageResponse, AgentPlaylistWorkflow, DiscoveryDownloadJob, ImportItem, Operation, OperationBatch } from "@music-os/core";
 import { LibraryRepository } from "./library-repository.js";
 import { OperationService } from "./operation-service.js";
 import { ImportService } from "./import-service.js";
@@ -13,6 +13,7 @@ type WorkflowStatus =
   | "waiting_for_import"
   | "creating_playlist"
   | "completed"
+  | "partial"
   | "failed";
 
 interface WorkflowRow {
@@ -47,6 +48,7 @@ type PlaylistItemRef =
     };
 
 export class AgentPlaylistWorkflowService {
+  private readonly advancing = new Map<string, Promise<void>>();
   constructor(
     private readonly db: Database.Database,
     private readonly library: LibraryRepository,
@@ -64,7 +66,7 @@ export class AgentPlaylistWorkflowService {
          LIMIT ?`
       )
       .all(limit) as WorkflowRow[];
-    return rows.map(mapWorkflow);
+    return rows.map((row) => ({ ...mapWorkflow(row), delivery: this.delivery(row) }));
   }
 
   registerAgentResponse(runId: string, threadId: string | null, response: AgentMessageResponse): void {
@@ -87,6 +89,10 @@ export class AgentPlaylistWorkflowService {
     const playlistPayload = asRecord(playlistOperation?.payload);
     const queuePayload = asRecord(queueOperation?.payload);
     const researchPlaylistPayload = asRecord(queuePayload?.researchPlaylist);
+    // Plain song/album downloads do not implicitly request a playlist.
+    if (!playlistOperation && !researchPlaylistPayload && response.intent !== "research_playlist") {
+      return;
+    }
     const name = stringValue(playlistPayload?.name) || stringValue(researchPlaylistPayload?.name) || playlistNameFromResponse(response);
     const description =
       nullableStringValue(playlistPayload?.description) ??
@@ -108,7 +114,7 @@ export class AgentPlaylistWorkflowService {
     const rows = this.db
       .prepare(
         `SELECT * FROM agent_playlist_workflows
-         WHERE status NOT IN ('completed', 'failed')
+         WHERE status NOT IN ('completed', 'partial', 'failed')
          ORDER BY created_at ASC`
       )
       .all() as WorkflowRow[];
@@ -121,7 +127,7 @@ export class AgentPlaylistWorkflowService {
     const rows = this.db
       .prepare(
         `SELECT * FROM agent_playlist_workflows
-         WHERE download_job_id = ? AND status NOT IN ('completed', 'failed')
+         WHERE download_job_id = ? AND status NOT IN ('completed', 'partial', 'failed')
          ORDER BY created_at ASC`
       )
       .all(jobId) as WorkflowRow[];
@@ -131,7 +137,30 @@ export class AgentPlaylistWorkflowService {
   }
 
   async advance(workflowId: string): Promise<void> {
+    return this.serializeAdvance(workflowId, false);
+  }
+
+  /** Recover available tracks only: never queues downloads or reimports successful items. */
+  async resume(workflowId: string): Promise<void> {
+    return this.serializeAdvance(workflowId, true);
+  }
+
+  private async serializeAdvance(workflowId: string, resume: boolean): Promise<void> {
+    const active = this.advancing.get(workflowId);
+    if (active) return active;
+    // Defer execution until the lock is installed, including synchronous service callbacks.
+    const pending = Promise.resolve().then(() => this.advanceOnce(workflowId, resume));
+    this.advancing.set(workflowId, pending);
+    try {
+      await pending;
+    } finally {
+      this.advancing.delete(workflowId);
+    }
+  }
+
+  private async advanceOnce(workflowId: string, resume: boolean): Promise<void> {
     const row = this.getRow(workflowId);
+    if (row.status === "completed" || (!resume && (row.status === "failed" || row.status === "partial"))) return;
     try {
       const batch = this.operations.getBatch(row.operation_batch_id);
       if (batch.status !== "applied" && batch.status !== "partially_applied") {
@@ -142,9 +171,8 @@ export class AgentPlaylistWorkflowService {
       const downloadJobId = row.download_job_id ?? readDownloadJobId(batch);
       const playlistId = row.playlist_id ?? readPlaylistId(batch);
       this.updateLinks(row.id, { downloadJobId, playlistId });
-
       if (!downloadJobId) {
-        await this.createOrUpdatePlaylist(row, playlistId, []);
+        await this.createOrUpdatePlaylist(this.getRow(row.id), playlistId, []);
         return;
       }
 
@@ -153,75 +181,70 @@ export class AgentPlaylistWorkflowService {
         this.mark(row.id, "waiting_for_download");
         return;
       }
+
+      const warnings: string[] = [];
       if (job.status === "failed" || job.status === "cancelled") {
-        this.fail(row.id, job.error ?? `Discovery download job ended with ${job.status}`);
-        return;
+        warnings.push(job.error ?? `Downloads ended with ${job.status}.`);
       }
-      if (!job.imported) {
-        this.mark(row.id, "waiting_for_import");
-        return;
+      const missingDownloads = Math.max(0, job.selectedCount - job.completedCount);
+      if (missingDownloads > 0) {
+        warnings.push(`${missingDownloads} requested download${missingDownloads === 1 ? "" : "s"} did not arrive.`);
       }
 
-      this.updateLinks(row.id, { downloadJobId, importId: job.imported.id, playlistId });
-      const importedFileIds = await this.approveImportItems(row, job);
-      await this.createOrUpdatePlaylist(this.getRow(row.id), playlistId, importedFileIds);
+      const importId = job.imported?.id ?? row.import_id;
+      if (importId) {
+        this.updateLinks(row.id, { importId });
+        try {
+          const warning = await this.approveImportItems(this.getRow(row.id), importId);
+          if (warning) warnings.push(warning);
+        } catch (error) {
+          // A failed item must never prevent delivery of the tracks that did import.
+          warnings.push(error instanceof Error ? error.message : String(error));
+        }
+      } else {
+        warnings.push("No downloaded tracks were available to import.");
+      }
+      const current = this.getRow(row.id);
+      await this.createOrUpdatePlaylist(current, playlistId, this.importedFileIds(current.import_id), warnings);
     } catch (error) {
       this.fail(row.id, error instanceof Error ? error.message : String(error));
     }
   }
 
-  private async approveImportItems(row: WorkflowRow, job: DiscoveryDownloadJob): Promise<string[]> {
-    if (!job.imported) {
-      return [];
-    }
-    const imported = this.imports.getImport(job.imported.id);
-    const existingFileIds = imported.items.map((item) => item.fileId).filter((fileId): fileId is string => Boolean(fileId));
+  private async approveImportItems(row: WorkflowRow, importId: string): Promise<string | null> {
+    const imported = this.imports.getImport(importId);
     const reviewableIds = imported.items.filter((item) => item.status === "needs_review").map((item) => item.id);
-    if (reviewableIds.length === 0) {
-      return existingFileIds;
-    }
-
+    if (reviewableIds.length === 0) return null;
     const root = this.library.listRoots()[0];
-    if (!root) {
-      throw new Error("Add a library root before the agent can import downloaded playlist tracks.");
-    }
+    if (!root) throw new Error("Add a library root before the agent can import downloaded playlist tracks.");
 
     this.mark(row.id, "waiting_for_import");
     const batch = this.operations.createImportApprovalBatchForItems(reviewableIds, root.id, "agent");
+    // Persist before the await so diagnostics and recovery retain this batch.
+    this.updateLinks(row.id, { importOperationBatchId: batch.id });
     this.operations.approveBatch(batch.id);
     const applied = await this.operations.applyBatch(batch.id);
-    this.updateLinks(row.id, { importOperationBatchId: applied.id });
-    if (applied.status !== "applied") {
-      const failedOperations = applied.operations.filter((operation) => operation.status === "failed");
-      const firstError = failedOperations.map((operation) => operationErrorMessage(operation.error)).find(Boolean);
-      const failedCount = failedOperations.length || reviewableIds.length;
-      const detail = firstError ? `: ${firstError}` : `; import batch ended with ${applied.status}`;
-      throw new Error(`Failed to import ${failedCount} downloaded playlist track${failedCount === 1 ? "" : "s"}${detail}`);
-    }
-
-    const importedFileIds = this.imports
-      .getImport(job.imported.id)
-      .items.filter((item) => item.status === "imported")
-      .map((item) => item.fileId)
-      .filter((fileId): fileId is string => Boolean(fileId));
-    if (importedFileIds.length === 0) {
-      throw new Error("Import approval completed without promoting any downloaded playlist tracks into the library.");
-    }
-    return importedFileIds;
+    const remaining = this.imports.getImport(importId).items.filter((item) => reviewableIds.includes(item.id) && item.status !== "imported");
+    if (remaining.length === 0) return null;
+    const firstError = applied.operations.filter((operation) => operation.status === "failed")
+      .map((operation) => operationErrorMessage(operation.error)).find(Boolean);
+    return `${remaining.length} downloaded track${remaining.length === 1 ? "" : "s"} could not be imported${firstError ? `: ${firstError}` : "."}`;
   }
 
-  private async createOrUpdatePlaylist(row: WorkflowRow, playlistId: string | null, importedFileIds: string[]): Promise<void> {
+  private importedFileIds(importId: string | null): string[] {
+    if (!importId) return [];
+    return this.imports.getImport(importId).items
+      .filter((item) => item.status === "imported")
+      .map((item) => item.fileId).filter((id): id is string => Boolean(id));
+  }
+
+  private async createOrUpdatePlaylist(row: WorkflowRow, playlistId: string | null, importedFileIds: string[], warnings: string[] = []): Promise<void> {
     const ownedFileIds = parseStringArray(row.owned_file_ids_json);
-    const fileIds = this.resolvePlaylistFileIds(row, ownedFileIds, importedFileIds).filter((fileId) => {
-      try {
-        this.library.getFile(fileId);
-        return true;
-      } catch {
-        return false;
-      }
-    });
+    const resolved = this.resolvePlaylistFileIds(row, ownedFileIds, importedFileIds);
+    const available = this.availableFileIds(resolved);
+    const fileIds = resolved.filter((id) => available.has(id));
     if (fileIds.length === 0) {
-      throw new Error("No imported or owned files were available for the researched playlist.");
+      throw new Error(["No imported or owned files were available for the researched playlist.", ...warnings].join(" "));
     }
 
     this.mark(row.id, "creating_playlist");
@@ -235,25 +258,39 @@ export class AgentPlaylistWorkflowService {
       this.operations.approveBatch(batch.id);
       const applied = await this.operations.applyBatch(batch.id);
       playlistOperationBatchId = applied.id;
+      if (applied.status !== "applied") {
+        const detail = applied.operations.map((operation) => operationErrorMessage(operation.error)).find(Boolean);
+        throw new Error(detail ?? "Playlist operation did not finish.");
+      }
       finalPlaylistId = playlistId ?? readPlaylistId(applied) ?? row.playlist_id;
     }
     if (!finalPlaylistId) {
       throw new Error("Playlist operation completed without returning a playlist id.");
     }
+    if (playlistId && fileIdsToApply.length > 0) {
+      this.positionRecoveredTracks(finalPlaylistId, fileIds, new Set(fileIdsToApply));
+    }
     const playlist = this.playlists.getPlaylist(finalPlaylistId);
+    const delivery = this.delivery({ ...row, playlist_id: finalPlaylistId });
+    const partial = delivery.missingTrackCount > 0 || delivery.pendingImportCount > 0;
+    const warning = partial
+      ? [`${delivery.readyTrackCount} of ${delivery.requestedTrackCount} requested tracks are ready; ${delivery.missingTrackCount} still missing.`, ...warnings].join(" ")
+      : null;
     this.db
       .prepare(
         `UPDATE agent_playlist_workflows
-         SET status = 'completed',
+         SET status = ?,
              playlist_operation_batch_id = ?,
              playlist_id = ?,
-             error = NULL,
+             error = ?,
              updated_at = datetime('now'),
              completed_at = datetime('now')
          WHERE id = ?`
       )
-      .run(playlistOperationBatchId, finalPlaylistId, row.id);
-    const message = `Here's your playlist: ${row.playlist_name}. ${playlist.items.length} track${playlist.items.length === 1 ? " is" : "s are"} ready.`;
+      .run(partial ? "partial" : "completed", playlistOperationBatchId, finalPlaylistId, warning, row.id);
+    const message = partial
+      ? `Your playlist is ready: ${row.playlist_name}. ${delivery.readyTrackCount} of ${delivery.requestedTrackCount} tracks are ready; ${delivery.missingTrackCount} could not be added yet. Available tracks are saved in the playlist.`
+      : `Here's your playlist: ${row.playlist_name}. ${playlist.items.length} track${playlist.items.length === 1 ? " is" : "s are"} ready.`;
     this.insertWorkflowMessage(row, message, {
       reply: message,
       intent: "research_playlist",
@@ -275,14 +312,14 @@ export class AgentPlaylistWorkflowService {
     }
 
     const importedByDiscoveryId = this.importedFileIdsByDiscoveryId(row.import_id);
-    const ordered = refs
+    const ordered = [...new Set(refs
       .map((ref) => {
         if (ref.type === "owned") {
           return ref.fileId;
         }
         return importedByDiscoveryId.get(ref.discoveryId) ?? null;
       })
-      .filter((fileId): fileId is string => Boolean(fileId));
+      .filter((fileId): fileId is string => Boolean(fileId)))];
     const referenced = new Set(ordered);
     for (const fileId of [...ownedFileIds, ...importedFileIds]) {
       if (!referenced.has(fileId)) {
@@ -294,10 +331,14 @@ export class AgentPlaylistWorkflowService {
   }
 
   private importedFileIdsByDiscoveryId(importId: string | null): Map<string, string> {
-    const byDiscoveryId = new Map<string, string>();
-    if (!importId) {
-      return byDiscoveryId;
-    }
+    return new Map([...this.importItemsByDiscoveryId(importId)]
+      .filter((entry): entry is [string, ImportItem & { fileId: string }] => entry[1].status === "imported" && Boolean(entry[1].fileId))
+      .map(([discoveryId, item]) => [discoveryId, item.fileId]));
+  }
+
+  private importItemsByDiscoveryId(importId: string | null): Map<string, ImportItem> {
+    const byDiscoveryId = new Map<string, ImportItem>();
+    if (!importId) return byDiscoveryId;
     let importBatch;
     try {
       importBatch = this.imports.getImport(importId);
@@ -307,23 +348,37 @@ export class AgentPlaylistWorkflowService {
     const context = this.importSourceContext(importId);
     const selectedResults = Array.isArray(context?.selectedResults) ? context.selectedResults : [];
     const expandedPaths = Array.isArray(context?.expandedPaths) ? context.expandedPaths : [];
-    const selectedIdByBasename = new Map<string, string>();
-    for (const selected of selectedResults) {
+    const selectedPaths = selectedResults.flatMap((selected) => {
       const record = asRecord(selected);
       const discoveryId = stringValue(record?.id);
       const resultPath = stringValue(record?.path);
-      if (discoveryId && resultPath) {
-        selectedIdByBasename.set(normalizePathBasename(resultPath), discoveryId);
-      }
-    }
-    for (let index = 0; index < importBatch.items.length; index += 1) {
-      const fileId = importBatch.items[index]?.fileId;
+      return discoveryId && resultPath ? [{ discoveryId, segments: normalizedPathSegments(resultPath) }] : [];
+    });
+    const itemsById = new Map(importBatch.items.map((item) => [item.id, item]));
+    // createFromSourcePaths inserts each item in expandedPaths order. created_at
+    // has one-second precision, so explicitly retain insertion order for ties.
+    const itemRows = this.db.prepare("SELECT id FROM import_items WHERE import_id = ? ORDER BY rowid ASC")
+      .all(importId) as Array<{ id: string }>;
+    for (let index = 0; index < itemRows.length; index += 1) {
+      const item = itemsById.get(itemRows[index]!.id);
+      if (!item) continue;
       const originalPath = typeof expandedPaths[index] === "string" ? expandedPaths[index] : null;
-      const itemPath = originalPath ?? importBatch.items[index]?.stagingPath;
-      const discoveryId = itemPath ? selectedIdByBasename.get(normalizePathBasename(itemPath)) : null;
-      if (fileId && discoveryId) {
-        byDiscoveryId.set(discoveryId, fileId);
+      const segments = normalizedPathSegments(originalPath ?? item.stagingPath);
+      let bestScore = 0;
+      let matches: string[] = [];
+      for (const selected of selectedPaths) {
+        const score = commonPathSuffixLength(segments, selected.segments);
+        if (score > bestScore) {
+          bestScore = score;
+          matches = [selected.discoveryId];
+        } else if (score > 0 && score === bestScore) {
+          matches.push(selected.discoveryId);
+        }
       }
+      const uniqueMatches = [...new Set(matches)];
+      // A basename alone is sufficient only when unique. Never silently map two
+      // artists' "01 - Intro.flac" to the last selected result.
+      if (bestScore > 0 && uniqueMatches.length === 1) byDiscoveryId.set(uniqueMatches[0]!, item);
     }
     return byDiscoveryId;
   }
@@ -340,6 +395,76 @@ export class AgentPlaylistWorkflowService {
     } catch {
       return null;
     }
+  }
+
+  private delivery(row: WorkflowRow): NonNullable<AgentPlaylistWorkflow["delivery"]> {
+    let job: DiscoveryDownloadJob | null = null;
+    if (row.download_job_id) {
+      try { job = this.downloads.getJob(row.download_job_id); } catch { /* Retain workflow diagnostics if the job was removed. */ }
+    }
+    const importId = row.import_id ?? job?.imported?.id ?? null;
+    let items = job?.imported?.items ?? [];
+    if (importId) {
+      try { items = this.imports.getImport(importId).items; } catch { /* A missing import remains undelivered. */ }
+    }
+    const owned = parseStringArray(row.owned_file_ids_json);
+    const available = this.availableFileIds([
+      ...owned,
+      ...items.filter((item) => item.status === "imported").flatMap((item) => item.fileId ? [item.fileId] : [])
+    ]);
+    const refs = parsePlaylistItemRefs(row.playlist_item_refs_json);
+    const requestedTrackCount = refs.length > 0
+      ? new Set(refs.map((ref) => ref.type === "owned" ? `owned:${ref.fileId}` : `download:${ref.discoveryId}`)).size
+      : new Set(owned).size + (job?.selectedCount ?? items.length);
+    const itemsByDiscoveryId = this.importItemsByDiscoveryId(importId);
+    const tracks: NonNullable<NonNullable<AgentPlaylistWorkflow["delivery"]>["tracks"]> = refs.map((ref) => {
+      if (ref.type === "owned") {
+        return { discoveryId: null, fileId: ref.fileId, state: available.has(ref.fileId) ? "owned" : "missing" };
+      }
+      const item = itemsByDiscoveryId.get(ref.discoveryId);
+      const fileId = item?.fileId ?? null;
+      const state = item?.status === "imported" && fileId && available.has(fileId)
+        ? "imported"
+        : item?.status === "needs_review" || item?.status === "scanning" ? "pending" : "missing";
+      return { discoveryId: ref.discoveryId, fileId, state };
+    });
+    return {
+      readyTrackCount: available.size,
+      requestedTrackCount: Math.max(requestedTrackCount, available.size),
+      missingTrackCount: Math.max(0, requestedTrackCount - available.size),
+      pendingImportCount: items.filter((item) => item.status === "needs_review").length,
+      tracks
+    };
+  }
+
+  private availableFileIds(fileIds: string[]): Set<string> {
+    if (fileIds.length === 0) return new Set();
+    // Polling delivery counts should not hydrate tags/artwork for every track.
+    const rows = this.db.prepare(
+      `SELECT id FROM files WHERE staged = 0 AND missing = 0 AND id IN (${fileIds.map(() => "?").join(",")})`
+    ).all(...fileIds) as Array<{ id: string }>;
+    return new Set(rows.map((row) => row.id));
+  }
+
+  private positionRecoveredTracks(playlistId: string, intendedFileIds: string[], addedFileIds: Set<string>): void {
+    // Insert only recovered items among the surviving sequence. Existing/user-added
+    // tracks retain their relative order, so resuming never replaces playlist edits.
+    const items = this.playlists.getPlaylist(playlistId).items;
+    const ordered = items.filter((item) => !addedFileIds.has(item.file.id));
+    for (let index = 0; index < intendedFileIds.length; index += 1) {
+      const fileId = intendedFileIds[index]!;
+      if (!addedFileIds.has(fileId)) continue;
+      const item = items.find((entry) => entry.file.id === fileId);
+      if (!item) continue;
+      const successorIds = new Set(intendedFileIds.slice(index + 1));
+      const next = ordered.findIndex((entry) => successorIds.has(entry.file.id));
+      if (next >= 0) ordered.splice(next, 0, item);
+      else ordered.push(item);
+    }
+    this.db.transaction(() => {
+      const update = this.db.prepare("UPDATE playlist_items SET position = ? WHERE id = ? AND playlist_id = ?");
+      ordered.forEach((item, index) => update.run(index, item.id, playlistId));
+    })();
   }
 
   private filterMissingPlaylistFileIds(playlistId: string, fileIds: string[]): string[] {
@@ -550,6 +675,14 @@ function parsePlaylistItemRefs(value: string): PlaylistItemRef[] {
   }
 }
 
-function normalizePathBasename(value: string): string {
-  return value.split(/[\\/]/).filter(Boolean).at(-1)?.toLowerCase() ?? value.toLowerCase();
+function normalizedPathSegments(value: string): string[] {
+  return value.replaceAll("\\", "/").split("/").filter(Boolean).map((segment) => segment.toLowerCase());
+}
+
+function commonPathSuffixLength(left: string[], right: string[]): number {
+  let length = 0;
+  while (length < left.length && length < right.length && left[left.length - 1 - length] === right[right.length - 1 - length]) {
+    length += 1;
+  }
+  return length;
 }

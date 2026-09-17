@@ -14,11 +14,13 @@
     "playback-progress:smoke": "tsx src/scripts/playback-progress-smoke.ts",
     "appearance:smoke": "tsx src/scripts/appearance-smoke.ts",
     "typecheck": "tsc --noEmit",
+    "agent-workspace:smoke": "node src/scripts/agent-workspace-smoke.mjs",
     "song-menu:smoke": "node src/scripts/song-menu-smoke.mjs",
     "artwork-requests:smoke": "tsx src/scripts/artwork-requests-smoke.ts",
     "artist-resource:smoke": "tsx src/scripts/artist-resource-smoke.ts",
     "record-player:smoke": "tsx src/scripts/record-player-smoke.ts",
     "record-player-sleeve:smoke": "node src/scripts/record-player-sleeve-smoke.mjs",
+    "now-playing-settings:smoke": "node src/scripts/now-playing-settings-smoke.mjs",
     "now-playing-motion:smoke": "node src/scripts/now-playing-motion-smoke.mjs",
     "visualizer-canvas:smoke": "node src/scripts/visualizer-canvas-smoke.mjs",
     "turntable-cache:smoke": "node src/scripts/turntable-cache-smoke.mjs",
@@ -32,7 +34,13 @@
     "album-sort:smoke": "tsx src/scripts/album-sort-smoke.ts",
     "command-search:smoke": "tsx src/scripts/command-search-smoke.ts",
     "playlist-performance:smoke": "node src/scripts/playlist-performance-smoke.mjs",
-    "explore-jobs:smoke": "node src/scripts/explore-jobs-smoke.mjs"
+    "explore-jobs:smoke": "node src/scripts/explore-jobs-smoke.mjs",
+    "youtube-browser:smoke": "node src/scripts/youtube-browser-smoke.mjs",
+    "library-letter:smoke": "node src/scripts/library-letter-smoke.mjs",
+    "queue-palette:smoke": "node src/scripts/queue-palette-smoke.mjs",
+    "youtube-playback:smoke": "node src/scripts/youtube-playback-smoke.mjs",
+    "agent-playlist-delivery:smoke": "node src/scripts/agent-playlist-delivery-smoke.mjs",
+    "playlist-save:smoke": "node src/scripts/playlist-save-smoke.mjs"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",

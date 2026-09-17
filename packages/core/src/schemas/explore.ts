@@ -119,12 +119,41 @@ export interface VideoResult {
   url: string;
   title: string;
   channel: string;
+  channelId?: string;
+  channelUrl?: string;
+  description?: string;
   duration: number | null;
   thumbnail: string | null;
   viewCount?: number | null;
   uploadDate?: string | null;
   approximateDate?: boolean;
   liveStatus?: string | null;
+}
+export const youtubeBrowseRequestSchema = z.object({
+  kind: z.enum(["search", "channel", "playlist"]).default("search"),
+  q: z.string().trim().min(1).max(2048),
+  page: z.coerce.number().int().min(1).max(20).default(1),
+  // Date orders the current search page only; YouTube no longer exposes global date sorting.
+  sort: z.enum(["relevance", "date"]).default("relevance"),
+});
+export type YoutubeBrowseRequest = z.infer<typeof youtubeBrowseRequestSchema>;
+export interface YoutubeChannelResult {
+  id: string;
+  name: string;
+  url: string;
+  matchedVideos: number;
+}
+export interface YoutubePreferences {
+  topics: { id: string; label: string; query: string }[];
+  homeQueries: string[];
+  personalized: boolean;
+}
+export interface YoutubeBrowsePage {
+  channels?: YoutubeChannelResult[];
+  results: VideoResult[];
+  title: string;
+  nextPage: number | null;
+  sourceUrl: string;
 }
 export const youtubeDownloadRequestSchema = z.object({
   url: z.string().url().max(2048),

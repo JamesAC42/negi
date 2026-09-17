@@ -1,0 +1,117 @@
+/* YouTube browsing shares the workbench theme; no remote page styles leak in. */
+.ytBrowser { container-type: inline-size; }
+.ytBrowser button, .ytBrowser a, .ytBrowser select { -webkit-tap-highlight-color: transparent; }
+.ytBrowser button:focus-visible, .ytBrowser a:focus-visible, .ytBrowser select:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; }
+.ytBrowser .youtubeTabs { flex-wrap: nowrap; overflow-x: auto; }
+.ytBrowser .youtubeTabs button { white-space: nowrap; gap: .45rem; }
+.ytBrowseScroll, .ytInboxHost { flex: 1; min-height: 0; overflow: auto; overflow-anchor: none; padding: 1.15rem 1.5rem 1.5rem; }
+.ytBrowseScroll[hidden], .ytInboxHost[hidden] { display: none; }
+.ytInboxHost .youtubeInbox { margin: 0; }
+.ytTopics { display: flex; gap: .65rem; overflow-x: auto; padding: .15rem 0 .4rem; margin-bottom: 1.3rem; scrollbar-width: thin; }
+.ytTopics button { flex-shrink: 0; font-size: .7rem; padding: .5rem .8rem; background: var(--bg1); border: 1px solid var(--line2); color: var(--tx2); border-radius: 4px; }
+.ytTopics button[aria-pressed="true"] { color: var(--acc); border-color: var(--acc); background: var(--acc-dim); }
+.ytWelcome { margin: 0 0 1.1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--line); }
+.ytWelcome h3, .ytSectionHeading h3 { margin: 0; font: 600 1.2rem/1.3 var(--font-head); color: var(--tx0); }
+.ytWelcome > p, .ytSectionHeading p { color: var(--tx2); font-size: .7rem; line-height: 1.6; margin: .3rem 0 .9rem; }
+.ytChannels { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: .9rem; }
+.ytBrowser .ytChannelShortcut { display: flex; align-items: center; gap: .85rem; padding: .85rem; text-align: left; background: var(--bg0); color: var(--tx0); border: 1px solid var(--line2); min-width: 0; }
+.ytBrowser .ytChannelShortcut:hover { border-color: var(--acc-line); background: var(--acc-dim); }
+.ytAvatar { width: 3rem; height: 3rem; flex: 0 0 3rem; border-radius: 50%; border: 1px solid var(--line2); background: var(--bg3,var(--bg1)); display: grid; place-items: center; font: 600 1.6rem var(--font-head); }
+.ytBrowser .ytChannelShortcut > span:last-child { display: flex; flex-direction: column; min-width: 0; gap: .4rem; }
+.ytBrowser .ytChannelShortcut strong { font: 600 .82rem var(--font-head); }
+.ytBrowser .ytChannelShortcut small { color: var(--tx2); font-size: .6rem; line-height: 1.5; }
+.ytExploreChannel { display: inline-flex; gap: .3rem; align-items: center; color: var(--tx1); font-size: .62rem; margin-top: .2rem; white-space: nowrap; }
+.ytSectionHeading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .9rem; }
+.ytHeadingMain { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+.ytHeadingMain h3 { overflow-wrap: anywhere; }
+.ytHeadingMain p { margin-bottom: 0; }
+.ytBack { padding: .4rem; flex-shrink: 0; }
+.ytFilters { display: flex; gap: .6rem; flex-shrink: 0; }
+.ytFilters label { display: flex; align-items: center; gap: .45rem; font-size: .62rem; color: var(--tx2); }
+.ytFilters select { font-size: .66rem; color: var(--tx1); background: var(--bg0); padding: .45rem; border: 1px solid var(--line2); min-width: 0; }
+.ytSource { display: inline-flex; align-items: center; gap: .35rem; font-size: .65rem; color: var(--tx2); margin: -.3rem 0 .9rem; }
+.ytVideoGrid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 1.3rem 1rem; }
+.ytCard { min-width: 0; container: yt-video-card / inline-size; }
+.ytBrowser .ytThumbnail { position: relative; display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 16 / 9; background: var(--bg0); border: 1px solid var(--line); padding: 0; overflow: hidden; color: var(--tx2); }
+.ytBrowser .ytThumbnail > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.ytDuration { position: absolute; bottom: .35rem; right: .35rem; padding: .2rem .3rem; color: white; background: #080a0ee6; font-size: .65rem; line-height: 1; }
+.ytPlay { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; color: #fff; background: #0004; }
+.ytBrowser .ytThumbnail:hover .ytPlay, .ytBrowser .ytThumbnail:focus-visible .ytPlay { display: flex; }
+.ytCardInfo { position: relative; padding-top: .5rem; min-height: 5.8rem; }
+.ytBrowser .ytVideoTitle { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; text-align: left; font: 600 .82rem/1.35 var(--font-head); color: var(--tx0); padding: 0; border: 0; background: none; width: 100%; min-height: 2.2rem; overflow-wrap: anywhere; }
+.ytBrowser .ytVideoTitle:hover { color: var(--acc); background: none; }
+.ytBrowser .ytChannelLink { display: block; max-width: calc(100% - 5rem); width: fit-content; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .67rem; color: var(--tx2); background: none; border: 0; padding: .25rem 0; }
+.ytBrowser .ytChannelLink:hover { color: var(--acc); background: none; }
+.ytFacts { display: flex; gap: .45rem; flex-wrap: wrap; color: var(--tx2); font-size: .6rem; line-height: 1.5; padding-right: 5rem; min-height: 1rem; }
+.ytFacts span + span::before { content: '·'; padding-right: .45rem; }
+.ytCardActions { position: absolute; right: 0; bottom: .3rem; display: flex; gap: .35rem; }
+.ytCardActions button { display: grid; place-items: center; width: 1.85rem; height: 1.85rem; padding: 0; color: var(--tx2); border: 1px solid var(--line2); background: var(--bg0); }
+.ytCardActions button[aria-pressed="true"] { color: var(--acc); border-color: var(--acc-line); }
+.ytLoading { min-height: 16rem; display: flex; align-items: center; justify-content: center; gap: .7rem; color: var(--tx2); font-size: .8rem; }
+.ytEmpty { padding: 5rem 1rem; text-align: center; color: var(--tx2); }
+.ytEmpty > svg { color: var(--acc); }
+.ytEmpty h3 { color: var(--tx0); font: 600 1.1rem var(--font-head); }
+.ytEmpty p { font-size: .75rem; }
+.ytEmpty button { margin: 1rem auto 0; }
+.ytLoadMore { display: flex; flex-direction: column; align-items: center; gap: .7rem; padding: 1.6rem 0 .5rem; }
+.ytLoadMore button { padding: .7rem 1.4rem; font-size: .75rem; }
+.ytLoadMore small { color: var(--tx2); font-size: .65rem; }
+.ytFailure { padding: 1rem; border: 1px solid var(--line2); margin-bottom: 1rem; font-size: .75rem; }
+.ytFailure p { color: var(--tx2); overflow-wrap: anywhere; }
+.ytFailure a { display: inline-flex; gap: .4rem; margin-left: 1rem; }
+.ytClearHistory { margin-top: 1.5rem; font-size: .7rem; }
+.ytWatchDialog { padding: 0; width: min(960px, 92vw); max-height: 92vh; border: 1px solid var(--line2); background: var(--bg1); color: var(--tx0); overflow: auto; }
+.ytWatchDialog::backdrop { background: #000b; }
+.ytWatchHeader { display: flex; align-items: center; justify-content: space-between; padding: .6rem 1rem; font-size: .65rem; color: var(--acc); }
+.ytWatchHeader button { padding: .3rem; }
+.ytWatchDialog iframe { display: block; border: 0; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+.ytWatchInfo { padding: 1rem 1.2rem 1.3rem; }
+.ytWatchInfo h2 { font: 600 1.25rem/1.35 var(--font-head); margin: 0 0 .4rem; }
+.ytWatchInfo p { font-size: .75rem; line-height: 1.6; white-space: pre-wrap; max-height: 7rem; overflow: auto; }
+.ytWatchActions { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: .7rem 0 1rem; }
+.ytWatchActions button, .ytWatchActions a { display: inline-flex; align-items: center; gap: .4rem; font-size: .7rem; padding: .5rem; }
+.ytWatchInfo > small { color: var(--tx2); font-size: .65rem; }
+@container (min-width: 1450px) { .ytVideoGrid { grid-template-columns: repeat(4,minmax(0,1fr)); } }
+@container (max-width: 850px) {
+  .ytChannels { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .ytVideoGrid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .ytFilters label > span { display: none; }
+}
+@container (max-width: 520px) {
+  .ytBrowseScroll, .ytInboxHost { padding: .8rem; }
+  .ytSectionHeading { align-items: flex-start; flex-direction: column; }
+  .ytVideoGrid { grid-template-columns: 1fr; }
+  .ytBrowser .ytChannelShortcut { padding: .65rem; gap: .5rem; }
+  .ytAvatar { width: 2.2rem; height: 2.2rem; flex-basis: 2.2rem; font-size: 1.2rem; }
+  .ytBrowser .ytChannelShortcut small { display: none; }
+  .ytBrowser .youtubeTabs button { font-size: .65rem; padding: .7rem; }
+  .ytBrowser .youtubeIdentity { flex-basis: 100%; }
+  .ytBrowser .youtubeWorkspaceFooter { font-size: .55rem; }
+}
+.ytBrowser .ytVideoTitle { white-space: normal; justify-content: flex-start; }
+.ytBrowser .ytChannelShortcut { justify-content: flex-start; white-space: normal; }
+
+/* Keep single-line and wrapped titles aligned within equal card rows. */
+.ytBrowser .ytVideoTitle { align-content: start; }
+.ytBrowser .ytChannelShortcut { min-height: 6.6rem; }
+.ytBrowser .ytAvatar { width: 3.3rem; height: 3.3rem; flex-basis: 3.3rem; font-size: 1.75rem; }
+.ytBrowser .ytExploreChannel { border: 1px solid var(--line2); padding: .3rem .4rem; width: fit-content; }
+.ytBrowser .ytFacts, .ytBrowser .ytChannelShortcut small, .ytBrowser .ytChannelLink { color: color-mix(in srgb, var(--tx2) 72%, var(--tx1)); }
+@container (max-width: 520px) {
+  .ytBrowser .ytChannelShortcut { min-height: 5.5rem; }
+  .ytBrowser .ytAvatar { width: 2.2rem; height: 2.2rem; flex-basis: 2.2rem; font-size: 1.2rem; }
+}
+.ytBrowser .ytVideoTitle { display: flex; align-items: flex-start; box-shadow: none; }
+.ytBrowser .ytVideoTitle > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+
+.ytCardDetails { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: .6rem; margin-top: .15rem; }
+.ytCardMetadata { min-width: 0; }
+.ytBrowser .ytCardActions { position: static; justify-content: flex-end; margin-top: .2rem; flex-shrink: 0; }
+@container yt-video-card (max-width: 300px) {
+  .ytBrowser .ytCardActions { display: grid; grid-template-columns: repeat(2, 1.85rem); }
+}
+.ytBrowser .ytFacts { padding-right: 0; }
+.ytBrowser .ytChannelLink { max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.45; }
+.ytChannelMatches { padding: .6rem 0 1.2rem; margin-bottom: 1.1rem; border-bottom: 1px solid var(--line); }
+.ytChannelMatches h4 { margin: 0 0 .75rem; font: 600 .9rem var(--font-head); color: var(--tx0); }
+.ytCardActions button:disabled { opacity: .4; cursor: not-allowed; }

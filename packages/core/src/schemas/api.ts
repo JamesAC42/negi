@@ -1,3 +1,4 @@
+import { agentCatalogPlanSchema, agentCatalogActionRequestSchema } from "./agent-catalog.js";
 import { z } from "zod";
 import { audioFileSchema, jobStatusSchema, libraryRootSchema } from "./domain.js";
 import { operationBatchSchema } from "./operations.js";
@@ -583,6 +584,7 @@ export const discoveryDownloadJobIdRequestSchema = z.object({
 });
 
 export const agentMessageRequestSchema = z.object({
+  catalogAction: agentCatalogActionRequestSchema.optional(),
   message: z.string().min(1),
   threadId: z.string().min(1).optional()
 });
@@ -676,10 +678,12 @@ export const agentImportResultSchema = z.object({
 });
 
 export const agentMessageResponseSchema = z.object({
+  catalogPlan: agentCatalogPlanSchema.optional(),
   threadId: z.string().min(1).optional(),
   runId: z.string().min(1).optional(),
   reply: z.string().min(1),
   intent: z.enum([
+    "catalog",
     "search_library",
     "search_discovery",
     "research_playlist",
@@ -737,6 +741,7 @@ export const agentRunSchema = z.object({
 });
 
 export const agentRunRequestSchema = z.object({
+  catalogAction: agentCatalogActionRequestSchema.optional(),
   message: z.string().min(1),
   threadId: z.string().min(1).optional()
 });
@@ -755,6 +760,7 @@ export const agentPlaylistWorkflowStatusSchema = z.enum([
   "waiting_for_import",
   "creating_playlist",
   "completed",
+  "partial",
   "failed"
 ]);
 
@@ -773,6 +779,17 @@ export const agentPlaylistWorkflowSchema = z.object({
   playlistOperationBatchId: z.string().min(1).nullable(),
   playlistId: z.string().min(1).nullable(),
   error: z.string().nullable(),
+  delivery: z.object({
+    readyTrackCount: z.number().int().nonnegative(),
+    requestedTrackCount: z.number().int().nonnegative(),
+    missingTrackCount: z.number().int().nonnegative(),
+    pendingImportCount: z.number().int().nonnegative(),
+    tracks: z.array(z.object({
+      discoveryId: z.string().nullable(),
+      fileId: z.string().nullable(),
+      state: z.enum(["owned", "imported", "pending", "missing"])
+    })).optional()
+  }).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   completedAt: z.string().nullable()
@@ -979,7 +996,29 @@ export const tasteProfileEntrySchema = z.object({
 export const tasteProfileResponseSchema = z.object({
   profile: tasteProfileSchema,
   entries: z.array(tasteProfileEntrySchema),
-  updatedAt: z.string().nullable()
+  updatedAt: z.string().nullable(),
+  effectiveProfile: tasteProfileSchema.optional(),
+  learned: z.object({
+    profile: tasteProfileSchema,
+    signals: z.array(z.object({
+      key: z.enum(["favoriteArtists", "favoriteAlbums", "favoriteTracks", "preferredGenres", "preferredEras", "preferredCountries", "preferredLabels"]),
+      value: z.string(),
+      score: z.number().nonnegative(),
+      confidence: z.number().min(0).max(1),
+      sampleCount: z.number().int().nonnegative(),
+      sources: z.array(z.enum(["listening", "liked", "rating"])),
+      lastObservedAt: z.string()
+    })),
+    stats: z.object({
+      qualifiedPlays: z.number().int().nonnegative(),
+      completedPlays: z.number().int().nonnegative(),
+      earlySkips: z.number().int().nonnegative(),
+      likedTracks: z.number().int().nonnegative(),
+      ratedTracks: z.number().int().nonnegative(),
+      trackedFiles: z.number().int().nonnegative()
+    }),
+    updatedAt: z.string().nullable()
+  }).optional()
 });
 
 export const updateTasteProfileRequestSchema = z.object({

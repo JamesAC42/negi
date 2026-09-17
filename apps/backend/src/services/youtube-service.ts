@@ -7,10 +7,14 @@ import type {
   VideoJob,
   VideoResult,
   YoutubeReviewRequest,
+  YoutubeBrowseRequest,
 } from "@music-os/core";
 import type { BackendConfig } from "../config.js";
 import type { ImportService } from "./import-service.js";
 import type { LibraryRepository } from "./library-repository.js";
+
+import { YoutubePlaybackService } from './youtube-playback-service.js';
+import { YoutubeBrowser } from './youtube-browse.js';
 
 export function youtubeUrl(input: string): string {
   const url = new URL(input);
@@ -117,6 +121,9 @@ export class YoutubeService {
   private children = new Map<string, ChildProcess>();
   private reviewing = new Set<string>();
   private directory: string;
+  readonly playback: YoutubePlaybackService;
+  private browser = new YoutubeBrowser((args) => this.run(args, nanoid(), 60000));
+  browse(request: YoutubeBrowseRequest) { return this.browser.browse(request); }
   constructor(
     private db: Database.Database,
     private config: BackendConfig,
@@ -124,6 +131,7 @@ export class YoutubeService {
     private library: LibraryRepository,
   ) {
     this.directory = join(dirname(config.databasePath), "youtube");
+    this.playback = new YoutubePlaybackService(this.directory, (args) => this.run(args, nanoid(), 60_000));
     this.db
       .prepare(
         "UPDATE jobs SET status='failed',error_json=? WHERE type='youtube_download' AND status IN ('queued','running') AND json_extract(payload_json,'$.stage') IS NOT 'review'",
@@ -136,6 +144,7 @@ export class YoutubeService {
       );
   }
   close() {
+    this.playback.close();
     for (const child of this.children.values()) child.kill();
   }
   private run(
@@ -307,7 +316,7 @@ export class YoutubeService {
     const id = nanoid();
     const known = [...this.searchCache.values()]
       .flatMap((entry) => entry.results)
-      .find((video) => video.url === url);
+      .find((video) => video.url === url) ?? this.browser.find(url);
     this.db
       .prepare(
         "INSERT INTO jobs (id,type,status,progress,payload_json) VALUES (?,'youtube_download','queued',0,?)",

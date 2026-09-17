@@ -1,0 +1,246 @@
+/* Agent surfaces share the application's theme, typography, and motion tokens. */
+.centerPane:has(.agentWorkspace) { min-height: 0; overflow: hidden; padding: 0; }
+.agentWorkspace { display: grid; grid-template-columns: 18.75rem minmax(0, 1fr); height: 100%; width: 100%; min-height: 0; color: var(--tx0); background: var(--bg0); }
+.agentWorkspace button { cursor: pointer; font-family: var(--font-body); }
+.agentWorkspace button:disabled { cursor: default; opacity: .5; }
+.agentWorkspace button:focus-visible, .agentWorkspace textarea:focus-visible, .agentWorkspace input:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; }
+.agentHistory { display: grid; grid-template-rows: 3.625rem 3.2rem minmax(0,1fr) 2.75rem; min-height: 0; min-width: 0; border-right: 1px solid var(--line); background: var(--bg1); }
+.agentHistory > header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: 0 .75rem; border-bottom: 1px solid var(--line); }
+.agentHistory h1 { display: flex; align-items: center; gap: .6rem; margin: 0; font: 750 1.25rem var(--font-head); letter-spacing: -.04em; }
+.agentHistory h1 svg { color: var(--acc); }
+.agentHistory > header button { display: flex; align-items: center; gap: .35rem; padding: .5rem .65rem; background: var(--acc); color: var(--acc-ink); border: 1px solid var(--acc); font-size: .7rem; font-weight: 700; }
+.agentHistorySearch { display: flex; align-items: center; gap: .55rem; margin: .5rem .65rem; padding: 0 .5rem; border: 1px solid var(--line); color: var(--tx2); background: var(--bg0); }
+.agentHistorySearch input { width: 100%; min-width: 0; padding: 0; border: 0; outline: 0; background: transparent; color: var(--tx0); font: .8rem var(--font-body); }
+.agentHistoryList { overflow: auto; min-height: 0; }
+.agentEyebrow { display: flex; align-items: center; gap: .7rem; color: var(--tx2); font: .6875rem var(--font-body); letter-spacing: .08em; }
+.agentHistoryList > .agentEyebrow { justify-content: space-between; padding: 1rem .75rem .65rem; }
+.agentHistoryList > button { display: grid; min-width: 0; grid-template-columns: minmax(0,1fr); gap: .45rem; width: 100%; padding: .85rem .75rem; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; color: var(--tx1); }
+.agentHistoryList > button strong { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 670 .8rem/1.45 var(--font-head); }
+.agentHistoryList > button small { color: var(--tx2); font-size: .68rem; }
+.agentHistoryList > button:hover, .agentHistoryList > button[aria-current] { background: var(--bg2); }
+.agentHistoryList > button[aria-current] { box-shadow: inset -2px 0 var(--acc); color: var(--acc); }
+.agentHistoryList > p { padding: .75rem; }
+.agentHistory > footer { display: flex; align-items: center; gap: .5rem; padding: .75rem; border-top: 1px solid var(--line); color: var(--tx2); font: .65rem var(--font-body); }
+.agentHistory > footer svg { color: var(--acc); }
+.agentCanvas { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.agentScroll { flex: 1; min-height: 0; overflow: auto; overflow-anchor: none; }
+.agentWelcome { width: min(62rem,100%); box-sizing: border-box; margin: 0 auto; padding: 3.5rem 3.25rem 1.75rem; }
+.agentWelcomeHeader { display: grid; grid-template-columns: 4.5rem minmax(0,1fr); align-items: center; gap: 1.25rem; margin-bottom: 1.9rem; }
+.agentWelcomeMark { display: grid; place-items: center; width: 4.5rem; height: 5.25rem; background: var(--acc-dim); border: 1px solid var(--acc-line); color: var(--acc); }
+.agentWelcomeMark > span { display: block; width: 3.5rem; height: 3.5rem; background: currentColor; -webkit-mask: url("/negi-outline.svg") center / contain no-repeat; mask: url("/negi-outline.svg") center / contain no-repeat; }
+.agentWelcomeEyebrow { margin-bottom: .7rem; }
+.agentWelcomeEyebrow > span { color: var(--tx0); font: 750 1.15rem var(--font-head); letter-spacing: -.04em; }
+.agentWelcome h2 { margin: 0; font: 760 clamp(1.9rem,3.4vw,3.375rem)/1.12 var(--font-head); letter-spacing: -.055em; }
+.agentWelcomeSubtitle { margin: .8rem 0 0; color: var(--tx2); font: 1.1rem/1.6 var(--font-body); }
+.agentTaste { border: 1px solid var(--line); border-radius: var(--radius-sm,3px); padding: .9rem; }
+.agentTaste > header { display: flex; align-items: center; gap: .75rem; margin-bottom: .9rem; font: .64rem var(--font-body); }
+.agentTaste > header > strong { color: var(--tx0); letter-spacing: .07em; white-space: nowrap; }
+.agentTaste > header > span { margin-left: auto; color: var(--tx2); font-size: .6rem; }
+.agentTaste button { display: inline-flex; align-items: center; gap: .45rem; border: 0; padding: 0; color: var(--acc); background: transparent; font-size: .62rem; white-space: nowrap; }
+.agentTastePicks { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .75rem; }
+.agentTastePicks > div { display: flex; align-items: center; gap: .75rem; min-width: 0; padding: .75rem; background: var(--bg1); border: 1px solid var(--line); border-radius: var(--radius-sm,3px); }
+.agentTasteIcon { width: 2.65rem; height: 2.65rem; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid var(--line2); border-radius: 50%; color: var(--acc); }
+.agentTastePicks > div > span:last-child { min-width: 0; display: grid; gap: .3rem; }
+.agentTastePicks strong { font: 550 .7rem var(--font-body); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.agentTastePicks small { color: var(--tx2); font: .62rem var(--font-body); }
+.agentCapabilities h3 { font: 730 1.6rem var(--font-head); letter-spacing: -.035em; margin: 1.9rem 0 1rem; }
+.agentCapabilityGrid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .65rem .75rem; }
+.agentCapabilityGrid > button { display: flex; align-items: center; gap: 1rem; min-height: 4.05rem; min-width: 0; padding: .8rem 1.1rem; border: 1px solid var(--line); border-radius: var(--radius-sm,3px); background: transparent; text-align: left; color: var(--tx0); transition: background var(--dur-hover,150ms),border-color var(--dur-hover,150ms); }
+.agentCapabilityGrid > button:hover { background: var(--bg1); border-color: var(--acc-line); }
+.agentCapabilityGrid > button > svg:first-child { color: var(--acc); flex: 0 0 auto; }
+.agentCapabilityGrid > button > svg:last-child { color: var(--tx2); margin-left: auto; flex: 0 0 auto; width: .85rem; }
+.agentCapabilityGrid > button > span { display: grid; gap: .35rem; min-width: 0; }
+.agentCapabilityGrid strong { font: 650 .75rem var(--font-body); }
+.agentCapabilityGrid small { font: .64rem/1.5 var(--font-body); color: var(--tx2); }
+.agentInputArea { width: min(62rem,100%); padding: .25rem 3.25rem 1.5rem; margin: 0 auto; box-sizing: border-box; flex: 0 0 auto; }
+.agentInputBox { display: flex; align-items: center; gap: .5rem; border: 1px solid var(--line2); padding: .35rem; background: var(--bg0); }
+.agentInputBox:focus-within { border-color: var(--acc); }
+.agentInputBox textarea { flex: 1; min-width: 0; resize: vertical; max-height: 9rem; min-height: 2.6rem; padding: .65rem .65rem; box-sizing: border-box; border: 0; outline: 0; background: transparent; color: var(--tx0); font: .8rem/1.5 var(--font-body); }
+.agentInputBox textarea::placeholder { color: var(--tx2); }
+.agentInputBox button { display: grid; place-items: center; flex: 0 0 auto; width: 2.8rem; height: 2.8rem; padding: 0; border: 0; background: var(--acc); color: var(--acc-ink); }
+.agentInputHint { display: flex; justify-content: space-between; gap: .75rem; align-items: center; padding: .55rem .2rem 0; color: var(--tx2); font: .58rem/1.5 var(--font-body); }
+.agentInputHint button { display: flex; align-items: center; gap: .4rem; border: 0; background: transparent; color: var(--tx2); padding: 0; font-size: inherit; }
+.agentChatHeader { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: 1rem 1.5rem; border-bottom: 1px solid var(--line); background: var(--bg1); }
+.agentChatHeader > div { min-width: 0; }
+.agentChatHeader h2 { font: 700 .9rem var(--font-head); margin: .25rem 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agentChatHeader button { display: flex; align-items: center; gap: .5rem; background: transparent; color: var(--tx1); border: 1px solid var(--line); padding: .5rem; font-size: .65rem; white-space: nowrap; }
+.agentMessages { max-width: 56rem; margin: auto; padding: 1rem 2.5rem 2rem; }
+.agentTurn { padding: 1.5rem 0; border-bottom: 1px solid var(--line); }
+.agentTurn > header { display: flex; align-items: center; gap: .5rem; margin-bottom: .75rem; font: .72rem var(--font-head); color: var(--tx1); }
+.agentTurnAvatar { display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border: 1px solid var(--line2); color: var(--tx2); font: .65rem var(--font-body); }
+.agentTurn.agent .agentTurnAvatar { color: var(--acc); border-color: var(--acc-line); }
+.agentTurnBody > p { margin: 0; font: .84rem/1.75 var(--font-body); white-space: pre-wrap; overflow-wrap: anywhere; }
+.agentTurnBody { min-width: 0; }
+.agentMuted { color: var(--tx2); font: .72rem/1.6 var(--font-body); }
+.agentThinking { display: grid; gap: .7rem; padding: 1rem; border: 1px solid var(--line); font: .8rem var(--font-body); --shimmer-base: var(--tx2); --shimmer-highlight: var(--tx0); }
+.agentThinking small { color: var(--tx2); font-size: .65rem; }
+.agentPlan { border: 1px solid var(--line2); background: var(--bg1); margin-top: 1rem; overflow: hidden; }
+.agentPlan > header { display: flex; align-items: center; gap: .7rem; padding: 1rem; border-bottom: 1px solid var(--line); }
+.agentPlan > header > svg { color: var(--acc); flex: 0 0 auto; }
+.agentPlan > header > div { display: grid; gap: .3rem; min-width: 0; }
+.agentPlan > header strong { font: 680 .85rem var(--font-head); }
+.agentPlan > header small { font: .62rem var(--font-body); color: var(--tx2); text-transform: uppercase; }
+.agentPlan > p, .agentPlan > .agentPlanNotes { margin: 0; padding: .85rem 1rem; color: var(--tx1); font: .75rem/1.65 var(--font-body); }
+.agentPlanChoices { display: grid; gap: .5rem; padding: 1rem; border-top: 1px solid var(--line); }
+.agentPlanChoices > button { display: flex; align-items: center; gap: .75rem; width: 100%; text-align: left; padding: .8rem; background: var(--bg0); border: 1px solid var(--line2); color: var(--tx0); }
+.agentPlanChoices > button:hover { border-color: var(--acc); }
+.agentPlanChoices > button > span { display: grid; gap: .3rem; flex: 1; }
+.agentPlanChoices strong { font: 650 .75rem var(--font-body); }
+.agentPlanChoices small { font: .65rem/1.5 var(--font-body); color: var(--tx2); }
+.agentPlanItems { max-height: 24rem; overflow: auto; }
+.agentPlanItem { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--line); }
+.agentPlanArt { width: 2.75rem; height: 2.75rem; flex: 0 0 auto; display: grid; place-items: center; background: var(--bg2); color: var(--tx2); }
+.agentPlanArt img { width: 100%; height: 100%; object-fit: cover; }
+.agentPlanItem > div { display: grid; gap: .3rem; min-width: 0; flex: 1; }
+.agentPlanItem strong { font: 600 .75rem var(--font-body); }
+.agentPlanItem small { color: var(--tx2); font: .65rem var(--font-body); }
+.agentPlanItem > small { flex: 0 0 auto; text-transform: capitalize; }
+.agentJob { padding: .9rem 1rem; border-top: 1px solid var(--line); display: grid; gap: .55rem; }
+.agentJob > div { display: flex; justify-content: space-between; gap: .75rem; font: .7rem var(--font-body); }
+.agentJob progress { width: 100%; height: .3rem; accent-color: var(--acc); }
+.agentJob small { color: var(--tx2); font: .65rem/1.5 var(--font-body); }
+.agentTrace { margin-top: 1rem; border: 1px solid var(--line); font: .7rem/1.6 var(--font-body); }
+.agentTrace summary { cursor: pointer; padding: .7rem .85rem; color: var(--tx1); }
+.agentTraceSteps { display: grid; padding: .3rem .85rem .85rem; }
+.agentTraceStep { display: grid; grid-template-columns: 1.1rem minmax(0,1fr); gap: .65rem; padding: .65rem 0; border-top: 1px solid var(--line); }
+.agentTraceStep svg { color: var(--acc); margin-top: .15rem; }
+.agentTraceStep.failed svg { color: var(--danger,#dc6970); }
+.agentTraceStep span { color: var(--tx1); overflow-wrap: anywhere; }
+.agentTraceStep small { display: block; color: var(--tx2); }
+.agentWorkspace .agentResultSummary { margin-top: 1rem; }
+.agentWorkspace .agentResults { overflow-wrap: anywhere; font: .72rem/1.6 var(--font-body); }
+.agentWorkspace .agentResults > span { padding: .55rem .7rem; border-bottom: 1px solid var(--line); }
+.agentWorkspace .agentResults > a { display: block; padding: .65rem .7rem; border: 1px solid var(--line); color: var(--tx1); text-decoration: none; }
+.agentWorkspace .agentResultActions { padding: .65rem 0; flex-wrap: wrap; }
+.learnedTastePanel { border: 1px solid var(--line); padding: 1.25rem; margin-bottom: 1.25rem; background: var(--bg1); }
+.learnedTastePanel > header { display: flex; justify-content: space-between; gap: 1rem; }
+.learnedTastePanel h3 { font: 700 1.4rem var(--font-head); margin: .5rem 0; letter-spacing: -.035em; }
+.learnedTastePanel p { color: var(--tx2); font: .75rem/1.6 var(--font-body); }
+.agentTasteTimestamp { color: var(--tx2); font: .65rem/1.6 var(--font-body); text-align: right; }
+.learnedTasteStats { display: flex; flex-wrap: wrap; gap: 1rem 2rem; padding: 1rem 0; margin: .5rem 0; border-block: 1px solid var(--line); }
+.learnedTasteStats > span { color: var(--tx2); font: .7rem var(--font-body); }
+.learnedTasteStats strong { color: var(--acc); font-size: 1.1rem; margin-right: .4rem; }
+.learnedTasteGroups { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem 2rem; margin-bottom: 1rem; }
+.learnedTasteGroups h4 { color: var(--tx1); font: 650 .8rem var(--font-head); }
+.learnedTasteSignal { display: flex; align-items: center; gap: 1rem; margin: .8rem 0; }
+.learnedTasteSignal > div { min-width: 0; display: grid; gap: .3rem; flex: 1; }
+.learnedTasteSignal strong { color: var(--tx0); font: 550 .72rem var(--font-body); overflow-wrap: anywhere; }
+.learnedTasteSignal small { color: var(--tx2); font: .62rem var(--font-body); }
+.learnedTasteSignal meter { width: 3rem; height: .35rem; flex: 0 0 auto; }
+.learnedTasteSignal meter::-webkit-meter-bar { border: 0; background: var(--bg2); }
+.learnedTasteSignal meter::-webkit-meter-optimum-value { background: var(--acc); }
+.t-shimmer {
+  position: relative;
+  display: inline-block;
+  color: var(--shimmer-base);
+}
+.t-shimmer::before {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+    90deg,
+    transparent          0%,
+    transparent         40%,
+    var(--shimmer-highlight) 50%,
+    transparent         60%,
+    transparent        100%
+  );
+  background-size: var(--shimmer-band) 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: t-shimmer var(--shimmer-dur) var(--shimmer-ease) infinite;
+}
+@keyframes t-shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: 0% 0; }
+}
+@media (max-width: 1250px) {
+ .agentWorkspace { grid-template-columns: 14rem minmax(0,1fr); }
+ .agentWelcome { padding: 2rem 1.5rem 1.5rem; }
+ .agentInputArea { padding-inline: 1.5rem; }
+ .agentTaste > header { flex-wrap: wrap; }
+ .agentTaste > header > span { display: none; }
+ .agentTaste > header > button { margin-left: auto; }
+ .agentTastePicks { gap: .4rem; }
+ .agentTastePicks > div { padding: .55rem; gap: .5rem; }
+ .agentTasteIcon { width: 2rem; height: 2rem; }
+ .agentCapabilityGrid > button { padding: .75rem; gap: .7rem; }
+ .agentCapabilityGrid > button > svg:last-child { display: none; }
+}
+@media (max-width: 850px) {
+ .agentWorkspace { grid-template-columns: 1fr; }
+ .agentHistory { max-height: 9.5rem; grid-template-rows: 3rem auto; border-bottom: 1px solid var(--line); border-right: 0; }
+ .agentHistorySearch, .agentHistory footer, .agentHistoryList > .agentEyebrow { display: none; }
+ .agentHistoryList { display: flex; overflow: auto; }
+ .agentHistoryList > button { min-width: 10rem; width: 10rem; flex: 0 0 auto; border-right: 1px solid var(--line); padding: .6rem .75rem; }
+ .agentWorkspace { grid-template-rows: auto minmax(0,1fr); }
+ .agentWelcome { padding-top: 1.5rem; }
+ .agentWelcome h2 { font-size: 2rem; }
+ .agentWelcomeSubtitle { font-size: .8rem; }
+ .agentMessages { padding-inline: 1.2rem; }
+}
+@media (max-width: 560px) {
+ .agentWelcome { padding: 1.5rem 1rem; }
+ .agentWelcomeHeader { grid-template-columns: 3rem minmax(0,1fr); gap: .8rem; align-items: start; }
+ .agentWelcomeMark { width: 3rem; height: 3.5rem; }
+ .agentWelcomeMark > span { width: 2.5rem; height: 2.5rem; }
+ .agentWelcome h2 { font-size: 1.7rem; }
+ .agentCapabilityGrid { grid-template-columns: 1fr; }
+ .agentTastePicks { grid-template-columns: 1fr; }
+ .agentTastePicks > div:nth-child(n+2) { display: none; }
+ .agentCapabilities h3 { font-size: 1.3rem; }
+ .agentInputArea { padding: .5rem 1rem .8rem; }
+ .agentInputHint > span { max-width: 75%; }
+ .agentChatHeader { padding: .75rem 1rem; }
+ .learnedTasteGroups { grid-template-columns: 1fr; }
+ .learnedTastePanel > header { flex-direction: column; }
+ .agentTasteTimestamp { text-align: left; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .t-shimmer::before { animation: none !important; }
+  .agentCapabilityGrid > button { transition: none; }
+}
+
+.agentWorkspace button { box-shadow: none; }
+.agentHistoryList > button { justify-items: start; white-space: normal; }
+.agentHistoryList > button strong { width: 100%; }
+.agentCapabilityGrid > button { white-space: normal; gap: 1.5rem; }
+.agentCapabilityGrid > button > span { flex: 1; }
+.agentCapabilityGrid small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agentTasteIcon { border: 0; background: var(--bg2); }
+.agentTaste button { min-height: 0; }
+@media (max-width: 850px) {
+  .appShell:has(.agentWorkspace) { min-width: 0; grid-template-columns: minmax(0,1fr); }
+  .appShell:has(.agentWorkspace) .nowPlayingInspector { display: none; }
+  .appShell:has(.agentWorkspace) .topSearch { width: 2rem; padding-inline: .4rem; }
+  .appShell:has(.agentWorkspace) .topSearchText, .appShell:has(.agentWorkspace) .topSearch kbd { display: none; }
+  .agentPlanChoices > button { white-space: normal; }
+  .agentPlanChoices > button > span { min-width: 0; }
+  .agentPlanItems { overflow-x: hidden; }
+  .agentPlanItem strong { overflow-wrap: anywhere; }
+}
+@media (max-width: 560px) {
+  .appShell:has(.agentWorkspace) .topTransport { display: none; }
+  .appShell:has(.agentWorkspace) .topAppearanceSwitch { margin-left: auto; }
+  .appShell:has(.agentWorkspace) .topBrand { padding-right: .4rem; }
+  .appShell:has(.agentWorkspace) .topNavigation button { padding-inline: .5rem; }
+  .agentPlanItem { flex-wrap: wrap; }
+  .agentPlanItem > small { margin-left: 3.5rem; }
+}
+.agentJob progress::-webkit-progress-bar { background: var(--bg2); }
+.agentJob progress::-webkit-progress-value { background: var(--acc); }
+.agentJob progress::-moz-progress-bar { background: var(--acc); }
+.agentPlanChoices { max-height: 25rem; overflow-y: auto; }
+@media (max-width: 560px) {
+  .agentInputBox textarea { min-height: 3.75rem; }
+}
+.agentDeliveryHistoryIssue { border:1px solid var(--line); color:var(--tx1); font:.75rem/1.6 var(--font-body); }
+.agentDeliveryHistoryIssue > summary { cursor:pointer; padding:.65rem .8rem; }
+.agentDeliveryHistoryIssue > summary span { float:right; color:var(--tx2); font-size:.65rem; }
+.agentDeliveryHistoryIssue > p { margin:0; padding:.8rem; border-top:1px solid var(--line); overflow-wrap:anywhere; }
+.agentDeliveryHistoryIssue > summary:focus-visible { outline:2px solid var(--acc); outline-offset:2px; }

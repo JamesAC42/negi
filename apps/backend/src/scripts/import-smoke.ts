@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createBackendApp } from "../app.js";
@@ -50,7 +50,13 @@ try {
   assert(app.library.countFiles() === 0, `staged file should not appear in library count, got ${app.library.countFiles()}`);
 
   await stat(sourcePath);
-  const approved = await app.imports.approveItem(item.id, root.id);
+  const concurrentApprovals = await Promise.all(Array.from({ length: 8 }, () => app.imports.approveItem(item.id, root.id)));
+  const approved = concurrentApprovals[0];
+  assert(concurrentApprovals.every((result) => result.fileId === approved.fileId && result.stagingPath === approved.stagingPath),
+    "concurrent approvals should share one imported file and destination");
+  assert((await readdir(join(libraryPath, "Corrected Import Artist", "1982 - Corrected Import Album"))).length === 1,
+    "concurrent approvals must not create duplicate destination files");
+  assert((await app.imports.approveItem(item.id, root.id)).fileId === approved.fileId, "repeat approval should reuse imported file");
   assert(approved.status === "imported", `expected imported, got ${approved.status}`);
   assert(app.library.countFiles() === 1, `expected one library file after approval, got ${app.library.countFiles()}`);
   assert(
@@ -76,7 +82,13 @@ try {
     const crossDeviceSourcePath = join(sourceDir, "cross-device.mp3");
     await writeFile(crossDeviceSourcePath, makeId3Fixture());
     const crossDeviceImport = await app.imports.createFromPaths([crossDeviceSourcePath], crossDeviceRoot.id);
-    const crossDeviceApproved = await app.imports.approveItem(crossDeviceImport.items[0].id, crossDeviceRoot.id);
+    const crossDeviceResults = await Promise.all(Array.from({ length: 8 }, () =>
+      app.imports.approveItem(crossDeviceImport.items[0].id, crossDeviceRoot.id)));
+    const crossDeviceApproved = crossDeviceResults[0];
+    assert(crossDeviceResults.every((result) => result.fileId === crossDeviceApproved.fileId && result.stagingPath === crossDeviceApproved.stagingPath),
+      "cross-device concurrent approvals should share the same copy/unlink and library identity");
+    assert((await readdir(join(crossDeviceLibraryPath, "Import Smoke Artist", "1981 - Import Smoke Album"))).length === 1,
+      "cross-device concurrent approvals must create only one destination file");
     assert(crossDeviceApproved.status === "imported", `expected cross-device import, got ${crossDeviceApproved.status}`);
     assert(crossDeviceApproved.fileId != null, "cross-device import should have a file id");
     const crossDeviceFile = app.library.getFile(crossDeviceApproved.fileId);
@@ -86,8 +98,43 @@ try {
     await stat(crossDeviceFile.path);
   }
 
+  const retryRoot = app.library.addRoot(join(fixtureDir, "retry-library"), "retry-library");
+  const retryImport = await app.imports.createFromPaths([sourcePath], retryRoot.id);
+  const retryItem = retryImport.items[0];
+  const originalPromote = app.library.promoteStagedFile.bind(app.library);
+  app.library.promoteStagedFile = (...args) => {
+    originalPromote(...args);
+    throw new Error("Injected promotion failure after database update");
+  };
+  try {
+    const outcomes = await Promise.allSettled(Array.from({ length: 4 }, () => app.imports.approveItem(retryItem.id, retryRoot.id)));
+    assert(outcomes.every((result) => result.status === "rejected" && String(result.reason).includes("Injected promotion failure")),
+      "concurrent callers should all receive the promotion error");
+  } finally {
+    app.library.promoteStagedFile = originalPromote;
+  }
+  const afterFailure = app.imports.getItem(retryItem.id);
+  assert(afterFailure.status === "needs_review", "failed finalization must remain retryable");
+  assert(afterFailure.fileId === retryItem.fileId, "failed finalization must retain the original staged identity");
+  assert(afterFailure.stagingPath !== retryItem.stagingPath, "failed finalization must remember the successful file move");
+  assert(app.library.getFile(retryItem.fileId!).staged, "failed finalization must roll back partial promotion");
+  await stat(afterFailure.stagingPath);
+  const recovered = await app.imports.approveItem(retryItem.id, retryRoot.id);
+  assert(recovered.status === "imported" && recovered.fileId === retryItem.fileId && recovered.stagingPath === afterFailure.stagingPath,
+    "retry must finish with the same identity and destination without moving the file again");
+
+  const missingImport = await app.imports.createFromPaths([sourcePath], retryRoot.id);
+  const missingItem = missingImport.items[0];
+  await unlink(missingItem.stagingPath);
+  const missingOutcomes = await Promise.allSettled([app.imports.approveItem(missingItem.id, retryRoot.id)]);
+  assert(missingOutcomes[0].status === "rejected" && String(missingOutcomes[0].reason).includes("ENOENT"),
+    "a genuinely missing source must still fail");
+  assert(app.imports.getItem(missingItem.id).status === "needs_review", "missing sources must never be marked imported");
+  await copyFile(sourcePath, missingItem.stagingPath);
+  assert((await app.imports.approveItem(missingItem.id, retryRoot.id)).status === "imported", "failed approval should release its lock for retry");
+
   app.close();
-  console.log(JSON.stringify({ ok: true, approved }, null, 2));
+  console.log(JSON.stringify({ ok: true, concurrentApprovals: 8, crossDeviceCovered: Boolean(crossDeviceLibraryPath), retryAfterMove: true, missingSourceRejected: true, approved }, null, 2));
 } finally {
   await rm(fixtureDir, { recursive: true, force: true });
   if (crossDeviceLibraryPath) {

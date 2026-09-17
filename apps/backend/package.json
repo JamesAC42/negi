@@ -11,6 +11,7 @@
     "health": "tsx src/scripts/health-smoke.ts",
     "import:smoke": "tsx src/scripts/import-smoke.ts",
     "incomplete-albums:smoke": "tsx src/scripts/incomplete-albums-smoke.ts",
+    "agent-catalog:smoke": "tsx src/scripts/agent-catalog-smoke.ts",
     "agent:smoke": "tsx src/scripts/agent-smoke.ts",
     "agent-run:smoke": "tsx src/scripts/agent-run-smoke.ts",
     "agent-routing:smoke": "tsx src/scripts/agent-routing-smoke.ts",
@@ -48,6 +49,7 @@
     "slskd:live-smoke": "tsx src/scripts/slskd-live-transfer-smoke.ts",
     "slskd:inspect-transfers": "tsx src/scripts/slskd-transfer-inspect.ts",
     "metadata:smoke": "tsx src/scripts/metadata-smoke.ts",
+    "taste-learning:smoke": "tsx src/scripts/taste-learning-smoke.ts",
     "taste-profile:smoke": "tsx src/scripts/taste-profile-smoke.ts",
     "track-association:smoke": "tsx src/scripts/track-association-smoke.ts",
     "track-album-association:smoke": "tsx src/scripts/track-album-association-smoke.ts",
@@ -60,6 +62,8 @@
     "typecheck": "tsc --noEmit",
     "artist-profile:smoke": "tsx src/scripts/artist-profile-smoke.ts",
     "similar-artists:smoke": "tsx src/scripts/similar-artists-smoke.ts",
+    "youtube-playback:smoke": "tsx src/scripts/youtube-playback-smoke.ts",
+    "youtube-browse:smoke": "tsx src/scripts/youtube-browse-smoke.ts",
     "explore:smoke": "tsx src/scripts/explore-smoke.ts",
     "album-acquisition:smoke": "tsx src/scripts/album-acquisition-matching-smoke.ts",
     "catalogue-artwork:smoke": "tsx src/scripts/catalogue-artwork-smoke.ts",
@@ -79,7 +83,9 @@
     "lyrics:smoke": "tsx src/scripts/lyrics-smoke.ts",
     "record-player-live:smoke": "tsx src/scripts/record-player-live-smoke.ts",
     "artwork-performance:smoke": "tsx src/scripts/artwork-performance-smoke.ts",
-    "artwork-index:smoke": "tsx src/scripts/artwork-index-smoke.ts"
+    "artwork-index:smoke": "tsx src/scripts/artwork-index-smoke.ts",
+    "youtube-personalization:smoke": "tsx src/scripts/youtube-personalization-smoke.ts",
+    "agent-playlist-resilience:smoke": "tsx src/scripts/agent-playlist-resilience-smoke.ts"
   },
   "dependencies": {
     "@music-os/core": "0.1.0",

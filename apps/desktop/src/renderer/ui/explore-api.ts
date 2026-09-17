@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 export async function exploreApi<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(
     "http://127.0.0.1:47831" + path,
@@ -22,13 +22,17 @@ export const libraryChanged = () =>
   window.dispatchEvent(new Event("music-library-changed"));
 export const identityKey = (s: string) =>
   s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+export const ExploreVisibleContext = createContext(true);
 export function useExploreJobs<T extends { id: string; status: string }>(
   path: string,
+  enabled = true,
 ) {
+  const visible = useContext(ExploreVisibleContext) && enabled;
   const [jobs, setJobs] = useState<T[]>([]);
   const [error, setError] = useState("");
   const previous = useRef(new Map<string, string>());
   useEffect(() => {
+    if (!visible) return;
     let live = true;
     let pending = false;
     let snapshot = "";
@@ -71,6 +75,6 @@ export function useExploreJobs<T extends { id: string; status: string }>(
       clearInterval(timer);
       window.removeEventListener("explore-jobs-changed", onChanged);
     };
-  }, [path]);
+  }, [path, visible]);
   return { jobs, error };
 }

@@ -1,3 +1,4 @@
+import { AgentCatalogService } from "./services/agent-catalog-service.js";
 import { AlbumHighlightsService } from "./services/album-highlights-service.js";
 import { SimilarArtistsService } from "./services/similar-artists-service.js";
 import { ArtistProfileService } from "./services/artist-profile-service.js";
@@ -96,14 +97,15 @@ export function createBackendApp(config: BackendConfig): BackendApp {
   const agentPlaylistWorkflows = new AgentPlaylistWorkflowService(db, library, operations, imports, playlists, discoveryDownloads);
   discoveryDownloads.onJobSucceeded((jobId) => agentPlaylistWorkflows.advanceForDownloadJob(jobId));
   const agent = new AgentService(library, operations, playback, discovery, imports, tasteProfile);
-  const agentThreads = new AgentThreadService(db);
+  const agentThreads = new AgentThreadService(db, operations);
   const agentRuns = new AgentRunService(
     db,
     agent,
     createAgentModelProvider(config),
     new MusicBrainzAgentMetadataTool(config),
     agentPlaylistWorkflows,
-    config.agentAutoStartResearchPlaylists === true
+    config.agentAutoStartResearchPlaylists === true,
+    new AgentCatalogService(db, appleCatalogue, catalogue, similarArtists, albumAcquisitions, discovery, operations, tasteProfile)
   );
   const jobs = new JobService(db);
   const artwork = new ArtworkService(db, library, config);

@@ -97,3 +97,26 @@ Validation: backend/desktop typechecks; playlist-performance, explore-jobs,
 home-scroll, and home-refresh browser smokes; git diff --check. Browser fixtures
 are isolated from live library mutations. Native Electron frame pacing was not
 measured and the managed runtime was not restarted.
+
+## Library letter navigation and queued visualizer colors
+
+Library letter clicks select A–Z for both artists and albums before scrolling.
+The jump waits for the virtual list to commit its new ordering; search and
+favorites remain active.
+
+The app prepares artwork palettes for the current track, the next track, and
+the first upcoming track from a different album, even with Now Playing closed.
+Lookahead follows the current queue (including repeat-queue wrapping), and
+uses mode-specific, artwork-versioned keys. Extraction shares in-flight work,
+retains the artwork Blob only until decoding finishes, and keeps at most 128
+palettes. Fetch/decode failures are not permanently cached.
+
+Now Playing reads an already prepared palette during the track-change render.
+Its layout effect invalidates the canvases' 250 ms color cache and redraws
+waveforms/meters before paint, including settled canvases. Cold or unavailable
+artwork uses the theme fallback until extraction succeeds; an immediate skip
+to artwork that has not finished loading cannot use a prepared color.
+
+Focused isolated browser coverage: `library-letter:smoke` and
+`queue-palette:smoke`. These exercise real renderer components and intercept
+artwork/API traffic without changing live playback or library data.

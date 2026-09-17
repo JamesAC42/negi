@@ -35,6 +35,7 @@ export interface AgentPlanningContext {
 }
 
 export interface AgentModelPlan {
+  catalogRequest?: { capability: string; query: string };
   summary: string;
   intent?: AgentMessageResponse["intent"];
   searchQuery?: string;
@@ -54,10 +55,20 @@ const agentPlanJsonSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
+    catalogRequest: {
+      anyOf: [
+        { type: "null" },
+        { type: "object", additionalProperties: false, properties: {
+          capability: { type: "string", enum: ["track", "album", "discography", "missing", "complete", "similar", "taste", "latest", "singles"] },
+          query: { type: "string" }
+        }, required: ["capability", "query"] }
+      ]
+    },
     summary: { type: "string" },
     intent: {
       type: "string",
       enum: [
+        "catalog",
         "search_library",
         "search_discovery",
         "research_playlist",
@@ -103,6 +114,7 @@ const agentPlanJsonSchema = {
     }
   },
   required: [
+    "catalogRequest",
     "summary",
     "intent",
     "searchQuery",
@@ -168,20 +180,23 @@ class OpenAIResponsesAgentModelProvider implements AgentModelProvider {
                 `User request: ${message}\n\n` +
                 `Taste/library context: ${JSON.stringify(context)}\n\n` +
                 "Return JSON with shape {\"summary\": string, \"intent\": string, \"searchQuery\": string, \"searchQueryHints\": string[], \"playlistName\": string, \"playlistDescription\": string, \"researchSources\": [{\"title\": string, \"url\": string, \"summary\": string}], \"trackCandidates\": [{\"artist\": string, \"title\": string, \"album\": string, \"reason\": string, \"query\": string}]}.\n" +
-                "Allowed intents: search_library, search_discovery, research_playlist, parse_pasted_list, propose_import, propose_playlist, propose_duplicate_cleanup, playback, unknown.\n" +
+                "Allowed intents: catalog, search_library, search_discovery, research_playlist, parse_pasted_list, propose_import, propose_playlist, propose_duplicate_cleanup, playback, unknown.\n" +
                 "Always set intent. Use search_library only when the user clearly asks to search indexed local files. Use search_discovery when the user wants to find music not already known to be local, asks to identify/find a song/album/release, or mentions Soulseek/downloads. Do not use search_library for general 'find' wording if the request is really a music lookup.\n" +
                 "Use research_playlist when the user asks for a playlist, mood/occasion recommendations, music like an artist/song, a song here/for this situation, or music they might like. For research_playlist, ALWAYS return playlistName, playlistDescription, and 12-20 concrete trackCandidates.\n" +
+                "For a single song, album, artist discography, missing albums, partial-album completion, related artists, taste-based album recommendations, latest release, or EP/single catalog request, use intent=catalog and catalogRequest={capability,query}. Capabilities are track, album, discography, missing, complete, similar, taste, latest, singles. For track/album/complete, query must be title by artist; for artist scopes, use just the artist name. Do not invent provider IDs. Use an empty query to request clarification if the artist or title is unknown. Set catalogRequest=null for non-catalog requests. Catalog work never creates a playlist. Explicit playlist requests still use research_playlist.\n" +
                 "For broad playlist requests, aim for 16-20 distinct candidates rather than stopping after a handful of famous songs.\n" +
                 "The requested deliverable controls intent. If the user asks you to make, build, curate, or put together a playlist/mix, ALWAYS use research_playlist unless they explicitly restrict it to their local library. Named songs, artists, edits, remixes, downloads, or Soulseek references are seeds and constraints for curation; never use search_discovery for the entire raw playlist prompt.\n" +
-                "For research_playlist, build a coherent sequence with a clear mood/energy arc. Avoid obvious cliché picks and generic greatest-hits choices unless the user asks for popular/familiar music. Prefer specific deep cuts, scene-adjacent recommendations, and tracks that are supported by the researched sources and the user's taste context.\n" +
+                "For research_playlist, prioritize how well each song fits the actual request: the named songs/artists, sound, mood, activity, and stated constraints. A similarity or mood playlist is a collection of good matches, not a story. Do not impose an opening/build/peak/comedown, era progression, or genre journey. Use a deliberate arc only when requested or functionally appropriate (for example a DJ warm-up, a workout with changing intensity, or a chronological overview). Otherwise use a straightforward order without inventing sequencing reasons. Familiar songs and deep cuts are equally valid when they fit; do not chase obscurity, novelty, variety, or the user's unrelated favorite artists at the expense of relevance.\n" +
+                "Playlist naming: honor an explicit user-provided title. Otherwise choose a short, natural name (usually 2-6 words) that a person might save in their library, grounded in the request. Simple artist-, sound-, or activity-based names are welcome. Avoid forced puns on seed titles, arbitrary poetic noun pairings, grandiose names, advertising language, and generic AI mood slogans. Be distinctive through specificity, not ornate wording. Examples of the intended tone: 'Good mood guitars', 'More like Talking Heads', 'Deep house for work'. These are tone examples, not templates to reuse.\n" +
+                "playlistDescription: one brief, plain sentence, usually 10-25 words, saying what music belongs here and how it fits the request. Do not include a proposed track count, a roll call of the user's favorite artists, process commentary, or an opening/middle/ending itinerary. Avoid piles of adjectives, decorative metaphors, marketing copy, and stock phrases such as 'sonic journey', 'sun-drenched', 'springy basslines', 'momentum', 'shimmer', or 'dopamine'. Example: 'Upbeat pop rock and ska with catchy choruses, along the lines of Smash Mouth and Sugar Ray.' A description should remain accurate if shuffled or if some downloads are unavailable; mention progression only for a genuinely requested or functional sequence. Apply the same direct tone to summary and track reasons.\n" +
                 "Each trackCandidates item must include artist, title, reason, and query. The reason must explain why that exact track fits the playlist and its relationship to the source/taste signals. Include album when you know it. The query must be a short Soulseek-ready search for that candidate, not the user's full sentence.\n" +
-                "Treat examples in a playlist request as a musical neighborhood to analyze: identify their shared energy, tempo, production, edit culture, scenes, and use cases, then expand outward without simply repeating the most famous adjacent tracks. For unofficial edits/remixes, use the exact credited remixer or uploader and title when a reliable source identifies one.\n" +
+                "Treat examples in a playlist request as reference points: identify the relevant sound, energy, rhythm, vocals, or production and choose other songs with those qualities. Explore adjacent artists when they fit, without broadening into unrelated scenes just for variety. Discuss edit culture or use cases only if the request makes them relevant. For unofficial edits/remixes, use the exact credited remixer or uploader and title when a reliable source identifies one.\n" +
                 "For Soulseek/download work, prefer high-quality files. Target FLAC first when available; use MP3 only when no FLAC/lossless candidate is available. Do not add quality words to searchQuery unless they are part of a known release title, but make trackCandidates/query choices that are likely to find album/release folders with FLAC sources.\n" +
                 "If the user asks to find the album/release a song is on, use search_discovery and set searchQuery to the resolved artist + album or artist + title + album. Example: 'find the Green Day album with When I Come Around on it' should not become 'green day when i come around album its on'; it should target Green Day Dookie.\n" +
                 "If the user asks for multiple albums/releases, resolve concrete album names and include each as a separate short album-level searchQueryHint. Do not satisfy a plural albums request with only one album unless the user specified exactly one release.\n" +
                 "For requests about music the user might like, strongly use tasteProfile plus favoriteArtists, favoriteGenres, favoriteTracks, highRotationArtists, highRotationTracks, recentArtists, recentTracks, and liked/rated library context. Treat dislikedArtists, dislikedTracks, skippedTracks, blockedArtists, blockedGenres, and overplayedTracks as negative taste signals to avoid.\n" +
                 "When the user says this song, this track, current song, or current artist, resolve that using currentTrack/currentArtist/currentAlbum from the Taste/library context.\n" +
-                "For research_playlist, use current web research when available and consult multiple independent sources before choosing tracks. Prefer sources from music discussion and recommendation contexts such as Reddit, Last.fm, Music-Map, Rate Your Music, Album of the Year, Bandcamp, Discogs, AllMusic, Pitchfork, Stereogum, Resident Advisor, DJ tracklists, forums, and label/artist pages. Use the research to diversify eras, scenes, and popularity level while keeping the playlist cohesive. Include only sources you actually used in researchSources.\n" +
+                "For research_playlist, use current web research when available and consult multiple independent sources before choosing tracks. Prefer sources from music discussion and recommendation contexts such as Reddit, Last.fm, Music-Map, Rate Your Music, Album of the Year, Bandcamp, Discogs, AllMusic, Pitchfork, Stereogum, Resident Advisor, DJ tracklists, forums, and label/artist pages. Use the research to verify candidate fit and identity. Vary eras, scenes, or popularity only when it serves the request; there is no diversity quota. Include only sources you actually used in researchSources.\n" +
                 "For research_playlist, searchQuery must be a short human-readable theme for the playlist, never the raw request. Soulseek searches happen later and must come only from each concrete trackCandidates.query.\n" +
                 "For all other intents, searchQuery should be the cleaned music target, not filler words like here, this, song, album, find, search, or download.\n" +
                 "searchQueryHints should be short Soulseek fallback searches, especially album/title/track names that avoid famous artist tokens likely to be suppressed."
@@ -261,6 +276,7 @@ export function parseAgentModelPlan(text: string): AgentModelPlan | null {
       return null;
     }
     return {
+      catalogRequest: parseCatalogRequestPlan(parsed.catalogRequest),
       summary: summary || "Model generated search hints.",
       intent,
       searchQuery: searchQuery || undefined,
@@ -318,11 +334,18 @@ function extractFirstJsonObject(text: string): string | null {
   return null;
 }
 
+function parseCatalogRequestPlan(value: unknown): AgentModelPlan["catalogRequest"] {
+  if (!isRecord(value) || typeof value.capability !== "string" || typeof value.query !== "string") return undefined;
+  if (!["track", "album", "discography", "missing", "complete", "similar", "taste", "latest", "singles"].includes(value.capability)) return undefined;
+  return { capability: value.capability, query: value.query.trim().slice(0, 500) };
+}
+
 function parseIntent(value: unknown): AgentMessageResponse["intent"] | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
   if (
+    value === "catalog" ||
     value === "search_library" ||
     value === "search_discovery" ||
     value === "research_playlist" ||

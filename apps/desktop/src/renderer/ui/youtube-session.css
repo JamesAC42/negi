@@ -1,0 +1,5 @@
+.youtubeSessionSettings > p { color: var(--tx2); font-size: .75rem; line-height: 1.65; max-width: 58rem; }
+.youtubeSessionActions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+.youtubeSessionActions > input { display: none; }
+.youtubeSessionActions > span { display: inline-flex; align-items: center; gap: .4rem; font-size: .7rem; color: var(--acc); }
+.youtubeSessionActions button { display: inline-flex; gap: .4rem; align-items: center; font-size: .72rem; }
