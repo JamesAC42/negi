@@ -1,10 +1,11 @@
-import { useState, type CSSProperties, type ReactElement } from "react";
+import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
 import { Check, ImagePlus, Moon, Palette, Sun, Trash2, Type } from "lucide-react";
 import {
   accentPalettes, appearanceModes, applyAppearanceLook, applyThemePreset, backgroundName,
   curatedThemePresets, displayFonts, getProfileStyle, saveAppearanceLook, themePresetIds, updateProfile,
   type AccentColorId, type AppearanceMode, type AppearanceProfile, type AppearanceSettings, type DisplayFontId
 } from "../appearance";
+import { loadAllDisplayFonts } from "../display-fonts";
 import { StyledSelect } from "./StyledSelect";
 import { useColorDraft } from "../use-color-draft";
 import "./appearance-studio.css";
@@ -29,6 +30,10 @@ export function AppearanceStudio({ appearance, setAppearance, onSelectBackground
   const modeLabel = mode === "dark" ? "Dark" : "Light";
   const label = profile.themePreset === "custom" ? "Custom" : curatedThemePresets[profile.themePreset].label;
   const fontOptions = Object.entries(displayFonts) as [DisplayFontId, (typeof displayFonts)[DisplayFontId]][];
+
+  useEffect(() => {
+    void loadAllDisplayFonts();
+  }, []);
 
   async function chooseImage(target: AppearanceMode): Promise<void> {
     setChoosing(target); setImageError("");

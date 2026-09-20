@@ -14,6 +14,8 @@
     "dev:doctor": "node scripts/dev-app.mjs doctor",
     "dev:stop": "node scripts/dev-app.mjs stop",
     "dev:sync": "node scripts/dev-app.mjs sync",
+    "build:app": "node scripts/prod-app.mjs build",
+    "start:app": "node scripts/prod-app.mjs start",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",

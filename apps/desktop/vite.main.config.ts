@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => {
         fileName: () => (isPreload ? "preload/index.cjs" : "main/index.js")
       },
       rollupOptions: {
-        external: ["electron", "node:path", "node:url"]
+        external: ["electron", "node:path", "node:url", "node:fs", "node:child_process"]
       }
     }
   };

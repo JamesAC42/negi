@@ -1,4 +1,4 @@
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { config as loadEnv } from "dotenv";
@@ -37,9 +37,9 @@ export function getBackendConfig(): BackendConfig {
   return {
     host: process.env.MUSIC_OS_HOST ?? "127.0.0.1",
     port: Number(process.env.MUSIC_OS_PORT ?? 47831),
-    databasePath:
-      process.env.MUSIC_OS_DATABASE_PATH ??
-      join(process.cwd(), ".music-os", "music-os.sqlite"),
+    databasePath: resolveRepoPath(
+      process.env.MUSIC_OS_DATABASE_PATH ?? join(backendRoot, ".music-os", "music-os.sqlite")
+    ),
     mpvPath: process.env.MUSIC_OS_MPV_PATH ?? detectDefaultMpvPath(),
     ytDlpPath: process.env.MUSIC_OS_YT_DLP_PATH ?? (existsSync(join(repoRoot, ".music-os/tools/youtube/bin/yt-dlp")) ? join(repoRoot, ".music-os/tools/youtube/bin/yt-dlp") : "yt-dlp"),
     windowsNodePath: process.env.MUSIC_OS_WINDOWS_NODE_PATH ?? null,
@@ -85,6 +85,10 @@ function detectFfmpegPath(): string | null {
     "/mnt/c/Program Files (x86)/ffmpeg/bin/ffmpeg.exe"
   ];
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function resolveRepoPath(path: string): string {
+  return isAbsolute(path) ? path : join(repoRoot, path);
 }
 
 export function normalizeClientPath(path: string): string {

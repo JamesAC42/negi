@@ -15,7 +15,7 @@ Browse your music by artist or album, follow a discography, and build a queue. n
 
 ![negi Home and listening activity](docs/screenshots/home.png)
 
-negi is in active development. The setup below runs from source on Windows with Ubuntu WSL. There is no standalone installer yet. A downloadable production app and a project website are planned for later.
+negi is in active development. The setup below runs from source on Windows with Ubuntu WSL. After the first production build, you can launch the packaged app from Windows without keeping a WSL terminal open. slskd is still started separately when you want Soulseek.
 
 ## Core features
 
@@ -179,6 +179,8 @@ npm run dev:app
 
 Wait for the desktop window to open. The command starts the backend and renderer, builds Electron, and launches the Windows shell. Keep this terminal open while using the app. Press Ctrl+C once to stop the managed processes.
 
+`npm run dev` only starts the Vite renderer. Use `npm run dev:app` for the full desktop stack.
+
 If startup fails, run this in another WSL terminal from the checkout:
 
 ```bash
@@ -186,6 +188,18 @@ npm run dev:doctor
 ```
 
 It checks service health, process ownership, ports, and the copied Electron files. If an older manually started backend, renderer, or Electron window occupies the required ports or shell, close that instance before trying again.
+
+### 5. Optional: launch a production build from Windows
+
+From the WSL checkout, after the development setup above:
+
+```bash
+npm run build:app
+```
+
+This builds a minified renderer, copies it into `%LOCALAPPDATA%\negi`, and writes a Windows shortcut. Double-click `negi.lnk` or `Start negi.cmd` in that folder. The app starts the WSL backend without Vite or `tsx watch`, then opens the packaged Electron window. Close the window to stop the backend it started. slskd is not launched.
+
+Rebuild with `npm run build:app` after source changes you want in that Windows launch. Do not mix this with a running `npm run dev:app` session if you want the production window to own the backend.
 
 ## Your first listen
 
@@ -232,6 +246,8 @@ negi uses Electron, React, TypeScript, SQLite, and mpv. Most interface code live
 | `npm run dev:doctor` | Check processes, service health, and Electron synchronization |
 | `npm run dev:stop` | Stop the managed stack |
 | `npm run dev:sync` | Rebuild and copy Electron main/preload without launching the app |
+| `npm run build:app` | Build a production app you can launch from Windows |
+| `npm run start:app` | Build the production app and launch it |
 | `npm run typecheck` | Typecheck the workspaces |
 | `npm run build` | Build the workspaces; this does not produce an installer |
 

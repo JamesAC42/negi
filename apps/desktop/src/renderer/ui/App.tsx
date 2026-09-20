@@ -12,7 +12,6 @@ import { indexAlbumFavorites, normalizeAlbumFavoriteEntry } from "../album-favor
 import { VirtualArtistList, type ArtistListHandle } from "./VirtualArtistList";
 import { useArtworkVisibility } from "./useArtworkVisibility";
 import { SongPlaylistContext, SongQueueRow } from "./SongQueueRow";
-import { NowPlayingViews } from "./NowPlayingViews";
 import { NowPlayingSettings } from "./NowPlayingSettings";
 import { defaultNowPlayingSettings, useNowPlayingSettings, type NowPlayingSettings as NowPlayingPreferences } from "../now-playing-settings";
 import { createNowPlayingMotion, type NowPlayingMotion } from "../now-playing-motion";
@@ -23,13 +22,14 @@ import { mergePlaybackState, shouldRefreshPlaybackHistory } from "../playback-st
 import { getArtworkObjectUrl, invalidateArtworkObjectUrl } from "../artwork-requests";
 import { AppearanceStudio } from "./AppearanceStudio";
 import { addBackgroundImage, appearanceStorageKey, curatedThemePresets, displayFonts, getAppearanceStyle, loadAppearanceSettings, makeAccentPalette, type AppearanceMode, type AppearanceSettings, type SelectedBackgroundImage } from "../appearance";
+import { loadAppearanceFonts } from "../display-fonts";
 import { HomeInsights } from "./HomeInsights";
 import { homeListeningResponseSchema, type HomeListeningResponse } from "@music-os/core";
 import "./home-journal.css";
 import { StyledSelect } from "./StyledSelect";
 import { LibraryArtistPage } from "./LibraryArtistPage";
 import { AlbumCompletion, ArtistExplorer, DiscoveryModes } from "./Explore";
-import { Fragment, memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowDownWideNarrow as LucideSort,
@@ -348,6 +348,11 @@ const emptyPlaylists: Playlist[] = [];
 const libraryPageSize = 700;
 const albumPageSize = 180;
 const backendOrigin = "http://127.0.0.1:47831";
+const NowPlayingViews = lazy(async () => {
+  const module = await import("./NowPlayingViews");
+  return { default: module.NowPlayingViews };
+});
+const waveformCacheLimit = 12;
 const startupReadAttempts = 4;
 const startupReadTimeoutMs = 5_000;
 const startupRetryDelayMs = 250;
@@ -524,11 +529,10 @@ export function App(): ReactElement {
   const playbackTickFileIdRef = useRef<string | null>(null);
   const documentVisible = useDocumentVisible();
   const reducedMotion = useReducedMotion();
-  const effectiveVisualizerMode = getEffectiveVisualizerMode(visualizerMode, visualizerCapabilities, reducedMotion);
   const liveVisualizersEnabled = documentVisible && !reducedMotion && !youtubeActive;
-  const nowPlayingStreamMode: VisualizerMode = visualizerCapabilities?.spectrogram === "available" && !reducedMotion
+  const nowPlayingStreamMode: VisualizerMode = nowPlayingOpen && visualizerCapabilities?.spectrogram === "available" && !reducedMotion
     ? "spectrogram"
-    : effectiveVisualizerMode;
+    : getEffectiveVisualizerMode("spectrum", visualizerCapabilities, reducedMotion);
   const modalVisualizer = useVisualizerStream(
     liveVisualizersEnabled && playback.status !== "stopped",
     nowPlayingStreamMode,
@@ -567,6 +571,10 @@ export function App(): ReactElement {
     } catch {
       setAppearanceSaveError("Your changes are visible, but this device could not save them. Free some browser storage before closing the app.");
     }
+  }, [appearance]);
+
+  useEffect(() => {
+    void loadAppearanceFonts(appearance);
   }, [appearance]);
 
   useEffect(() => {
@@ -11701,9 +11709,11 @@ export function NowPlayingModal({
                     />
                   ) : null}
                 </div>
-                <NowPlayingViews currentFile={currentFile} files={files} playback={playback} artworkUrl={artworkFileUrl} albumProgress={albumProgress}
-                  onPresence={onRecordPlayerPresence} onAction={onRecordPlayerAction} onStop={onStop}
-                  frameRef={visualizerFrameRef} getFrameAgeMs={getVisualizerFrameAgeMs} onSeek={onSeek} playbackBusy={playbackBusy} />
+                <Suspense fallback={<div className="nowPlayingViews is-loading" aria-hidden="true" />}>
+                  <NowPlayingViews currentFile={currentFile} files={files} playback={playback} artworkUrl={artworkFileUrl} albumProgress={albumProgress}
+                    onPresence={onRecordPlayerPresence} onAction={onRecordPlayerAction} onStop={onStop}
+                    frameRef={visualizerFrameRef} getFrameAgeMs={getVisualizerFrameAgeMs} onSeek={onSeek} playbackBusy={playbackBusy} />
+                </Suspense>
 
                 {currentFile ? (
                   <dl className="nowPlayingSongDetails" aria-label="Song details">
@@ -13007,6 +13017,7 @@ function PlaylistsView({
               <span />
               <span>#</span>
               <span>Title</span>
+              <span>Artist</span>
               <span>Album</span>
               <span>Time</span>
               <span>Format</span>
@@ -13016,6 +13027,8 @@ function PlaylistsView({
               {activePlaylist.items.map((item, index) => {
                 const tags = item.file.displayTags;
                 const isCurrent = playback.currentFileId === item.file.id;
+                const trackArtist = tags.artist ?? tags.albumartist ?? null;
+                const albumTarget = getFileAlbumTarget(item.file);
                 return (
                   <SongQueueRow
                     fileId={item.file.id}
@@ -13037,7 +13050,32 @@ function PlaylistsView({
                       <strong>{tags.title ?? item.file.filename}</strong>
                       {isCurrent ? <MiniTrackWaveform playback={playback} waveform={currentWaveform} /> : null}
                     </span>
-                    <span>{tags.album ?? "-"}</span>
+                    <span>
+                      {trackArtist ? (
+                        <button
+                          className="playlistWorkspaceLink"
+                          type="button"
+                          onClick={() => onOpenArtistPage(albumArtistLabel(item.file))}
+                        >
+                          {trackArtist}
+                        </button>
+                      ) : (
+                        "-"
+                      )}
+                    </span>
+                    <span>
+                      {albumTarget ? (
+                        <button
+                          className="playlistWorkspaceLink"
+                          type="button"
+                          onClick={() => void onOpenAlbumPage(albumTarget)}
+                        >
+                          {albumTarget.album}
+                        </button>
+                      ) : (
+                        tags.album ?? "-"
+                      )}
+                    </span>
                     <span>{item.file.durationMs == null ? "-" : formatTime(item.file.durationMs)}</span>
                     <span>{formatFileFormat(item.file)}</span>
                     <button className="secondary" type="button" onClick={() => void onProposeRemoveItem(activePlaylist.id, item.id)}>Remove</button>
@@ -14982,6 +15020,22 @@ function mergeAlbumsById(current: AlbumGroupItem[], incoming: AlbumGroupItem[]):
   return next;
 }
 
+function rememberWaveform(
+  cache: Map<string, WaveformSummaryResponse>,
+  fileId: string,
+  waveform: WaveformSummaryResponse
+): void {
+  cache.delete(fileId);
+  cache.set(fileId, waveform);
+  while (cache.size > waveformCacheLimit) {
+    const oldest = cache.keys().next().value;
+    if (oldest == null) {
+      break;
+    }
+    cache.delete(oldest);
+  }
+}
+
 function getProgressPercent(playback: PlaybackStateResponse): number {
   if (!playback.durationMs || playback.durationMs <= 0) {
     return 0;
@@ -15136,7 +15190,7 @@ function useWaveform(fileId: string | null, enabled: boolean): WaveformState {
           return;
         }
         if (response.status === "ready") {
-          cacheRef.current.set(requestedFileId, response.waveform);
+          rememberWaveform(cacheRef.current, requestedFileId, response.waveform);
           setState({ status: "ready", waveform: response.waveform, message: null });
           return;
         }

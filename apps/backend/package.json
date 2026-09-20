@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "tsx src/server.ts",
     "dev:watch": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
     "health": "tsx src/scripts/health-smoke.ts",
     "import:smoke": "tsx src/scripts/import-smoke.ts",
     "incomplete-albums:smoke": "tsx src/scripts/incomplete-albums-smoke.ts",

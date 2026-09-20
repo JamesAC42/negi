@@ -62,8 +62,28 @@ because it can retain an old copied main bundle. If an unmanaged legacy backend
 or Vite process owns a fixed port, `dev:app` stops with a clear error; inspect
 it with `dev:doctor`, stop it once, and rerun `dev:app`.
 
-The Windows shell defaults to `%LOCALAPPDATA%\\negi-dev-shell`. Override it
-with `MUSIC_OS_ELECTRON_SHELL` when necessary.
+The Windows development shell defaults to `%LOCALAPPDATA%\\negi-dev-shell`. Override it
+with `MUSIC_OS_ELECTRON_SHELL` when necessary. The production app lives in
+`%LOCALAPPDATA%\\negi` after `npm run build:app`. Vite file polling is off by
+default; set `MUSIC_OS_VITE_POLL=1` only if HMR misses edits.
+
+## Production launch
+
+From the WSL checkout:
+
+```bash
+source ~/.nvm/nvm.sh
+cd ~/code/musicplayer
+npm run build:app
+```
+
+Then launch `%LOCALAPPDATA%\\negi\\negi.lnk` from Windows. Electron starts the
+WSL backend with `tsx` (no watch) and loads the packaged renderer. Close the
+window to stop a backend that this launch started. slskd is still separate.
+
+`npm run start:app` builds and launches that production window from WSL.
+`npm run dev` only starts the Vite renderer; use `npm run dev:app` for daily
+development.
 
 ## Playback environment
 

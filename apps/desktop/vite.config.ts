@@ -19,11 +19,14 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5173,
     strictPort: true,
-    watch: {
-      // WSL gets no file events for edits made from Windows on /mnt/*,
-      // so fall back to polling to keep HMR working in this setup.
-      usePolling: true,
-      interval: 400
-    }
+    watch: process.env.MUSIC_OS_VITE_POLL === "1"
+      ? {
+          // Opt-in polling for editors that do not deliver inotify events.
+          usePolling: true,
+          interval: 400
+        }
+      : {
+          ignored: ["**/.music-os/**", "**/dist/**"]
+        }
   }
 });
